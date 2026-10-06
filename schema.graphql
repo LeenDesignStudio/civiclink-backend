@@ -1,0 +1,1298 @@
+input AcceptTermsInput {
+  displayName: String!
+  marketingOptIn: Boolean!
+  privacyVersion: String!
+  termsVersion: String!
+}
+
+input AddCorrectionNoteInput {
+  body: String!
+  id: UUID!
+}
+
+type AdminAlert {
+  alert: Alert
+  stats: [AlertChannelStats!]
+}
+
+input AdminAlertFilter {
+  status: AlertStatus
+  targetOfficeId: UUID
+}
+
+type AdminCorrection {
+  assigneeId: ID
+  createdAt: DateTime
+  currentValueSnapshot: String
+  details: String
+  dismissNote: String
+  dismissReason: DismissReason
+  entityId: ID
+  entityType: CivicEntityType
+  evidenceUrl: String
+  field: CorrectionField
+  id: ID
+  notes: [CorrectionNote!]
+  proposedValue: String
+  status: CorrectionStatus
+  submitterDisplayName: String
+  updatedAt: DateTime
+}
+
+type AdminCorrectionConnection {
+  edges: [AdminCorrectionEdge!]
+  pageInfo: PageInfo
+  totalCount: Int
+}
+
+type AdminCorrectionEdge {
+  cursor: String
+  node: AdminCorrection
+}
+
+input AdminCorrectionFilter {
+  assignedToMe: Boolean
+  entityType: CivicEntityType
+  level: GovLevel
+  olderThanDays: Int
+  status: CorrectionStatus
+}
+
+type AdminCorrectionPayload {
+  correction: AdminCorrection
+}
+
+type AdminDashboardCounts {
+  alertFailures: Int
+  alertsLast7d: Int
+  correctionsByStatus: [StatusCount!]
+  correctionsOlderThan5d: Int
+  failedSourceRuns: Int
+  pendingSourceChanges: Int
+  staleRecordsByLevel: [LevelCount!]
+}
+
+type AdminJurisdiction {
+  id: ID
+  level: GovLevel
+  name: String
+  status: String
+  type: JurisdictionType
+}
+
+type AdminMe {
+  email: String
+  id: ID
+  name: String
+  permissions: [String!]
+  role: AdminRole
+}
+
+enum AdminRole {
+  COMMUNICATIONS
+  EDITOR
+  SUPER_ADMIN
+  VIEWER
+}
+
+type AdminSignOutPayload {
+  signedOut: Boolean
+}
+
+type AdminSource {
+  runs: [SourceRun!]
+  source: Source
+}
+
+enum AdminStatus {
+  ACTIVE
+  DEACTIVATED
+  INVITED
+}
+
+enum AdminStatusChange {
+  ACTIVE
+  DEACTIVATED
+}
+
+type AdminUser {
+  createdAt: DateTime
+  email: String
+  id: ID
+  lastLoginAt: DateTime
+  name: String
+  role: AdminRole
+  status: AdminStatus
+}
+
+type AdminUserConnection {
+  edges: [AdminUserEdge!]
+  pageInfo: PageInfo
+  totalCount: Int
+}
+
+type AdminUserEdge {
+  cursor: String
+  node: AdminUser
+}
+
+input AdminUserFilter {
+  role: AdminRole
+  status: AdminStatus
+}
+
+type AdminUserPayload {
+  adminUser: AdminUser
+}
+
+type Alert {
+  body: String
+  channels: [NotificationChannel!]
+  createdAt: DateTime
+  id: ID
+  link: String
+  recipientCount: Int
+  sentAt: DateTime
+  status: AlertStatus
+  targetOfficeId: ID
+  targetOfficialId: ID
+  title: String
+}
+
+type AlertChannelStats {
+  channel: NotificationChannel
+  clicks: Int
+  delivered: Int
+  failed: Int
+  opens: Int
+  queued: Int
+  sent: Int
+  skipped: Int
+}
+
+type AlertConnection {
+  edges: [AlertEdge!]
+  pageInfo: PageInfo
+  totalCount: Int
+}
+
+enum AlertDraftChannel {
+  EMAIL
+  PUSH
+}
+
+type AlertEdge {
+  cursor: String
+  node: Alert
+}
+
+input AlertIdInput {
+  id: UUID!
+}
+
+type AlertPayload {
+  alert: Alert
+}
+
+type AlertPreview {
+  emailRecipients: Int
+  emailSubject: String
+  emailText: String
+  followers: Int
+  inAppBody: String
+  inAppRecipients: Int
+  inAppTitle: String
+  pushBody: String
+  pushRecipients: Int
+  pushTitle: String
+}
+
+enum AlertStatus {
+  DRAFT
+  SENDING
+  SENT
+}
+
+input ApplyCorrectionInput {
+  id: UUID!
+  notifyFollowers: Boolean
+  sourceId: UUID
+  sourceUrl: String
+  value: String
+}
+
+input AssignCorrectionInput {
+  assigneeId: UUID
+  id: UUID!
+}
+
+enum ChangeDecision {
+  ACCEPTED
+  PENDING
+  REJECTED
+}
+
+type ChangeLogConnection {
+  edges: [ChangeLogEdge!]
+  pageInfo: PageInfo
+  totalCount: Int
+}
+
+type ChangeLogEdge {
+  cursor: String
+  node: ChangeLogEntry
+}
+
+type ChangeLogEntry {
+  action: String
+  actorId: ID
+  actorType: String
+  after: String
+  before: String
+  createdAt: DateTime
+  entityId: ID
+  entityType: String
+  id: ID
+  requestId: String
+}
+
+type CheckoutSessionPayload {
+  url: String
+}
+
+type CivicCard {
+  confidence: Confidence
+  displayLabel: String
+  levels: [CivicCardLevel!]
+  method: LookupMethod
+  servicesPreview: [ServicePreview!]
+  token: String
+}
+
+type CivicCardLevel {
+  confidence: Confidence
+  coverage: Coverage
+  level: GovLevel
+  notice: String
+  offices: [Office!]
+}
+
+enum CivicEntityType {
+  JURISDICTION
+  OFFICE
+  OFFICIAL
+  SERVICE
+}
+
+type CivicSource {
+  name: String
+  url: URL
+}
+
+enum Confidence {
+  EXACT
+  LIKELY
+  MULTIPLE
+  UNRESOLVED
+}
+
+type ContactMessage {
+  createdAt: DateTime
+  id: ID
+  topic: ContactTopic
+}
+
+enum ContactTopic {
+  BILLING
+  DATA_ACCURACY
+  GENERAL
+  OTHER
+  PARTNERSHIPS
+  PRESS
+}
+
+type Correction {
+  createdAt: DateTime
+  details: String
+  dismissNote: String
+  dismissReason: DismissReason
+  entityId: ID
+  entityType: CivicEntityType
+  evidenceUrl: String
+  field: CorrectionField
+  id: ID
+  proposedValue: String
+  status: CorrectionStatus
+  updatedAt: DateTime
+}
+
+enum CorrectionField {
+  DISTRICT
+  DOES_NOT_APPLY
+  EMAIL
+  OFFICEHOLDER_NAME
+  OFFICE_ADDRESS
+  OTHER
+  PARTY
+  PHONE
+  SERVICE_DETAILS
+  TITLE
+  WEBSITE
+}
+
+input CorrectionIdInput {
+  id: UUID!
+}
+
+type CorrectionNote {
+  adminId: ID
+  body: String
+  createdAt: DateTime
+  id: ID
+}
+
+enum CorrectionStatus {
+  APPLIED
+  DISMISSED
+  IN_REVIEW
+  SUBMITTED
+}
+
+enum Coverage {
+  COVERED
+  NONE
+  PARTIAL
+}
+
+input CreateCheckoutSessionInput {
+  planId: UUID!
+}
+
+scalar DateTime
+
+input DecideSourceChangeInput {
+  decision: ChangeDecision!
+  id: UUID!
+}
+
+type DecideSourceChangePayload {
+  change: PendingSourceChange
+}
+
+type DeleteAlertDraftPayload {
+  id: ID
+}
+
+input DeleteNotificationInput {
+  id: UUID!
+}
+
+type DeleteNotificationPayload {
+  notification: Notification
+}
+
+type DeleteSavedLocationPayload {
+  id: ID
+}
+
+input DismissCorrectionInput {
+  id: UUID!
+  note: String
+  reason: DismissReason!
+}
+
+enum DismissReason {
+  ALREADY_CORRECT
+  DUPLICATE
+  INSUFFICIENT_EVIDENCE
+  OTHER
+  OUT_OF_SCOPE
+}
+
+input EndOfficeTermInput {
+  termEnd: DateTime
+  termId: ID!
+}
+
+input ExportCsvInput {
+  filter: String
+  list: ExportList!
+}
+
+type ExportCsvPayload {
+  url: String
+}
+
+enum ExportList {
+  ALERTS
+  CORRECTIONS
+  JURISDICTIONS
+  OFFICES
+  OFFICIALS
+  SERVICES
+  SOURCES
+}
+
+type Follow {
+  createdAt: DateTime
+  holder: FollowHolder
+  id: ID
+  office: FollowOffice
+  officeId: ID
+  officialId: ID
+}
+
+type FollowConnection {
+  edges: [FollowEdge!]
+  pageInfo: PageInfo
+}
+
+type FollowEdge {
+  cursor: String
+  node: Follow
+}
+
+type FollowHolder {
+  displayName: String
+  fullName: String
+  id: ID
+}
+
+input FollowInput {
+  officeId: UUID!
+  officialId: UUID
+}
+
+type FollowOffice {
+  id: ID
+  lastUpdatedAt: DateTime
+  level: GovLevel
+  name: String
+}
+
+type FollowPayload {
+  follow: Follow
+}
+
+enum Freshness {
+  CURRENT
+  MAY_BE_OUTDATED
+}
+
+enum FreshnessOverride {
+  FORCE_CURRENT
+  FORCE_OUTDATED
+  NONE
+}
+
+enum GovLevel {
+  COUNTY
+  EDUCATION
+  FEDERAL
+  MUNICIPAL
+  SPECIAL
+  STATE
+}
+
+input InviteAdminInput {
+  email: String!
+  name: String
+  role: AdminRole!
+}
+
+type Invoice {
+  amountDueCents: Int
+  amountPaidCents: Int
+  currency: String
+  hostedUrl: String
+  id: ID
+  issuedAt: DateTime
+  number: String
+  pdfUrl: String
+  status: InvoiceStatus
+}
+
+type InvoiceConnection {
+  edges: [InvoiceEdge!]
+  pageInfo: PageInfo
+}
+
+type InvoiceEdge {
+  cursor: String
+  node: Invoice
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  UNCOLLECTIBLE
+  VOID
+}
+
+type JurisdictionRef {
+  districtCode: String
+  id: ID
+  level: GovLevel
+  name: String
+  state: String
+  type: JurisdictionType
+}
+
+enum JurisdictionType {
+  COMMUNITY_COLLEGE_DISTRICT
+  CONGRESSIONAL_DISTRICT
+  COUNTY
+  COUNTY_COUNCIL_DISTRICT
+  MUNICIPALITY
+  NATION
+  SCHOOL_BOARD_DISTRICT
+  SCHOOL_DISTRICT
+  SPECIAL_DISTRICT
+  STATE
+  STATE_HOUSE_DISTRICT
+  STATE_SENATE_DISTRICT
+  WARD
+  ZCTA
+}
+
+type LegalVersion {
+  effectiveAt: DateTime
+  kind: String
+  version: String
+}
+
+type LevelCount {
+  count: Int
+  level: String
+}
+
+type LocationCandidate {
+  candidateToken: String
+  displayLabel: String
+}
+
+enum LocationLabel {
+  HOME
+  OTHER
+  WORK
+}
+
+enum LookupMethod {
+  ADDRESS
+  CITY_STATE
+  DEVICE
+  ZIP
+}
+
+input MarkNotificationsReadInput {
+  all: Boolean
+  ids: [UUID!]
+}
+
+type MarkNotificationsReadPayload {
+  updatedCount: Int
+}
+
+type Me {
+  activeSessionCount: Int
+  currentPrivacyVersion: String
+  currentTermsVersion: String
+  displayName: String
+  email: String
+  id: ID
+  marketingOptIn: Boolean
+  provider: String
+  status: String
+  subscription: SubscriptionSummary
+  termsAccepted: Boolean
+  unreadCount: Int
+}
+
+type MePayload {
+  me: Me
+}
+
+type Mutation {
+  acceptTerms(input: AcceptTermsInput!): MePayload
+  addCorrectionNote(input: AddCorrectionNoteInput!): AdminCorrectionPayload
+  adminSignOut: AdminSignOutPayload
+  applyCorrection(input: ApplyCorrectionInput!): AdminCorrectionPayload
+  assignCorrection(input: AssignCorrectionInput!): AdminCorrectionPayload
+  createCheckoutSession(input: CreateCheckoutSessionInput!): CheckoutSessionPayload
+  createPortalSession: PortalSessionPayload
+  decideSourceChange(input: DecideSourceChangeInput!): DecideSourceChangePayload
+  deleteAlertDraft(input: AlertIdInput!): DeleteAlertDraftPayload
+  deleteNotification(input: DeleteNotificationInput!): DeleteNotificationPayload
+  deleteSavedLocation(input: SavedLocationIdInput!): DeleteSavedLocationPayload
+  dismissCorrection(input: DismissCorrectionInput!): AdminCorrectionPayload
+  endOfficeTerm(input: EndOfficeTermInput!): ID
+  exportCsv(input: ExportCsvInput!): ExportCsvPayload
+  follow(input: FollowInput!): FollowPayload
+  inviteAdmin(input: InviteAdminInput!): AdminUserPayload
+  markCorrectionInReview(input: CorrectionIdInput!): AdminCorrectionPayload
+  markNotificationsRead(input: MarkNotificationsReadInput!): MarkNotificationsReadPayload
+  registerPushSubscription(input: RegisterPushSubscriptionInput!): RegisterPushSubscriptionPayload
+  removePushSubscription(input: RemovePushSubscriptionInput!): RemovePushSubscriptionPayload
+  requestAccountDeletion(input: RequestAccountDeletionInput!): RequestAccountDeletionPayload
+  restoreAccount: MePayload
+  restoreJurisdiction(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  restoreOffice(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  restoreOfficial(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  restoreService(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  retireJurisdiction(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  retireOffice(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  retireOfficial(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  retireService(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  saveAlertDraft(input: SaveAlertDraftInput!): AlertPayload
+  saveLocation(input: SaveLocationInput!): SaveLocationPayload
+  sendAlert(input: SendAlertInput!): AlertPayload
+  sendTestAlert(input: AlertIdInput!): SendTestAlertPayload
+  sendTestNotification: SendTestNotificationPayload
+  setAdminStatus(input: SetAdminStatusInput!): AdminUserPayload
+  setDefaultLocation(input: SavedLocationIdInput!): SaveLocationPayload
+  setOfficeTerm(input: SetOfficeTermInput!): ID
+  signOut(input: SignOutInput): SignOutPayload
+  submitContactMessage(input: SubmitContactMessageInput!): SubmitContactMessagePayload
+  submitCorrection(input: SubmitCorrectionInput!): SubmitCorrectionPayload
+  triggerSourceRefresh(input: TriggerSourceRefreshInput!): TriggerSourceRefreshPayload
+  unfollow(input: UnfollowInput!): UnfollowPayload
+  updateAdminRole(input: UpdateAdminRoleInput!): AdminUserPayload
+  updateNotificationPreference(input: UpdateNotificationPreferenceInput!): UpdateNotificationPreferencePayload
+  updateProfile(input: UpdateProfileInput!): MePayload
+  updateSavedLocation(input: UpdateSavedLocationInput!): SaveLocationPayload
+  upsertJurisdiction(input: UpsertJurisdictionInput!): AdminJurisdiction
+  upsertOffice(input: UpsertOfficeInput!): ID
+  upsertOfficial(input: UpsertOfficialInput!): ID
+  upsertService(input: UpsertServiceInput!): ID
+  upsertServiceCategory(input: UpsertServiceCategoryInput!): ID
+  upsertSource(input: UpsertSourceInput!): SourcePayload
+}
+
+type MyCorrectionConnection {
+  edges: [MyCorrectionEdge!]
+  pageInfo: PageInfo
+}
+
+type MyCorrectionEdge {
+  cursor: String
+  node: Correction
+}
+
+type Notification {
+  body: String
+  createdAt: DateTime
+  id: ID
+  link: String
+  readAt: DateTime
+  title: String
+  type: NotificationType
+}
+
+enum NotificationCategory {
+  ALERTS
+  UPDATES
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  PUSH
+}
+
+type NotificationConnection {
+  edges: [NotificationEdge!]
+  pageInfo: PageInfo
+}
+
+type NotificationEdge {
+  cursor: String
+  node: Notification
+}
+
+enum NotificationFilter {
+  ALERTS
+  ALL
+  UNREAD
+  UPDATES
+}
+
+type NotificationPreference {
+  category: NotificationCategory
+  channel: NotificationChannel
+  enabled: Boolean
+}
+
+enum NotificationType {
+  ALERT
+  RECORD_UPDATE
+  SYSTEM
+}
+
+type Office {
+  addresses: [OfficeAddress!]
+  contactUrl: URL
+  currentHolder: OfficeHolder
+  displayOrder: Int
+  email: String
+  freshness: Freshness
+  holderUnknown: Boolean
+  id: ID
+  isFollowed: Boolean
+  jurisdiction: JurisdictionRef
+  lastUpdatedAt: DateTime
+  name: String
+  phone: String
+  seatLabel: String
+  selectionMethod: SelectionMethod
+  slug: String
+  source: CivicSource
+  termStatus: TermStatus
+  vacant: Boolean
+  website: URL
+  whyItApplies: String
+}
+
+type OfficeAddress {
+  city: String
+  hours: String
+  id: ID
+  label: String
+  phone: String
+  state: String
+  street: String
+  zip: String
+}
+
+type OfficeHolder {
+  displayName: String
+  fullName: String
+  id: ID
+  party: String
+  photoUrl: URL
+  slug: String
+}
+
+type Official {
+  displayName: String
+  freshness: Freshness
+  fullName: String
+  id: ID
+  lastUpdatedAt: DateTime
+  party: String
+  photoUrl: URL
+  redirectOfficeSlug: String
+  slug: String
+  source: CivicSource
+  website: URL
+  whyItApplies: String
+}
+
+type PageInfo {
+  endCursor: String
+  hasNextPage: Boolean
+}
+
+type PendingSourceChange {
+  decision: ChangeDecision
+  entityId: ID
+  entityType: String
+  field: String
+  id: ID
+  newValue: String
+  oldValue: String
+}
+
+type Plan {
+  amountCents: Int
+  currency: String
+  features: [String!]
+  id: ID
+  interval: String
+  name: String
+}
+
+type PlanSummary {
+  amountCents: Int
+  currency: String
+  id: ID
+  interval: String
+  name: String
+}
+
+type PortalSessionPayload {
+  url: String
+}
+
+type Query {
+  adminAlert(id: UUID!): AdminAlert
+  adminAlerts(after: String, filter: AdminAlertFilter, first: Int): AlertConnection
+  adminCorrection(id: UUID!): AdminCorrection
+  adminCorrections(after: String, filter: AdminCorrectionFilter, first: Int): AdminCorrectionConnection
+  adminDashboardCounts: AdminDashboardCounts
+  adminJurisdiction(id: ID!): AdminJurisdiction
+  adminMe: AdminMe
+  adminOffice(id: ID!): ID
+  adminOfficial(id: ID!): ID
+  adminService(id: ID!): ID
+  adminSource(id: UUID!): AdminSource
+  adminSources(after: String, first: Int): SourceConnection
+  adminUsers(after: String, filter: AdminUserFilter, first: Int): AdminUserConnection
+  changeLog(after: String, entityId: UUID!, entityType: String!, first: Int): ChangeLogConnection
+  civicCard(token: String!): CivicCard
+  confirmLocationCandidate(candidateToken: String!): ResolveLocationResult
+  follows(after: String, first: Int): FollowConnection
+  health: String
+  invoices(after: String, first: Int): InvoiceConnection
+  legalVersions: [LegalVersion!]
+  me: Me
+  myCorrections(after: String, first: Int): MyCorrectionConnection
+  notificationPreferences: [NotificationPreference!]
+  notifications(after: String, filter: NotificationFilter, first: Int): NotificationConnection
+  office(lookupToken: String, slug: String!): Office
+  official(lookupToken: String, slug: String!): Official
+  pendingSourceChanges(decision: ChangeDecision, first: Int, sourceId: UUID): [PendingSourceChange!]
+  plans: [Plan!]
+  previewAlert(id: UUID!): AlertPreview
+  resolveLocation(input: ResolveLocationInput!): ResolveLocationResult
+  reverseGeocode(lat: Float!, lng: Float!): ReverseGeocodeResult
+  savedLocations: [SavedLocation!]
+  serviceCategories: [ServiceCategory!]
+  services(after: String, categoryId: ID, first: Int, jurisdictionId: ID, lookupToken: String, officeId: ID): ServiceConnection
+  subscription: Subscription
+  unreadNotificationCount: Int
+}
+
+type RecordStatusPayload {
+  id: ID
+  status: String
+}
+
+input RegisterPushSubscriptionInput {
+  token: String!
+  userAgent: String
+}
+
+type RegisterPushSubscriptionPayload {
+  registered: Boolean
+}
+
+input RemovePushSubscriptionInput {
+  token: String!
+}
+
+type RemovePushSubscriptionPayload {
+  removed: Boolean
+}
+
+input RequestAccountDeletionInput {
+  confirm: String!
+  reason: String
+  reasonText: String
+}
+
+type RequestAccountDeletionPayload {
+  purgeAfter: DateTime
+  status: String
+}
+
+input ResolveLocationInput {
+  lat: Float
+  lng: Float
+  method: LookupMethod
+  query: String
+}
+
+type ResolveLocationResult {
+  candidates: [LocationCandidate!]
+  confidence: Confidence
+  status: ResolveLocationStatus
+  token: String
+}
+
+enum ResolveLocationStatus {
+  NEEDS_CONFIRMATION
+  RESOLVED
+}
+
+type ReverseGeocodeResult {
+  candidateToken: String
+  displayLabel: String
+}
+
+enum RunStatus {
+  FAILED
+  QUEUED
+  RUNNING
+  SUCCEEDED
+}
+
+input SaveAlertDraftInput {
+  body: String!
+  channels: [AlertDraftChannel!]
+  id: UUID
+  link: String
+  targetOfficeId: UUID
+  targetOfficialId: UUID
+  title: String!
+}
+
+input SaveLocationInput {
+  customName: String
+  label: LocationLabel!
+  lookupToken: String!
+  makeDefault: Boolean
+}
+
+type SaveLocationPayload {
+  savedLocation: SavedLocation
+}
+
+type SavedLocation {
+  confidence: Confidence
+  createdAt: DateTime
+  customName: String
+  displayAddress: String
+  geocodePrecision: String
+  id: ID
+  isDefault: Boolean
+  jurisdictionIds: [String!]
+  label: LocationLabel
+  normalizedAddress: String
+  resolvedAt: DateTime
+  updatedAt: DateTime
+}
+
+input SavedLocationIdInput {
+  id: UUID!
+}
+
+enum SelectionMethod {
+  APPOINTED
+  ELECTED
+}
+
+input SendAlertInput {
+  confirmRecipientCount: Int!
+  id: UUID!
+}
+
+type SendTestAlertPayload {
+  sent: Boolean
+}
+
+type SendTestNotificationPayload {
+  notification: Notification
+}
+
+type Service {
+  category: ServiceCategory
+  description: String
+  id: ID
+  phoneContact: String
+  title: String
+  url: URL
+}
+
+type ServiceCategory {
+  id: ID
+  name: String
+  sortOrder: Int
+}
+
+type ServiceConnection {
+  edges: [ServiceEdge!]
+  pageInfo: PageInfo
+}
+
+type ServiceEdge {
+  cursor: String
+  node: Service
+}
+
+type ServicePreview {
+  category: ServicePreviewCategory
+  description: String
+  id: ID
+  phoneContact: String
+  title: String
+  url: URL
+}
+
+type ServicePreviewCategory {
+  id: ID
+  name: String
+}
+
+input SetAdminStatusInput {
+  adminId: UUID!
+  status: AdminStatusChange!
+}
+
+input SetOfficeTermInput {
+  makeCurrent: Boolean!
+  notifyFollowers: Boolean
+  officeId: ID!
+  officialId: ID!
+  status: TermStatus!
+  termEnd: DateTime
+  termStart: DateTime
+}
+
+input SignOutInput {
+  everywhere: Boolean
+}
+
+type SignOutPayload {
+  signedOut: Boolean
+}
+
+type Source {
+  active: Boolean
+  collectorKey: String
+  freshnessDays: Int
+  id: ID
+  lastRunAt: DateTime
+  levels: [GovLevel!]
+  method: SourceMethod
+  name: String
+  publisher: String
+  schedule: SourceSchedule
+  termsUrl: String
+  url: String
+}
+
+type SourceConnection {
+  edges: [SourceEdge!]
+  pageInfo: PageInfo
+  totalCount: Int
+}
+
+type SourceEdge {
+  cursor: String
+  node: Source
+}
+
+enum SourceMethod {
+  API
+  BULK
+  MANUAL
+  PAGE_COLLECTION
+}
+
+type SourcePayload {
+  source: Source
+}
+
+type SourceRun {
+  added: Int
+  changed: Int
+  createdAt: DateTime
+  error: String
+  id: ID
+  pending: Int
+  status: RunStatus
+}
+
+enum SourceSchedule {
+  DAILY
+  MONTHLY
+  ON_DEMAND
+  QUARTERLY
+  WEEKLY
+}
+
+type StatusCount {
+  count: Int
+  status: String
+}
+
+input SubmitContactMessageInput {
+  consent: Boolean!
+  email: String!
+  message: String!
+  name: String!
+  topic: ContactTopic!
+  turnstileToken: String!
+}
+
+type SubmitContactMessagePayload {
+  contactMessage: ContactMessage
+}
+
+input SubmitCorrectionInput {
+  details: String
+  entityId: UUID!
+  entityType: CivicEntityType!
+  evidenceUrl: String
+  field: CorrectionField!
+  lookupToken: String
+  proposedValue: String
+}
+
+type SubmitCorrectionPayload {
+  correction: Correction
+}
+
+type Subscription {
+  cancelAtPeriodEnd: Boolean
+  currentPeriodEnd: DateTime
+  plan: PlanSummary
+  status: SubscriptionStatus
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  PAST_DUE
+  PAUSED
+  TRIALING
+  UNPAID
+}
+
+type SubscriptionSummary {
+  cancelAtPeriodEnd: Boolean
+  currentPeriodEnd: DateTime
+  planName: String
+  status: String
+}
+
+enum TermStatus {
+  ACTING
+  APPOINTED
+  ELECTED
+}
+
+input TriggerSourceRefreshInput {
+  sourceId: UUID!
+}
+
+type TriggerSourceRefreshPayload {
+  run: SourceRun
+}
+
+scalar URL
+
+scalar UUID
+
+input UnfollowInput {
+  officeId: UUID!
+}
+
+type UnfollowPayload {
+  officeId: ID
+}
+
+input UpdateAdminRoleInput {
+  adminId: UUID!
+  role: AdminRole!
+}
+
+input UpdateNotificationPreferenceInput {
+  category: NotificationCategory!
+  channel: NotificationChannel!
+  enabled: Boolean!
+}
+
+type UpdateNotificationPreferencePayload {
+  preference: NotificationPreference
+}
+
+input UpdateProfileInput {
+  displayName: String
+  marketingOptIn: Boolean
+}
+
+input UpdateSavedLocationInput {
+  customName: String
+  id: UUID!
+  label: LocationLabel
+}
+
+input UpsertJurisdictionInput {
+  districtCode: String
+  freshnessNote: String
+  freshnessOverride: FreshnessOverride
+  geoid: String
+  id: ID
+  lastUpdatedAt: DateTime!
+  level: GovLevel!
+  name: String!
+  parentId: ID
+  sourceId: ID!
+  sourceRecordUrl: String
+  state: String
+  subtype: String
+  type: JurisdictionType!
+  website: String
+}
+
+input UpsertOfficeInput {
+  contactUrl: String
+  displayOrder: Int
+  email: String
+  freshnessNote: String
+  holderUnknown: Boolean
+  id: ID
+  jurisdictionId: ID!
+  lastUpdatedAt: DateTime!
+  name: String!
+  notifyFollowers: Boolean
+  phone: String
+  seatLabel: String
+  selectionMethod: SelectionMethod!
+  sourceId: ID!
+  sourceRecordUrl: String
+  website: String
+  whyTemplate: String
+}
+
+input UpsertOfficialInput {
+  displayName: String
+  freshnessNote: String
+  fullName: String!
+  id: ID
+  lastUpdatedAt: DateTime!
+  notifyFollowers: Boolean
+  party: String
+  photoUrl: String
+  sourceId: ID!
+  sourceRecordUrl: String
+  website: String
+}
+
+input UpsertServiceCategoryInput {
+  active: Boolean
+  id: ID
+  name: String!
+  sortOrder: Int
+}
+
+input UpsertServiceInput {
+  categoryId: ID!
+  description: String!
+  id: ID
+  jurisdictionIds: [String!]
+  lastValidatedAt: DateTime!
+  officeIds: [String!]
+  phoneContact: String
+  sourceId: ID!
+  title: String!
+  url: String
+}
+
+input UpsertSourceInput {
+  active: Boolean!
+  collectorKey: String
+  freshnessDays: Int!
+  id: UUID
+  levels: [GovLevel!]!
+  method: SourceMethod!
+  name: String!
+  publisher: String!
+  schedule: SourceSchedule!
+  termsUrl: String!
+  url: String!
+}

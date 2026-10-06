@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
+      - run: pnpm exec prisma generate
+        env:
+          MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test:unit
+      - name: Prepare test database
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql "postgresql://postgres:postgres@localhost:5432/postgres" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE civiclink_owner LOGIN PASSWORD 'owner';
+          CREATE ROLE civiclink_app LOGIN PASSWORD 'app';
+          CREATE DATABASE civiclink_test OWNER civiclink_owner;
+          SQL
+          psql "postgresql://postgres:postgres@localhost:5432/civiclink_test" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE SCHEMA IF NOT EXISTS extensions AUTHORIZATION civiclink_owner;
+          CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA extensions;
+          CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA extensions;
+          ALTER DATABASE civiclink_test SET search_path TO public, extensions;
+          GRANT USAGE ON SCHEMA extensions TO civiclink_app;
+          GRANT USAGE ON SCHEMA public TO civiclink_app;
+          SQL
+      - run: pnpm test:int
+        env:
+          TEST_DATABASE_URL: postgresql://civiclink_app:app@localhost:5432/civiclink_test
+          TEST_MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
+      - run: pnpm exec prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code --shadow-database-url "$SHADOW"
+        env:
+          MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
+          SHADOW: postgresql://postgres:postgres@localhost:5432/postgres
+      - run: pnpm schema:print && git diff --exit-code schema.graphql
+      - run: pnpm audit --prod
+      - name: Docker build
+        run: docker build -t civiclink-api .
+
+  deploy-check:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Staging deploy is defined in deploy.yml"

@@ -71,6 +71,20 @@ Put PEMs in `.env` with `\n` for newlines. Delete the key files afterwards.
   `docker/postgres-init`; RDS: run `prisma/sql/20_db_roles.sql` Part A as the master user, then
   Part B after the first deploy).
 
+## Runbook
+
+Database roles are created from `prisma/sql/20_db_roles.sql` (not a Prisma migration). Part A runs as the RDS master user before the first deploy. Part B runs after `prisma migrate deploy`. The runtime role is `civiclink_app`. Migrations use `civiclink_owner` via `MIGRATION_DATABASE_URL`.
+
+Deploy: merge to `main` for staging, or push a `v*` tag for production. Both jobs run `prisma migrate deploy` with the environment's `MIGRATION_DATABASE_URL` and require the matching GitHub environment approval.
+
+Rollback: deploy the previous image tag. Do not edit applied migrations. If a migration must be reversed, add a new forward migration.
+
+Restore: restore the RDS snapshot, then run `prisma migrate deploy` so the schema matches the release. Re-seed is not required; seed is idempotent for local and first-boot data only.
+
+Rotate JWT keys: set `JWT_PREVIOUS_PUBLIC_KEY` to the current public key, deploy a new `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` / `JWT_KEY_ID`, wait for access tokens to expire, then remove the previous public key. Cookie encryption: set a new `COOKIE_ENC_KEY` only during a maintenance window; existing session cookies cannot be decrypted afterwards and residents sign in again.
+
+Re-run a failed source: in the admin API call `triggerSourceRefresh` for that source. The worker starts a new `source_run`. A run already in progress returns `RUN_IN_PROGRESS`.
+
 ## Verified in this kit
 
 - `schema.prisma` validates and formats cleanly with Prisma 7.10's schema engine (no lint warnings).

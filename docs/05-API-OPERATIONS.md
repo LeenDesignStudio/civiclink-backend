@@ -10,6 +10,12 @@ Legend — **Scope**: `public` (anyone), `resident` (signed-in resident, any sub
 
 ---
 
+## Process
+
+| Operation | Kind | Scope / permission | Rate | Input (validation) | Rules | Errors |
+|---|---|---|---|---|---|---|
+| `health` | Query | public | — | — | Returns `ok`. Used to prove the GraphQL stack is mounted. | — |
+
 ## A. Location resolution & civic read (public)
 
 | Operation | Kind | Scope / permission | Rate | Input (validation) | Rules | Errors |
