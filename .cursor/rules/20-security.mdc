@@ -1,0 +1,93 @@
+---
+description: Security controls for authentication, sessions, cookies, CSRF, rate limiting, secrets, input handling and dependencies. Use for any auth, HTTP, GraphQL, webhook or data-handling code.
+globs: src/**/*.ts, prisma/**/*
+alwaysApply: false
+---
+
+# Security Rules (full detail in docs/04-SECURITY-BASELINE.md)
+
+## Authentication — residents (Google + Apple only)
+- Use `openid-client` (v6) Authorization Code flow with **PKCE (S256), `state` and `nonce`** for both
+  providers. Verify ID token signature, `iss`, `aud`, `exp`, `iat`, `nonce`.
+- `state`, `nonce`, PKCE verifier and the resident's pending intent live in ONE short-lived (10 min)
+  **encrypted + signed cookie** `__Host-cl_oauth` (AES-256-GCM via `src/lib/crypto.ts`).
+  Apple uses `response_mode=form_post` (cross-site POST), so this cookie must be `SameSite=None; Secure`.
+- Identity key is `(provider, sub)`. Link a new provider to an existing user **only** when both
+  providers assert `email_verified=true` for the same email. Never link on unverified email.
+- Apple sends name only on first consent — persist it then; accept private-relay emails.
+- Intent return URL must be a **relative path** matching an allowlist (`/card/`, `/officials/`,
+  `/offices/`, `/me`, `/pricing`). Reject anything else (open-redirect protection).
+
+## Sessions & tokens — residents
+- Access token: JWT, **ES256**, 15 min, claims `{sub, typ:'resident', sid, ver}`, signed with a key
+  from env (`JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY`, PEM). Cookie `__Host-cl_at`: HttpOnly, Secure,
+  SameSite=Lax, Path=/.
+- Refresh token: 256-bit random, stored as SHA-256 hash in `user_sessions`, 30-day rolling, cookie
+  `__Host-cl_rt` (HttpOnly, Secure, SameSite=Strict, Path=/ — the `__Host-` prefix requires Path=/
+  and no Domain attribute). **Rotate on every refresh**; reuse of a rotated token revokes the whole `family_id`.
+- On `PENDING_DELETION`/`DELETED` user, deny refresh and revoke sessions.
+- Logout revokes the session row and clears cookies. "Sign out everywhere" revokes all user sessions.
+
+## Authentication — admins (decision D-04)
+- Google OIDC restricted to `ADMIN_GOOGLE_HD` (Workspace domain) **and** an `admin_users` allowlist
+  row with `status=ACTIVE`. `hd` claim must match; email must be verified.
+- Opaque session token (256-bit) stored hashed in `admin_sessions`; cookie `__Host-cl_admin`
+  (HttpOnly, Secure, SameSite=Strict). **Idle timeout 30 min, absolute 12 h.**
+- Lockout: 5 failed sign-ins in 15 min → `locked_until = now()+15min`. Deactivation revokes all sessions immediately.
+- Role is read from the DB on every request (cache ≤ 30 s). Role change takes effect without re-login.
+
+## CSRF & CORS
+- `useCSRFPrevention({ requestHeaders: ['x-civiclink-csrf'] })` from `@graphql-yoga/plugin-csrf-prevention` — every GraphQL request must
+  carry that header. Additionally reject state-changing requests whose `Origin` is not in `CORS_ORIGINS`.
+- CORS: explicit allowlist from env, `credentials: true`, no wildcard. Admin and web origins listed separately.
+
+## GraphQL hardening
+- `@escape.tech/graphql-armor`: maxDepth 8, maxAliases 10, maxDirectives 20, maxTokens 2000,
+  costLimit 5000. Introspection and field suggestions **disabled in production**.
+- Batched queries disabled. Max body 100 KB. Persisted operations optional (not required in Phase 1).
+- Every list field is paginated (`first` ≤ 100) — no unbounded lists.
+
+## Rate limiting (rate-limiter-flexible, Postgres store, keyed by IP hash and/or user id)
+| Class | Limit | Key |
+|---|---|---|
+| `lookup` (resolveLocation, reverseGeocode) | 30 / 10 min | IP |
+| `auth` (OAuth start/callback, refresh) | 20 / 10 min | IP |
+| `contact` | 5 / hour | IP |
+| `correction` | 10 / day | user |
+| `mutation` (resident, default) | 60 / min | user |
+| `admin` | 300 / min | admin |
+| `alert_send` | 10 / hour | admin |
+On limit: throw `RateLimitedError` with `retryAfterSeconds`; set `Retry-After` header on REST routes.
+
+## Webhooks (Stripe)
+- Raw body only on `/webhooks/stripe`; verify with `stripe.webhooks.constructEvent` and
+  `STRIPE_WEBHOOK_SECRET`; tolerance 300 s. Reject on failure with 400 and log at warn (no payload).
+- Idempotent: insert `stripe_events(id)` first; if it exists, return 200 without reprocessing.
+- Out-of-order safe: apply a subscription update only if `event.created >= subscriptions.last_event_at`.
+
+## Data protection
+- Hash IPs with HMAC-SHA256 + `IP_HASH_SECRET` before storing or logging. Never store raw IPs.
+- Never persist raw search text. Analytics get jurisdiction ids/ZIP only.
+- Signed, expiring tokens (HMAC) for email unsubscribe/open/click links; no user ids in clear.
+- Turnstile token verified server-side on `submitContactMessage`.
+- Output only fields the caller is allowed to see — DTOs are explicit allowlists, never spread Prisma rows.
+
+## Input handling
+- Zod `.strict()` objects; trim strings; length caps that match DB column sizes; URLs must be
+  `https?:`; emails lower-cased; phones normalised to E.164 (`libphonenumber-js`).
+- Reject control characters in free text. Store text as-is (no HTML); the frontend escapes on render.
+- IDs are UUIDs — validate format before hitting the DB (return NOT_FOUND on bad format, not 500).
+
+## Secrets & config
+- All secrets via env, loaded from AWS Secrets Manager in staging/prod. `env.ts` fails boot if any
+  required var is missing or malformed. Never log `env`.
+- Separate keys per environment. Google Maps key restricted by API + server IP; Stripe restricted keys where possible.
+
+## Headers (all REST responses; GraphQL too)
+`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`,
+`Cache-Control: no-store` on authenticated responses. Use `@fastify/helmet` configured accordingly.
+
+## Dependencies & supply chain
+- `pnpm audit --prod` and `osv-scanner` in CI; fail on high/critical. Lockfile committed. No `postinstall` scripts from new deps without review.
+- Docker image: multi-stage, `node:22-alpine` (or distroless), non-root user, read-only FS, no dev deps.

@@ -1,0 +1,1037 @@
+// =============================================================================
+// CivicLink Phase 1 — Prisma schema (Prisma ORM 7.x, PostgreSQL 16 + PostGIS 3)
+// Scope: SOW A1–A20 only. Do NOT add models for events, inbox, office portal,
+// ads, donations, forums, SMS — they are excluded (SOW A20).
+//
+// Conventions
+// - Models PascalCase, DB tables snake_case plural via @@map; columns snake_case via @map.
+// - All ids are UUID v7-friendly strings generated in the DB (gen_random_uuid()).
+// - Every table has created_at / updated_at.
+// - Civic records are never hard-deleted: status RETIRED instead.
+// - Geometry columns are declared Unsupported(...) and are ONLY read/written via
+//   typed raw SQL in the repository layer (see prisma/sql/0001_postgis_init.sql).
+// - Datasource URL lives in prisma.config.ts (Prisma 7), not here.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  PENDING_DELETION
+  DELETED
+}
+
+enum AuthProvider {
+  GOOGLE
+  APPLE
+}
+
+enum LocationLabel {
+  HOME
+  WORK
+  OTHER
+}
+
+enum LookupMethod {
+  ADDRESS
+  ZIP
+  CITY_STATE
+  DEVICE
+}
+
+enum Confidence {
+  EXACT
+  LIKELY
+  MULTIPLE
+  UNRESOLVED
+}
+
+enum GovLevel {
+  FEDERAL
+  STATE
+  COUNTY
+  MUNICIPAL
+  EDUCATION
+  SPECIAL
+}
+
+enum JurisdictionType {
+  NATION
+  STATE
+  CONGRESSIONAL_DISTRICT
+  STATE_SENATE_DISTRICT
+  STATE_HOUSE_DISTRICT
+  COUNTY
+  COUNTY_COUNCIL_DISTRICT
+  MUNICIPALITY
+  WARD
+  SCHOOL_DISTRICT
+  SCHOOL_BOARD_DISTRICT
+  COMMUNITY_COLLEGE_DISTRICT
+  SPECIAL_DISTRICT
+  ZCTA
+}
+
+enum RecordStatus {
+  ACTIVE
+  RETIRED
+}
+
+enum FreshnessOverride {
+  NONE
+  FORCE_CURRENT
+  FORCE_OUTDATED
+}
+
+enum SelectionMethod {
+  ELECTED
+  APPOINTED
+}
+
+enum TermStatus {
+  ELECTED
+  APPOINTED
+  ACTING
+}
+
+enum SourceMethod {
+  API
+  BULK
+  PAGE_COLLECTION
+  MANUAL
+}
+
+enum SourceSchedule {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ON_DEMAND
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum ChangeDecision {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum CivicEntityType {
+  JURISDICTION
+  OFFICE
+  OFFICIAL
+  SERVICE
+}
+
+enum CorrectionField {
+  OFFICEHOLDER_NAME
+  TITLE
+  PARTY
+  PHONE
+  EMAIL
+  WEBSITE
+  OFFICE_ADDRESS
+  DISTRICT
+  DOES_NOT_APPLY
+  SERVICE_DETAILS
+  OTHER
+}
+
+enum CorrectionStatus {
+  SUBMITTED
+  IN_REVIEW
+  APPLIED
+  DISMISSED
+}
+
+enum DismissReason {
+  ALREADY_CORRECT
+  INSUFFICIENT_EVIDENCE
+  OUT_OF_SCOPE
+  DUPLICATE
+  OTHER
+}
+
+enum NotificationType {
+  ALERT
+  RECORD_UPDATE
+  SYSTEM
+}
+
+enum NotificationCategory {
+  ALERTS
+  UPDATES
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum DeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  SKIPPED
+}
+
+enum AlertStatus {
+  DRAFT
+  SENDING
+  SENT
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  PAUSED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  UNCOLLECTIBLE
+  VOID
+}
+
+enum AdminRole {
+  VIEWER
+  EDITOR
+  COMMUNICATIONS
+  SUPER_ADMIN
+}
+
+enum AdminStatus {
+  INVITED
+  ACTIVE
+  DEACTIVATED
+}
+
+enum ActorType {
+  RESIDENT
+  ADMIN
+  SYSTEM
+  SOURCE
+}
+
+enum ContactTopic {
+  GENERAL
+  DATA_ACCURACY
+  BILLING
+  PARTNERSHIPS
+  PRESS
+  OTHER
+}
+
+enum DeletionReason {
+  NOT_USEFUL
+  PRIVACY
+  TOO_MANY_NOTIFICATIONS
+  OTHER
+}
+
+// -----------------------------------------------------------------------------
+// Residents & authentication
+// -----------------------------------------------------------------------------
+
+model User {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String     @db.Citext
+  displayName     String     @map("display_name") @db.VarChar(60)
+  status          UserStatus @default(ACTIVE)
+  termsVersion    String?    @map("terms_version") @db.VarChar(20)
+  privacyVersion  String?    @map("privacy_version") @db.VarChar(20)
+  acceptedAt      DateTime?  @map("accepted_at") @db.Timestamptz(3)
+  marketingOptIn  Boolean    @default(false) @map("marketing_opt_in")
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  identities              AuthIdentity[]
+  sessions                UserSession[]
+  savedLocations          SavedLocation[]
+  lookups                 Lookup[]
+  follows                 Follow[]
+  corrections             Correction[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  pushSubscriptions       PushSubscription[]
+  subscriptions           Subscription[]
+  deletionRequests        DeletionRequest[]
+  stripeCustomer          StripeCustomer?
+
+  @@index([email])
+  @@index([status])
+  @@map("users")
+}
+
+model AuthIdentity {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String       @map("user_id") @db.Uuid
+  provider        AuthProvider
+  providerSubject String       @map("provider_subject") @db.VarChar(255)
+  email           String?      @db.Citext
+  emailVerified   Boolean      @default(false) @map("email_verified")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("auth_identities")
+}
+
+/// Refresh-token session for residents. Only the SHA-256 hash of the token is stored.
+model UserSession {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash") @db.Char(64)
+  familyId         String    @map("family_id") @db.Uuid
+  userAgent        String?   @map("user_agent") @db.VarChar(400)
+  ipHash           String?   @map("ip_hash") @db.Char(64)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(3)
+  rotatedAt        DateTime? @map("rotated_at") @db.Timestamptz(3)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+model DeletionRequest {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String          @map("user_id") @db.Uuid
+  reason      DeletionReason?
+  reasonText  String?         @map("reason_text") @db.VarChar(500)
+  requestedAt DateTime        @default(now()) @map("requested_at") @db.Timestamptz(3)
+  purgeAfter  DateTime        @map("purge_after") @db.Timestamptz(3)
+  restoredAt  DateTime?       @map("restored_at") @db.Timestamptz(3)
+  purgedAt    DateTime?       @map("purged_at") @db.Timestamptz(3)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([purgeAfter])
+  @@index([userId])
+  @@map("deletion_requests")
+}
+
+// -----------------------------------------------------------------------------
+// Resident features
+// -----------------------------------------------------------------------------
+
+model SavedLocation {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  label             LocationLabel
+  customName        String?       @map("custom_name") @db.VarChar(40)
+  displayAddress    String        @map("display_address") @db.VarChar(200)
+  normalizedAddress String        @map("normalized_address") @db.VarChar(200)
+  /// geometry(Point, 4326) — raw SQL only
+  point             Unsupported("geometry(Point, 4326)")?
+  geocodePrecision  String?       @map("geocode_precision") @db.VarChar(32)
+  isDefault         Boolean       @default(false) @map("is_default")
+  jurisdictionIds   String[]      @map("jurisdiction_ids") @db.Uuid
+  confidence        Confidence
+  resolvedAt        DateTime      @map("resolved_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("saved_locations")
+}
+
+/// One resolution result. Never stores the raw text the resident typed.
+model Lookup {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token           String       @unique @db.VarChar(32)
+  userId          String?      @map("user_id") @db.Uuid
+  method          LookupMethod
+  displayLabel    String       @map("display_label") @db.VarChar(200)
+  zip             String?      @db.VarChar(5)
+  /// geometry(Geometry, 4326): point for address/device, area for ZIP/city — raw SQL only
+  geom            Unsupported("geometry(Geometry, 4326)")?
+  jurisdictionIds String[]     @map("jurisdiction_ids") @db.Uuid
+  confidence      Confidence
+  partialLevels   GovLevel[]   @map("partial_levels")
+  /// Per-level confidence + candidate jurisdiction ids for MULTIPLE matches
+  levelDetail     Json         @map("level_detail")
+  latencyMs       Int          @map("latency_ms")
+  expiresAt       DateTime?    @map("expires_at") @db.Timestamptz(3)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("lookups")
+}
+
+model Follow {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  officeId   String   @map("office_id") @db.Uuid
+  officialId String?  @map("official_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  office   Office    @relation(fields: [officeId], references: [id], onDelete: Restrict)
+  official Official? @relation(fields: [officialId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, officeId])
+  @@index([officeId])
+  @@index([officialId])
+  @@map("follows")
+}
+
+// -----------------------------------------------------------------------------
+// Civic data
+// -----------------------------------------------------------------------------
+
+model Source {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String         @unique @db.VarChar(150)
+  publisher     String         @db.VarChar(150)
+  url           String         @db.VarChar(2048)
+  termsUrl      String         @map("terms_url") @db.VarChar(2048)
+  method        SourceMethod
+  schedule      SourceSchedule
+  freshnessDays Int            @default(90) @map("freshness_days")
+  levels        GovLevel[]
+  /// Collector key that maps this source to code in src/modules/pipeline/collectors
+  collectorKey  String?        @map("collector_key") @db.VarChar(80)
+  active        Boolean        @default(true)
+  lastRunAt     DateTime?      @map("last_run_at") @db.Timestamptz(3)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  runs          SourceRun[]
+  jurisdictions Jurisdiction[]
+  offices       Office[]
+  officials     Official[]
+  services      Service[]
+
+  @@map("sources")
+}
+
+model SourceRun {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceId    String    @map("source_id") @db.Uuid
+  status      RunStatus @default(QUEUED)
+  triggeredBy String?   @map("triggered_by") @db.Uuid
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(3)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(3)
+  added       Int       @default(0)
+  changed     Int       @default(0)
+  retired     Int       @default(0)
+  pending     Int       @default(0)
+  snapshotKey String?   @map("snapshot_key") @db.VarChar(512)
+  snapshotSha String?   @map("snapshot_sha") @db.Char(64)
+  error       String?   @db.VarChar(2000)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  source         Source                @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  pendingChanges PendingSourceChange[]
+
+  @@index([sourceId, createdAt(sort: Desc)])
+  @@map("source_runs")
+}
+
+model PendingSourceChange {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceRunId String          @map("source_run_id") @db.Uuid
+  entityType  CivicEntityType @map("entity_type")
+  entityId    String?         @map("entity_id") @db.Uuid
+  field       String          @db.VarChar(80)
+  oldValue    Json?           @map("old_value")
+  newValue    Json            @map("new_value")
+  decision    ChangeDecision  @default(PENDING)
+  decidedBy   String?         @map("decided_by") @db.Uuid
+  decidedAt   DateTime?       @map("decided_at") @db.Timestamptz(3)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sourceRun SourceRun  @relation(fields: [sourceRunId], references: [id], onDelete: Cascade)
+  decider   AdminUser? @relation(fields: [decidedBy], references: [id], onDelete: SetNull)
+
+  @@index([decision, createdAt])
+  @@map("pending_source_changes")
+}
+
+model Jurisdiction {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String            @db.VarChar(150)
+  level             GovLevel
+  type              JurisdictionType
+  subtype           String?           @db.VarChar(80)
+  parentId          String?           @map("parent_id") @db.Uuid
+  districtCode      String?           @map("district_code") @db.VarChar(40)
+  geoid             String?           @db.VarChar(40)
+  state             String?           @db.Char(2)
+  /// geometry(MultiPolygon, 4326) — loaded by the pipeline, raw SQL only
+  boundary          Unsupported("geometry(MultiPolygon, 4326)")?
+  boundaryVintage   String?           @map("boundary_vintage") @db.VarChar(20)
+  website           String?           @db.VarChar(2048)
+  sourceId          String            @map("source_id") @db.Uuid
+  sourceRecordUrl   String?           @map("source_record_url") @db.VarChar(2048)
+  lastUpdatedAt     DateTime          @map("last_updated_at") @db.Timestamptz(3)
+  freshnessOverride FreshnessOverride @default(NONE) @map("freshness_override")
+  freshnessNote     String?           @map("freshness_note") @db.VarChar(500)
+  status            RecordStatus      @default(ACTIVE)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  parent       Jurisdiction?  @relation("JurisdictionTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children     Jurisdiction[] @relation("JurisdictionTree")
+  source       Source         @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  offices      Office[]
+  serviceLinks ServiceLink[]
+
+  @@unique([type, geoid])
+  @@index([level, status])
+  @@index([parentId])
+  @@index([state])
+  @@map("jurisdictions")
+}
+
+model Office {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug              String            @unique @db.VarChar(160)
+  jurisdictionId    String            @map("jurisdiction_id") @db.Uuid
+  name              String            @db.VarChar(150)
+  seatLabel         String?           @map("seat_label") @db.VarChar(60)
+  selectionMethod   SelectionMethod   @map("selection_method")
+  displayOrder      Int               @default(100) @map("display_order")
+  whyTemplate       String?           @map("why_template") @db.VarChar(300)
+  phone             String?           @db.VarChar(20)
+  email             String?           @db.Citext
+  website           String?           @db.VarChar(2048)
+  contactUrl        String?           @map("contact_url") @db.VarChar(2048)
+  holderUnknown     Boolean           @default(false) @map("holder_unknown")
+  sourceId          String            @map("source_id") @db.Uuid
+  sourceRecordUrl   String?           @map("source_record_url") @db.VarChar(2048)
+  lastUpdatedAt     DateTime          @map("last_updated_at") @db.Timestamptz(3)
+  freshnessOverride FreshnessOverride @default(NONE) @map("freshness_override")
+  freshnessNote     String?           @map("freshness_note") @db.VarChar(500)
+  status            RecordStatus      @default(ACTIVE)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  jurisdiction Jurisdiction    @relation(fields: [jurisdictionId], references: [id], onDelete: Restrict)
+  source       Source          @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  addresses    OfficeAddress[]
+  terms        OfficeTerm[]
+  follows      Follow[]
+  serviceLinks ServiceLink[]
+  alerts       Alert[]
+
+  @@index([jurisdictionId, status])
+  @@map("offices")
+}
+
+model OfficeAddress {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  officeId  String   @map("office_id") @db.Uuid
+  label     String   @db.VarChar(60)
+  street    String   @db.VarChar(200)
+  city      String   @db.VarChar(100)
+  state     String   @db.Char(2)
+  zip       String   @db.VarChar(10)
+  phone     String?  @db.VarChar(20)
+  hours     String?  @db.VarChar(200)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  office Office @relation(fields: [officeId], references: [id], onDelete: Cascade)
+
+  @@index([officeId])
+  @@map("office_addresses")
+}
+
+model Official {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug              String            @unique @db.VarChar(160)
+  fullName          String            @map("full_name") @db.VarChar(120)
+  displayName       String?           @map("display_name") @db.VarChar(120)
+  party             String?           @db.VarChar(60)
+  photoUrl          String?           @map("photo_url") @db.VarChar(2048)
+  website           String?           @db.VarChar(2048)
+  externalIds       Json              @default("{}") @map("external_ids")
+  sourceId          String            @map("source_id") @db.Uuid
+  sourceRecordUrl   String?           @map("source_record_url") @db.VarChar(2048)
+  lastUpdatedAt     DateTime          @map("last_updated_at") @db.Timestamptz(3)
+  freshnessOverride FreshnessOverride @default(NONE) @map("freshness_override")
+  freshnessNote     String?           @map("freshness_note") @db.VarChar(500)
+  status            RecordStatus      @default(ACTIVE)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  source  Source       @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  terms   OfficeTerm[]
+  follows Follow[]
+  alerts  Alert[]
+
+  @@index([status])
+  @@map("officials")
+}
+
+/// At most one current term per office — enforced by a partial unique index in raw SQL.
+model OfficeTerm {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  officeId   String     @map("office_id") @db.Uuid
+  officialId String     @map("official_id") @db.Uuid
+  status     TermStatus
+  termStart  DateTime?  @map("term_start") @db.Date
+  termEnd    DateTime?  @map("term_end") @db.Date
+  isCurrent  Boolean    @default(true) @map("is_current")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  office   Office   @relation(fields: [officeId], references: [id], onDelete: Restrict)
+  official Official @relation(fields: [officialId], references: [id], onDelete: Restrict)
+
+  @@index([officeId, isCurrent])
+  @@index([officialId])
+  @@map("office_terms")
+}
+
+model ServiceCategory {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique @db.VarChar(60)
+  sortOrder Int      @default(0) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  services Service[]
+
+  @@map("service_categories")
+}
+
+model Service {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String       @db.VarChar(120)
+  categoryId      String       @map("category_id") @db.Uuid
+  description     String       @db.VarChar(400)
+  url             String?      @db.VarChar(2048)
+  phoneContact    String?      @map("phone_contact") @db.VarChar(120)
+  lastValidatedAt DateTime     @map("last_validated_at") @db.Timestamptz(3)
+  linkBroken      Boolean      @default(false) @map("link_broken")
+  sourceId        String       @map("source_id") @db.Uuid
+  status          RecordStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  source   Source          @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  links    ServiceLink[]
+
+  @@index([categoryId, status])
+  @@map("services")
+}
+
+/// Exactly one of jurisdictionId / officeId is set (CHECK constraint in raw SQL).
+model ServiceLink {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serviceId      String   @map("service_id") @db.Uuid
+  jurisdictionId String?  @map("jurisdiction_id") @db.Uuid
+  officeId       String?  @map("office_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  service      Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  jurisdiction Jurisdiction? @relation(fields: [jurisdictionId], references: [id], onDelete: Cascade)
+  office       Office?       @relation(fields: [officeId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, jurisdictionId, officeId])
+  @@index([jurisdictionId])
+  @@index([officeId])
+  @@map("service_links")
+}
+
+// -----------------------------------------------------------------------------
+// Corrections & change history
+// -----------------------------------------------------------------------------
+
+model Correction {
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Nullable so the record survives account purge (de-identified).
+  userId               String?          @map("user_id") @db.Uuid
+  entityType           CivicEntityType  @map("entity_type")
+  entityId             String           @map("entity_id") @db.Uuid
+  field                CorrectionField
+  currentValueSnapshot Json?            @map("current_value_snapshot")
+  proposedValue        String?          @map("proposed_value") @db.VarChar(500)
+  details              String?          @db.VarChar(1000)
+  evidenceUrl          String?          @map("evidence_url") @db.VarChar(2048)
+  lookupToken          String?          @map("lookup_token") @db.VarChar(32)
+  status               CorrectionStatus @default(SUBMITTED)
+  assigneeId           String?          @map("assignee_id") @db.Uuid
+  dismissReason        DismissReason?   @map("dismiss_reason")
+  dismissNote          String?          @map("dismiss_note") @db.VarChar(500)
+  resolvedAt           DateTime?        @map("resolved_at") @db.Timestamptz(3)
+  resolvedBy           String?          @map("resolved_by") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  assignee AdminUser?       @relation("CorrectionAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  resolver AdminUser?       @relation("CorrectionResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
+  notes    CorrectionNote[]
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("corrections")
+}
+
+model CorrectionNote {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  correctionId String   @map("correction_id") @db.Uuid
+  adminId      String   @map("admin_id") @db.Uuid
+  body         String   @db.VarChar(2000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  correction Correction @relation(fields: [correctionId], references: [id], onDelete: Cascade)
+  admin      AdminUser  @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@index([correctionId])
+  @@map("correction_notes")
+}
+
+/// Append-only. UPDATE/DELETE are revoked from the app role in raw SQL.
+model ChangeLog {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorType  ActorType @map("actor_type")
+  actorId    String?   @map("actor_id") @db.Uuid
+  entityType String    @map("entity_type") @db.VarChar(60)
+  entityId   String    @map("entity_id") @db.Uuid
+  action     String    @db.VarChar(60)
+  before     Json?
+  after      Json?
+  requestId  String?   @map("request_id") @db.VarChar(64)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([actorType, actorId])
+  @@map("change_log")
+}
+
+// -----------------------------------------------------------------------------
+// Notifications
+// -----------------------------------------------------------------------------
+
+model Alert {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  targetOfficeId   String?     @map("target_office_id") @db.Uuid
+  targetOfficialId String?     @map("target_official_id") @db.Uuid
+  title            String      @db.VarChar(80)
+  body             String      @db.VarChar(1000)
+  link             String?     @db.VarChar(2048)
+  channels         NotificationChannel[]
+  status           AlertStatus @default(DRAFT)
+  createdBy        String      @map("created_by") @db.Uuid
+  sentBy           String?     @map("sent_by") @db.Uuid
+  sentAt           DateTime?   @map("sent_at") @db.Timestamptz(3)
+  recipientCount   Int?        @map("recipient_count")
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  targetOffice   Office?   @relation(fields: [targetOfficeId], references: [id], onDelete: Restrict)
+  targetOfficial Official? @relation(fields: [targetOfficialId], references: [id], onDelete: Restrict)
+  creator        AdminUser @relation("AlertCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  sender         AdminUser? @relation("AlertSender", fields: [sentBy], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("alerts")
+}
+
+model Notification {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String           @map("user_id") @db.Uuid
+  type       NotificationType
+  title      String           @db.VarChar(120)
+  body       String           @db.VarChar(1000)
+  link       String?          @db.VarChar(2048)
+  /// e.g. "alert:<uuid>" or "update:<changeLogId>" — part of the dedupe key
+  sourceRef  String           @map("source_ref") @db.VarChar(80)
+  readAt     DateTime?        @map("read_at") @db.Timestamptz(3)
+  deletedAt  DateTime?        @map("deleted_at") @db.Timestamptz(3)
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@unique([userId, sourceRef])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId    String              @map("notification_id") @db.Uuid
+  channel           NotificationChannel
+  status            DeliveryStatus      @default(QUEUED)
+  /// `${sourceRef}:${userId}:${channel}` — guarantees no duplicate sends
+  dedupeKey         String              @unique @map("dedupe_key") @db.VarChar(200)
+  providerMessageId String?             @map("provider_message_id") @db.VarChar(200)
+  attempts          Int                 @default(0)
+  error             String?             @db.VarChar(1000)
+  sentAt            DateTime?           @map("sent_at") @db.Timestamptz(3)
+  openedAt          DateTime?           @map("opened_at") @db.Timestamptz(3)
+  clickedAt         DateTime?           @map("clicked_at") @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([status, channel])
+  @@map("notification_deliveries")
+}
+
+model NotificationPreference {
+  id        String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String               @map("user_id") @db.Uuid
+  category  NotificationCategory
+  channel   NotificationChannel
+  enabled   Boolean
+  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+  @@map("notification_preferences")
+}
+
+model PushSubscription {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  /// Provider token (FCM registration token) or Web Push endpoint
+  token      String    @unique @db.VarChar(2048)
+  userAgent  String?   @map("user_agent") @db.VarChar(400)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// -----------------------------------------------------------------------------
+// Billing (Stripe is the source of truth; these are mirrors)
+// -----------------------------------------------------------------------------
+
+model Plan {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stripePriceId String   @unique @map("stripe_price_id") @db.VarChar(100)
+  name          String   @db.VarChar(60)
+  amountCents   Int      @map("amount_cents")
+  currency      String   @default("usd") @db.Char(3)
+  interval      String   @db.VarChar(10)
+  features      Json     @default("[]")
+  /// Machine-readable entitlements, e.g. {"maxSavedLocations": 10, "maxFollows": 200}
+  entitlements  Json     @default("{}")
+  active        Boolean  @default(true)
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model StripeCustomer {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String   @unique @map("user_id") @db.Uuid
+  stripeCustomerId String   @unique @map("stripe_customer_id") @db.VarChar(100)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  invoices Invoice[]
+
+  @@map("stripe_customers")
+}
+
+model Subscription {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String             @map("user_id") @db.Uuid
+  stripeSubscriptionId String             @unique @map("stripe_subscription_id") @db.VarChar(100)
+  planId               String?            @map("plan_id") @db.Uuid
+  status               SubscriptionStatus
+  currentPeriodEnd     DateTime?          @map("current_period_end") @db.Timestamptz(3)
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  /// Stripe event.created of the last applied event — ignore older out-of-order events
+  lastEventAt          DateTime           @map("last_event_at") @db.Timestamptz(3)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plan Plan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stripeInvoiceId  String        @unique @map("stripe_invoice_id") @db.VarChar(100)
+  stripeCustomerId String        @map("stripe_customer_id") @db.VarChar(100)
+  number           String?       @db.VarChar(60)
+  amountDueCents   Int           @map("amount_due_cents")
+  amountPaidCents  Int           @map("amount_paid_cents")
+  currency         String        @db.Char(3)
+  status           InvoiceStatus
+  hostedUrl        String?       @map("hosted_url") @db.VarChar(2048)
+  pdfUrl           String?       @map("pdf_url") @db.VarChar(2048)
+  issuedAt         DateTime      @map("issued_at") @db.Timestamptz(3)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId], onDelete: Restrict)
+
+  @@index([stripeCustomerId, issuedAt(sort: Desc)])
+  @@map("invoices")
+}
+
+/// Webhook idempotency: an event id is processed once.
+model StripeEvent {
+  id          String    @id @db.VarChar(100)
+  type        String    @db.VarChar(100)
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(3)
+  error       String?   @db.VarChar(1000)
+
+  @@map("stripe_events")
+}
+
+// -----------------------------------------------------------------------------
+// Admin
+// -----------------------------------------------------------------------------
+
+model AdminUser {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email          String      @unique @db.Citext
+  name           String?     @db.VarChar(100)
+  role           AdminRole
+  status         AdminStatus @default(INVITED)
+  googleSubject  String?     @unique @map("google_subject") @db.VarChar(255)
+  invitedBy      String?     @map("invited_by") @db.Uuid
+  lastLoginAt    DateTime?   @map("last_login_at") @db.Timestamptz(3)
+  failedAttempts Int         @default(0) @map("failed_attempts")
+  lockedUntil    DateTime?   @map("locked_until") @db.Timestamptz(3)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions            AdminSession[]
+  assignedCorrections Correction[]          @relation("CorrectionAssignee")
+  resolvedCorrections Correction[]          @relation("CorrectionResolver")
+  correctionNotes     CorrectionNote[]
+  alertsCreated       Alert[]               @relation("AlertCreator")
+  alertsSent          Alert[]               @relation("AlertSender")
+  sourceDecisions     PendingSourceChange[]
+
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminId        String    @map("admin_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash") @db.Char(64)
+  userAgent      String?   @map("user_agent") @db.VarChar(400)
+  ipHash         String?   @map("ip_hash") @db.Char(64)
+  lastActivityAt DateTime  @default(now()) @map("last_activity_at") @db.Timestamptz(3)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@map("admin_sessions")
+}
+
+// -----------------------------------------------------------------------------
+// Public website
+// -----------------------------------------------------------------------------
+
+model ContactMessage {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String       @db.VarChar(80)
+  email     String       @db.Citext
+  topic     ContactTopic
+  message   String       @db.VarChar(2000)
+  ipHash    String       @map("ip_hash") @db.Char(64)
+  emailedAt DateTime?    @map("emailed_at") @db.Timestamptz(3)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@map("contact_messages")
+}
+
+/// Storage for rate-limiter-flexible (RateLimiterPostgres, tableCreated: true).
+/// Owned by Prisma so the app role never needs DDL and `migrate diff` stays clean.
+model RateLimit {
+  key    String @id @db.VarChar(255)
+  points Int
+  expire BigInt?
+
+  @@index([expire])
+  @@map("rate_limits")
+}
+
+/// Versioned legal documents so consent records which version was accepted.
+model LegalDocument {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind        String   @db.VarChar(20) // "TERMS" | "PRIVACY"
+  version     String   @db.VarChar(20)
+  effectiveAt DateTime @map("effective_at") @db.Timestamptz(3)
+  current     Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([kind, version])
+  @@map("legal_documents")
+}

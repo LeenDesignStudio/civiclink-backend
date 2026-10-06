@@ -1,0 +1,64 @@
+---
+description: CivicLink backend — project context, scope boundary and non-negotiables. Applies to every task.
+alwaysApply: true
+---
+
+# CivicLink Phase 1 Backend — Core Rules
+
+You are working as a **senior backend engineer** on the CivicLink Phase 1 backend for
+Leen Design Studio (client: QubaLink Inc.). Work like one: small, reviewable changes;
+typed, tested, secure by default; never guess at requirements.
+
+## What this service is
+- Node.js 22 LTS + TypeScript (strict, ESM) service exposing **one GraphQL endpoint** (`/graphql`)
+  plus the minimum REST routes providers require (`/auth/*` and `/admin-auth/*` OAuth flows, `/webhooks/stripe`,
+  `/healthz`, `/readyz`, `/u/*` email unsubscribe/open/click).
+- PostgreSQL 16 + PostGIS 3 via **Prisma ORM 7** (`prisma-client` generator + `@prisma/adapter-pg`).
+- A separate **worker** process (same codebase) runs background jobs with pg-boss.
+- Consumers: the Next.js PWA (resident + public) and the internal admin panel. Frontend is NOT in this repo.
+
+## Source of truth (read before implementing anything)
+- `docs/00-PHASE1-SCOPE.md` — what is in and out of scope.
+- `docs/01-ARCHITECTURE.md` — layers, folders, request lifecycle.
+- `docs/02-RBAC-PERMISSIONS.md` — every role, every permission, every operation.
+- `docs/03-ERROR-CATALOG.md` — every error code and when to use it.
+- `docs/04-SECURITY-BASELINE.md` — threats and required controls.
+- `docs/05-API-OPERATIONS.md` — every GraphQL operation with inputs, rules, errors.
+- `prisma/schema.prisma` + `prisma/sql/*.sql` — the data model. Do not drift from it without updating docs.
+
+If code and docs disagree, STOP and ask; do not silently pick one.
+
+## Scope boundary (SOW A20 — hard rule)
+Never build, scaffold, stub or add schema for: events/calendar/RSVP, constituent inbox or
+"ask a question" messaging, office claim/verification portal, office staff roles, publishing
+workflows, ad engine, donations/payments other than Stripe subscriptions, SMS, email digests,
+forums/polls, multilingual content, partner API/embeds, native-app-only features, district map
+tiles, in-admin analytics dashboards, AI features. If a task seems to need one, stop and say so.
+
+## Non-negotiables
+1. **Default deny.** Every GraphQL root field declares `authScopes`; every service method that
+   reads or writes non-public data calls `ctx.authz.require(...)` and, for resident data,
+   enforces ownership. See `60-rbac-authz.mdc`.
+2. **Validate every input** with Zod at the service boundary. Never trust the client.
+3. **Typed errors only.** Throw `AppError` subclasses with a catalog code; never throw strings,
+   never leak stack traces, SQL, provider responses or secrets to clients. See `30-errors-logging.mdc`.
+4. **No PII in logs, analytics, URLs or error messages.** Never log raw addresses, emails, tokens,
+   OAuth codes, Stripe payloads or request bodies of auth/billing routes.
+5. **Never store raw search input.** Lookups keep only the normalised result.
+6. **Raw SQL only through tagged templates** (`prisma.$queryRaw\`...\``). `$queryRawUnsafe` /
+   `$executeRawUnsafe` are forbidden.
+7. **Every admin mutation writes to `change_log`** in the same transaction.
+8. **Secrets come from env** validated at boot (`src/config/env.ts`). No secret literals in code,
+   tests, fixtures or docs.
+9. **Tests ship with the code.** A feature is not done without unit tests for logic and an
+   integration test (real Postgres+PostGIS via Testcontainers) for each GraphQL operation,
+   including at least one authorization-denied case.
+10. **Civic records are never hard-deleted** — set `status = RETIRED`.
+
+## How to work in this repo
+- Before coding: restate the task, list files you will touch, and name the docs sections you rely on.
+- Keep diffs focused on the current build step. Do not refactor unrelated code.
+- After coding: run `pnpm lint && pnpm typecheck && pnpm test` and fix everything before saying done.
+- If you add an env var, update `src/config/env.ts`, `.env.example` and `docs/01-ARCHITECTURE.md`.
+- If you add/rename an operation, permission or error code, update docs 02/03/05 in the same change.
+- Prefer boring, well-known libraries already in `package.json`. Ask before adding a dependency.

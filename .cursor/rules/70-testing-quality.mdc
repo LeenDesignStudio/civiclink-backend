@@ -1,0 +1,46 @@
+---
+description: Testing strategy, tooling and definition of done for the CivicLink backend. Use when writing tests or finishing any step.
+globs: src/**/*.test.ts, test/**/*.ts
+alwaysApply: false
+---
+
+# Testing & Quality Rules
+
+## Tooling
+- Vitest. Unit tests `*.service.test.ts` (fakes, no DB). Integration tests `*.int.test.ts` run
+  through GraphQL against **PostgreSQL 16 + PostGIS** started by `@testcontainers/postgresql`
+  (image `postgis/postgis:16-3.5`), migrated once per run, tables truncated between tests.
+- Fakes in `test/fakes/` for Geocoder, EmailSender, PushSender, BillingProvider (Stripe), Turnstile, Clock.
+  No test may call a real external service.
+- Factories in `test/factories/` build valid rows for every model (`makeOffice({...overrides})`).
+- GraphQL test client helper: `gql(principal).execute(query, variables)` returning `{ data, errors }`
+  with helpers `expectCode(res, 'FORBIDDEN')`.
+
+## What to test (minimum per operation)
+1. Happy path with realistic data.
+2. Validation failure → `VALIDATION` with the right `fieldErrors[].path`.
+3. Authorization: every disallowed principal kind → `UNAUTHENTICATED` / `FORBIDDEN`.
+4. Ownership: other resident's id → `NOT_FOUND`.
+5. Domain rule failures (limits, duplicates, state transitions) → their catalog code.
+6. For admin mutations: a `change_log` row exists with correct actor/before/after.
+7. For external calls: timeout and upstream failure → `UPSTREAM_UNAVAILABLE` (or domain code), no leak of provider text.
+
+## Spatial tests
+- `test/fixtures/geo/` holds small GeoJSON polygons (two adjacent districts, a ZCTA spanning both,
+  a county, a city) and test points: inside A, inside B, 20 m from the A/B border, outside all.
+- Assert EXACT / LIKELY / MULTIPLE / partial coverage outcomes against these fixtures.
+
+## Coverage & gates (CI)
+- `pnpm lint` (ESLint flat config, `@typescript-eslint/strict-type-checked`, `no-floating-promises`,
+  `no-restricted-imports` banning Prisma in `*.graphql.ts` and `$queryRawUnsafe` everywhere).
+- `pnpm typecheck` (tsc --noEmit, `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
+- `pnpm test` with coverage ≥ 80% lines on `src/modules/**` and 100% of root fields covered by `schema-guard`.
+- `prisma migrate diff ... --exit-code`, `pnpm schema:print` diff check, `pnpm audit --prod`.
+
+## Definition of done (every build step)
+- [ ] Code follows layers in `10-architecture.mdc`; no TODOs left without an issue reference.
+- [ ] Inputs validated, permissions enforced at both layers, ownership enforced in SQL.
+- [ ] Errors are catalog errors; no PII in logs; external calls have timeouts.
+- [ ] Unit + integration tests written and passing; lint and typecheck clean.
+- [ ] Docs 02/03/05 updated if operations, permissions or error codes changed.
+- [ ] `.env.example` updated for any new env var.

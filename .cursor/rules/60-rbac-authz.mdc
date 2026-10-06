@@ -1,0 +1,58 @@
+---
+description: Roles, permissions, ownership and authorization enforcement. Use for any code that reads or writes non-public data, any admin feature, and any GraphQL field definition.
+globs: src/authz/**/*.ts, src/**/*.service.ts, src/**/*.graphql.ts
+alwaysApply: false
+---
+
+# RBAC & Authorization Rules (full matrix: docs/02-RBAC-PERMISSIONS.md)
+
+## Principals
+```ts
+type Principal =
+  | { kind: 'anonymous' }
+  | { kind: 'resident'; userId: string; status: UserStatus; termsAccepted: boolean; sessionId: string }
+  | { kind: 'admin'; adminId: string; role: AdminRole; sessionId: string }
+  | { kind: 'system'; job: string };          // worker jobs, Stripe webhook processing
+```
+A request has exactly one principal. A resident token and an admin session are never combined.
+
+## Permissions
+`src/authz/permissions.ts` exports a string-literal union and a `ROLE_PERMISSIONS` map. It must match
+docs/02 exactly; `test/authz-matrix.test.ts` is table-driven from that doc's matrix.
+
+Two enforcement layers — **both required**:
+1. **Schema layer**: `authScopes` on every root field (`public`, `resident`, `residentActive`, `permission`).
+2. **Service layer**: first lines of every non-public service method:
+   ```ts
+   ctx.authz.require('admin.civic:write');                // throws Forbidden/Unauthenticated
+   // or for resident-owned data:
+   const userId = ctx.authz.requireResident({ active: true }); // returns userId
+   const loc = await this.repo.findOwned(userId, input.id);    // repo filters by owner
+   if (!loc) throw new NotFoundError('Saved location not found');
+   ```
+
+## Ownership rules (residents)
+- Resident-owned tables: `saved_locations, follows, notifications, notification_preferences,
+  push_subscriptions, corrections (own only), subscriptions, invoices (via stripe_customers), deletion_requests`.
+- Repos expose `findOwned(userId, id)` / `listOwned(userId, ...)` — **the userId filter is in the SQL**,
+  never applied after fetching.
+- Accessing another resident's resource → `NotFoundError` (no existence leak).
+- Residents in `PENDING_DELETION` can only: `me`, `restoreAccount`, `signOut`. Everything else → `ACCOUNT_PENDING_DELETION`.
+- Residents who have not accepted current Terms can only: `me`, `acceptTerms`, `signOut` + public operations → `TERMS_REQUIRED`.
+
+## Admin rules
+- Role → permissions is fixed in code (no per-user custom permissions in Phase 1).
+- Admins **cannot**: read resident emails, saved locations, follows lists, notifications, sessions,
+  or billing details; impersonate residents; hard-delete anything; edit `change_log`.
+  Admin views of corrections show the submitter's `displayName` only.
+- Only `SUPER_ADMIN` manages admin users; the last active `SUPER_ADMIN` cannot be demoted/deactivated (`LAST_SUPER_ADMIN`).
+- An admin cannot change their own role or deactivate themselves (`SELF_ROLE_CHANGE`).
+
+## System principal
+- Used by worker jobs and Stripe webhook processing. Has only `system:*` permissions listed in docs/02.
+  Never reachable from a GraphQL request.
+
+## Testing requirement
+For every operation add at least: one allowed case, one denied case per disallowed principal kind
+(anonymous / resident / each admin role that lacks the permission), and for resident-owned data one
+"other resident's id → NOT_FOUND" case.

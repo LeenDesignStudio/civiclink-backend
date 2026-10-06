@@ -1,0 +1,68 @@
+---
+description: Prisma 7 + PostgreSQL/PostGIS rules — schema changes, migrations, raw spatial SQL, transactions, performance. Use for anything in prisma/ or any *.repo.ts.
+globs: prisma/**/*, src/db/**/*.ts, src/**/*.repo.ts
+alwaysApply: false
+---
+
+# Prisma & Database Rules
+
+## Prisma 7 specifics (do not use Prisma 5/6 patterns)
+- Generator `provider = "prisma-client"` with `output = "../src/generated/prisma"`; import from
+  `src/generated/prisma/client` — NOT `@prisma/client`.
+- Connection URL lives in `prisma.config.ts` (`defineConfig({ datasource: { url: env('DATABASE_URL') } })`),
+  not in `schema.prisma`. Env is not auto-loaded: `import 'dotenv/config'` in `prisma.config.ts` only.
+- Runtime client always uses the driver adapter:
+  ```ts
+  import { PrismaPg } from '@prisma/adapter-pg';
+  import { PrismaClient } from '../generated/prisma/client.js';
+  const adapter = new PrismaPg({ connectionString: env.DATABASE_URL, max: env.DB_POOL_MAX });
+  export const prisma = new PrismaClient({ adapter, log: [{ emit: 'event', level: 'warn' }, { emit: 'event', level: 'error' }] });
+  ```
+- `$use` middleware no longer exists — use `$extends` if a client extension is needed.
+- Seeding is explicit: `pnpm db:seed` (`tsx prisma/seed.ts`). No auto-seed.
+
+## Migrations
+- Never edit an applied migration. Every schema change = `pnpm prisma migrate dev --create-only --name <change>`,
+  review the SQL, add any raw SQL (indexes/constraints) to that same migration, then apply.
+- The **first** migration must have `prisma/sql/00_extensions.sql` prepended and
+  `prisma/sql/10_post_init.sql` appended (see build step 3).
+- Production applies with `prisma migrate deploy` using the `civiclink_owner` role only. The app
+  runs as `civiclink_app` (DML only) — see `prisma/sql/20_db_roles.sql`.
+- Destructive changes (drop column/table, type narrowing) need an expand → migrate data → contract
+  sequence across releases. Call this out in the PR description.
+- CI runs `prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code`
+  to prove the schema and migrations agree.
+
+## Geometry (PostGIS)
+- Geometry columns are `Unsupported(...)` in Prisma. Read/write them **only** in `src/db/spatial.repo.ts`
+  with `$queryRaw` tagged templates. Always SRID 4326. Example:
+  ```ts
+  const rows = await db.$queryRaw<{ id: string; level: GovLevel }[]>`
+    SELECT j.id, j.level FROM jurisdictions j
+    WHERE j.status = 'ACTIVE' AND ST_Contains(j.boundary, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326))`;
+  ```
+- ZIP / city lookups intersect the area: `ST_Intersects(j.boundary, z.boundary)` and treat
+  `ST_Area(ST_Intersection(...))/ST_Area(z.boundary) < 0.01` as noise (ignore slivers).
+- "Near boundary" check for LIKELY confidence: `ST_DWithin(j.boundary::geography, point::geography, 50)`
+  against neighbouring polygons of the same type.
+- Boundaries are inserted by the pipeline with `ST_Multi(ST_MakeValid(ST_GeomFromGeoJSON(...)))`;
+  the DB rejects invalid geometry (CHECK constraint).
+
+## Querying
+- Select only needed fields (`select: {...}`) in hot paths (civicCard, lookups). No `include` chains deeper than 2.
+- No N+1: batch with `where: { id: { in: ids } }` or a single raw query. Use DataLoader only in GraphQL field resolvers that truly fan out.
+- Every list query is paginated with a stable order (`createdAt DESC, id DESC`) and cursor = base64url(`createdAt|id`).
+- Use transactions for multi-row invariants: `db.$transaction(async (tx) => {...}, { isolationLevel: 'Serializable' })`
+  for "one default location", "one current term", follow-limit checks; otherwise ReadCommitted.
+- Soft states: civic tables filter `status = 'ACTIVE'` by default in repos; admin repos may include RETIRED explicitly.
+- Never interpolate identifiers. `Prisma.sql` / `Prisma.join` for dynamic fragments; never `Prisma.raw` with user input.
+
+## Change log
+- `audit.service.ts` → `record(tx, { actorType, actorId, entityType, entityId, action, before, after, requestId })`.
+  Called inside the same transaction as the change. `before/after` contain only changed, non-secret fields.
+
+## Data retention jobs (worker)
+- `lookups` where `user_id IS NULL AND expires_at < now()` → delete daily.
+- `user_sessions` / `admin_sessions` expired > 7 days → delete daily.
+- `deletion_requests` past `purge_after` and not restored → purge user data (see docs/05 R-18).
+- `stripe_events` older than 90 days → delete.

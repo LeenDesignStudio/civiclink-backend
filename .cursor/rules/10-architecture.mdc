@@ -1,0 +1,93 @@
+---
+description: Layering, folder structure and module template for the CivicLink backend. Use when creating or changing any file under src/.
+globs: src/**/*.ts
+alwaysApply: false
+---
+
+# Architecture Rules
+
+Modular monolith with strict layers. Dependencies point **down only**:
+
+```
+transport  (src/http/*, src/graphql/**/*.graphql.ts, src/jobs/handlers/*)
+   ↓ calls
+service    (src/modules/<m>/<m>.service.ts)     ← business rules, authz, validation, transactions
+   ↓ calls
+repository (src/modules/<m>/<m>.repo.ts)        ← Prisma + typed raw SQL only, no business rules
+   ↓
+database   (Prisma client in src/db/prisma.ts)
+```
+
+Cross-cutting: `src/lib/*` (errors, logger, crypto, time, pagination), `src/authz/*`,
+`src/auth/*`, `src/config/*`. These never import from `src/modules/*`.
+
+## Hard rules
+- **Resolvers are thin**: parse args → call one service method → map DTO to GraphQL type. No Prisma,
+  no business logic, no permission logic beyond `authScopes` in resolvers.
+- **Services own**: input validation (Zod), authorization assertions, ownership checks,
+  transactions (`db.$transaction` / `withTx`), change-log writes, domain events, and calling
+  external clients (geocoder, Stripe, email, push).
+- **Repositories own**: all Prisma calls and raw SQL. They accept an optional `tx` client, return
+  plain typed objects, and translate DB errors with `mapDbError()`.
+- **Modules talk to each other through services**, never by importing another module's repo.
+- **External providers sit behind interfaces** in `src/modules/<m>/clients/*` (e.g. `Geocoder`,
+  `EmailSender`, `PushSender`, `BillingProvider`) so tests use fakes. Real implementations add
+  timeouts, retries and circuit breaking (see `30-errors-logging.mdc`).
+- **No module-level singletons with I/O** except `prisma`, `logger`, `boss`. Pass dependencies
+  through a small composition root (`src/app/container.ts`).
+- **Time and randomness are injectable** (`src/lib/clock.ts`, `src/lib/random.ts`) so tests are deterministic.
+
+## Folder layout
+```
+src/
+  app/container.ts            composition root (wires repos, services, clients)
+  config/env.ts               Zod-validated env (fail fast on boot)
+  lib/                        errors.ts, logger.ts, crypto.ts, clock.ts, random.ts, pagination.ts, slug.ts, retry.ts
+  db/prisma.ts                PrismaClient + PrismaPg adapter, withTx(), mapDbError()
+  db/spatial.repo.ts          typed raw SQL for geometry
+  auth/                       oauth/google.ts, oauth/apple.ts, tokens.ts, sessions.ts, cookies.ts, admin-auth.ts
+  authz/                      permissions.ts, roles.ts, authz.ts (require/can/requireOwner)
+  graphql/                    builder.ts, schema.ts, context.ts, errors.ts (mask), armor.ts, scalars.ts
+  http/                       server.ts, security.ts, routes/{health,auth,webhooks,unsubscribe}.ts
+  jobs/                       boss.ts, queues.ts, handlers/*.ts, schedules.ts
+  modules/
+    lookup/  civic/  residents/  locations/  follows/  corrections/
+    notifications/  alerts/  billing/  admin-users/  sources/  pipeline/
+    audit/  contact/  analytics/
+  generated/prisma/           Prisma client output (gitignored)
+  server.ts                   API entrypoint
+  worker.ts                   worker entrypoint
+test/
+  setup/                      testcontainers bootstrap, migrate, truncate helpers
+  factories/                  typed builders for every model
+  fakes/                      FakeGeocoder, FakeEmail, FakePush, FakeStripe
+```
+
+## Module template (copy for every module)
+```
+modules/<m>/
+  <m>.inputs.ts      Zod schemas + inferred input types (single source for validation)
+  <m>.service.ts     class <M>Service { constructor(deps) {} async op(ctx, input) {...} }
+  <m>.repo.ts        class <M>Repo { constructor(private db: Db) {} ... }
+  <m>.graphql.ts     Pothos types, inputs, queries, mutations for this module
+  <m>.dto.ts         output types returned by the service (never raw Prisma models)
+  <m>.service.test.ts  unit tests (fakes)
+  <m>.int.test.ts      integration tests through GraphQL (real DB)
+```
+
+## Request lifecycle (API)
+1. Fastify receives request → assigns `requestId` (or accepts a valid inbound `x-request-id`).
+2. Security headers, CORS allowlist, body size limit (100 KB GraphQL, raw body for Stripe).
+3. Auth: read `__Host-cl_at` (resident access JWT) or `__Host-cl_admin` (admin session) cookie →
+   build `Principal` (`anonymous` | `resident` | `admin` | `system`). Invalid/expired → anonymous
+   (the operation's authScopes then decide).
+4. Yoga: CSRF-prevention header check, graphql-armor limits, parse/validate.
+5. Rate limiter by operation class (see `20-security.mdc`).
+6. Resolver → service (validate → authorize → transact → audit → emit events) → repo.
+7. Errors are masked into catalog codes; response includes `extensions.requestId`.
+8. Access log line (no bodies, no PII) with requestId, operationName, principal type, duration, outcome code.
+
+## Worker lifecycle
+`src/worker.ts` starts pg-boss, registers handlers from `src/jobs/handlers`, registers cron schedules
+from `src/jobs/schedules.ts`. Every handler is idempotent, has a timeout and a retry policy, and
+runs with `Principal.system(jobName)`.

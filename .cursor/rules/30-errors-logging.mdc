@@ -1,0 +1,92 @@
+---
+description: Error model, error mapping, retries/timeouts for external calls, and structured logging. Use whenever writing code that can fail (that is, all code).
+globs: src/**/*.ts
+alwaysApply: false
+---
+
+# Error Handling & Logging Rules (catalog: docs/03-ERROR-CATALOG.md)
+
+## The error model
+All expected failures are `AppError` subclasses from `src/lib/errors.ts`:
+
+```ts
+export abstract class AppError extends Error {
+  abstract readonly code: ErrorCode;          // from the catalog, e.g. 'VALIDATION'
+  abstract readonly httpStatus: number;       // used by REST routes and logs
+  readonly expose: boolean = true;            // safe to show message to client?
+  readonly retryable: boolean = false;
+  constructor(message: string, readonly details?: Record<string, unknown>, options?: { cause?: unknown }) {
+    super(message, options);
+  }
+}
+// Subclasses: ValidationError(fieldErrors), UnauthenticatedError, ForbiddenError, NotFoundError,
+// ConflictError, RateLimitedError(retryAfterSeconds), LimitExceededError, PreconditionError,
+// UpstreamError (expose=false, retryable=true), InternalError (expose=false)
+// Domain errors extend these with a specific code, e.g.
+//   class LocationNotFoundError extends NotFoundError { code = 'LOCATION_NOT_FOUND' }
+```
+
+Rules:
+- **Throw catalog errors only.** Never `throw new Error('...')` in services/repos for expected cases.
+- **Never swallow errors.** `catch` only to (a) translate to an AppError with `{ cause }`, (b) add
+  context and rethrow, or (c) compensate (e.g. mark job failed). Empty catch blocks are forbidden.
+- **Resident-owned resources that are not the caller's → `NotFoundError`**, not Forbidden (no enumeration).
+- **Validation errors carry field paths**: `fieldErrors: [{ path: 'input.label', code: 'too_long', message }]`
+  built from Zod issues via `fromZod(error)`.
+- Messages are short, human, and free of PII and internals.
+
+## GraphQL error masking (src/graphql/errors.ts)
+Yoga `maskedErrors: { maskError }`:
+- `AppError` with `expose=true` → `GraphQLError(message, { extensions: { code, requestId, fieldErrors?, retryAfterSeconds? } })`.
+- `AppError` with `expose=false` → generic message for its code (`UPSTREAM_UNAVAILABLE`: "A service we depend on is unavailable. Try again shortly." / `INTERNAL`: "Something went wrong.") + requestId.
+- GraphQL validation/parse errors → `code: 'BAD_REQUEST'` (no suggestions in prod).
+- Anything else (bug) → `INTERNAL`, logged at `error` with stack and requestId.
+Clients only ever branch on `extensions.code`.
+
+## Database errors (src/db/prisma.ts → mapDbError)
+| Source | Condition | Map to |
+|---|---|---|
+| Prisma `P2002` / PG `23505` | unique violation | `ConflictError` (domain code if the constraint name is known, e.g. `saved_locations_home_work_once` → `LOCATION_LABEL_TAKEN`) |
+| Prisma `P2025` | record not found for update/delete | `NotFoundError` |
+| Prisma `P2003` / PG `23503` | FK violation | `ConflictError('RELATED_RECORD_MISSING')` |
+| PG `23514` | check violation | `ValidationError` with constraint name in `details` (not exposed) |
+| Prisma `P2034` / PG `40001`, `40P01` | serialization/deadlock | retry the transaction up to 3× (jittered), then `ConflictError('TRY_AGAIN')` |
+| Prisma `P1001`, `P1002`, `P1017`, connection errors | DB unreachable | `UpstreamError('DATABASE_UNAVAILABLE')` |
+| PG `57014` | statement timeout | `UpstreamError('TIMEOUT')` |
+Repos call `mapDbError` in a single `try/catch` wrapper helper (`dbCall(() => ...)`); services never inspect Prisma error codes.
+
+## External calls (geocoder, Stripe, email, push, Turnstile, source fetches)
+- Every call has an **explicit timeout** (`AbortSignal.timeout(ms)`): geocoder 4 s, Stripe 10 s,
+  email 8 s, push 8 s, Turnstile 4 s, source fetch 60 s.
+- Retries only on retryable failures (network, 429, 5xx), **max 2 retries**, exponential backoff
+  with full jitter, honour `Retry-After`. Never retry non-idempotent calls without an idempotency key
+  (Stripe: always pass `idempotencyKey`).
+- Circuit breaker (`src/lib/retry.ts`, simple half-open breaker) around the geocoder: open after 5
+  consecutive failures for 30 s → throw `UpstreamError('GEOCODER_UNAVAILABLE')` immediately.
+- Translate provider errors at the client boundary; never pass provider messages to clients.
+
+## Jobs (pg-boss)
+- Handlers are idempotent (dedupe keys / upserts). Configure `retryLimit`, `retryBackoff: true`,
+  `expireInSeconds`. Permanent failures (`AppError` non-retryable) mark the job failed without retry.
+- After final failure, write the outcome where admins can see it (e.g. `source_runs.error`,
+  `notification_deliveries.status=FAILED`).
+
+## Process-level safety
+- `process.on('unhandledRejection'|'uncaughtException')` → log `fatal` with stack, start graceful
+  shutdown, exit non-zero. Never keep running in an unknown state.
+- SIGTERM/SIGINT: stop accepting connections, wait for in-flight requests (≤ 20 s), stop pg-boss
+  (graceful), `prisma.$disconnect()`, flush logger, exit 0.
+- `/readyz` returns 503 during shutdown or when DB is unreachable; `/healthz` is liveness only.
+
+## Logging (pino)
+- JSON logs, one line per event, fields: `time, level, msg, requestId, operation, principalType,
+  principalId (internal uuid only), durationMs, code`.
+- Levels: `debug` (dev only), `info` (request completed, job completed, state changes),
+  `warn` (expected-but-notable: auth failures, rate limits, webhook signature failures, upstream retries),
+  `error` (unexpected errors, final job failures), `fatal` (process crash).
+- **Redaction list (configure in logger.ts):** `req.headers.authorization`, `req.headers.cookie`,
+  `res.headers["set-cookie"]`, `*.password`, `*.token`, `*.refreshToken`, `*.idToken`, `*.code`,
+  `*.email`, `*.address`, `*.input.query`, `*.stripeSignature`. Never log request/response bodies.
+- Expected client errors (`VALIDATION`, `NOT_FOUND`, `UNAUTHENTICATED`, `FORBIDDEN`) are logged at
+  `info`/`warn` without stack. Only unexpected errors get stacks.
+- Error tracking: Sentry (`@sentry/node`) for `error`/`fatal` with PII scrubbing (`sendDefaultPii: false`).

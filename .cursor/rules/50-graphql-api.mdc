@@ -1,0 +1,63 @@
+---
+description: GraphQL schema conventions with Pothos + GraphQL Yoga — naming, inputs, pagination, nullability, auth scopes. Use for any *.graphql.ts or src/graphql/** file.
+globs: src/graphql/**/*.ts, src/**/*.graphql.ts
+alwaysApply: false
+---
+
+# GraphQL API Rules (operation list: docs/05-API-OPERATIONS.md)
+
+## Stack
+- `graphql-yoga` mounted in Fastify at `POST /graphql` (GET disabled except in dev for GraphiQL).
+- `@pothos/core` code-first schema + `@pothos/plugin-scope-auth` (+ `plugin-validation`/zod is NOT
+  used for business validation — services validate with Zod). No Pothos Prisma plugin: resolvers
+  return service DTOs.
+- Schema SDL is exported to `schema.graphql` by `pnpm schema:print` and committed; CI fails if it is stale.
+
+## Naming
+- Types `PascalCase`, fields `camelCase`, enums `SCREAMING_SNAKE` (mirror Prisma enums).
+- Queries are nouns (`civicCard`, `office`, `myCorrections`); mutations are verb-first
+  (`saveLocation`, `submitCorrection`, `sendAlert`). Admin operations are prefixed `admin` for
+  queries (`adminOffices`) and use verbs for mutations (`upsertOffice`, `retireOffice`).
+- One input object per mutation: `mutation saveLocation(input: SaveLocationInput!)`.
+- Mutations return a payload type with the changed entity (`SaveLocationPayload { savedLocation }`),
+  never a bare boolean (except idempotent fire-and-forget like `markNotificationsRead` → `{ updatedCount }`).
+
+## Auth scopes (default deny)
+- Builder `authScopes` available: `public`, `resident`, `residentActive` (resident + terms accepted +
+  ACTIVE status), and `permission: Permission` (from `src/authz/permissions.ts`).
+- **Every Query/Mutation field must declare `authScopes`.** `test/schema-guard.test.ts` walks the
+  schema and fails if any root field lacks it. Public fields declare `{ public: true }` explicitly.
+- Object types that expose admin-only fields use field-level `authScopes` (e.g. `Correction.internalNotes`).
+- Scope failures return `FORBIDDEN` (admin) or `UNAUTHENTICATED` (no principal); configure
+  `unauthorizedError` in the builder to throw the catalog errors.
+
+## Types & nullability
+- IDs are `ID!` (UUID strings). Dates `DateTime` scalar (ISO-8601 UTC). URLs `URL` scalar (validated).
+- Non-null by default for fields that always exist; nullable only when the data can be missing
+  (e.g. `party`, `photoUrl`, `currentHolder`).
+- Never expose: internal ids of other residents, emails of residents to admins, session data,
+  Stripe ids, raw geometry, `source_record_url` to public (admin only), `ip_hash`.
+- Civic types expose provenance: `source { name url }`, `lastUpdatedAt`, `freshness: CURRENT | MAY_BE_OUTDATED`.
+
+## Pagination
+- Relay-style connections for every list: `first: Int (≤100, default 20)`, `after: String`,
+  returns `{ edges { node cursor } pageInfo { hasNextPage endCursor } totalCount? }`. `totalCount`
+  only on admin lists.
+- Admin list filters are a single `filter:` input object; sort is an enum (`sort: OFFICE_SORT`).
+
+## Resolvers
+- Signature pattern:
+  ```ts
+  builder.mutationField('saveLocation', (t) => t.field({
+    type: SaveLocationPayload,
+    authScopes: { residentActive: true },
+    args: { input: t.arg({ type: SaveLocationInput, required: true }) },
+    resolve: (_root, { input }, ctx) => ctx.services.locations.save(ctx, input),
+  }));
+  ```
+- No try/catch in resolvers — errors propagate to masking. No Prisma imports in `*.graphql.ts` (lint rule).
+- Field resolvers that fan out use DataLoaders created per request in `context.ts`.
+
+## Context (src/graphql/context.ts)
+`{ requestId, principal, authz, services, loaders, ipHash, userAgent, reply }` — `reply` only for
+setting cookies in auth-related mutations. Context is created per request; nothing request-scoped is global.
