@@ -20,6 +20,7 @@ import { logger as rootLogger, withRequest } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
 import { REQUEST_ID, ulid } from '../lib/ulid.js';
 import { armorPlugin, depthLimitRule } from '../graphql/armor.js';
+import { introspectionSkipsCsrf, skipDepthForIntrospection } from '../graphql/introspection.js';
 import { createLoaders } from '../graphql/loaders.js';
 import { maskError, requestAls } from '../graphql/errors.js';
 import { schema } from '../graphql/schema.js';
@@ -211,8 +212,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   };
 
   const introspectionPlugin: Plugin<GraphQLContext> = {
-    onValidate({ addValidationRule }) {
-      addValidationRule(depthLimitRule());
+    onValidate({ addValidationRule, params }) {
+      if (!skipDepthForIntrospection(env.APP_ENV, params.documentAST)) {
+        addValidationRule(depthLimitRule());
+      }
       if (!env.GRAPHQL_INTROSPECTION) addValidationRule(NoSchemaIntrospectionCustomRule);
     },
   };
@@ -271,7 +274,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     method: ['GET', 'POST', 'OPTIONS'],
     handler: async (request, reply) => {
       const csrf = request.headers['x-civiclink-csrf'];
-      if (request.method !== 'OPTIONS' && (typeof csrf !== 'string' || csrf.length === 0)) {
+      const hasCsrf = typeof csrf === 'string' && csrf.length > 0;
+      const introspectionOnly =
+        !hasCsrf &&
+        introspectionSkipsCsrf({
+          appEnv: env.APP_ENV,
+          method: request.method,
+          url: request.url,
+          body: request.body,
+        });
+      if (request.method !== 'OPTIONS' && !hasCsrf && !introspectionOnly) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
         });
