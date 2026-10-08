@@ -78,6 +78,23 @@ export default tseslint.config(
     },
   },
   {
+    files: ['**/*.cjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        module: 'writable',
+        exports: 'writable',
+        require: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        Buffer: 'readonly',
+      },
+    },
+  },
+  {
     files: ['src/**/*.graphql.ts'],
     rules: {
       'no-restricted-imports': [
