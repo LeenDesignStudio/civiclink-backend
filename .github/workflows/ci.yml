@@ -21,6 +21,8 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 12
@@ -36,8 +38,7 @@ jobs:
           MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test:unit
-      - name: Prepare test database
+      - name: Prepare shadow database for migrate diff
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
           psql "postgresql://postgres:postgres@localhost:5432/postgres" -v ON_ERROR_STOP=1 <<'SQL'
@@ -53,16 +54,23 @@ jobs:
           GRANT USAGE ON SCHEMA extensions TO civiclink_app;
           GRANT USAGE ON SCHEMA public TO civiclink_app;
           SQL
-      - run: pnpm test:int
-        env:
-          TEST_DATABASE_URL: postgresql://civiclink_app:app@localhost:5432/civiclink_test
-          TEST_MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
+      - name: Unit and integration tests, 80% line coverage on src/modules
+        run: pnpm exec vitest run --coverage
       - run: pnpm exec prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code --shadow-database-url "$SHADOW"
         env:
           MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
           SHADOW: postgresql://postgres:postgres@localhost:5432/postgres
       - run: pnpm schema:print && git diff --exit-code schema.graphql
       - run: pnpm audit --prod
+      - name: osv-scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v2.3.2
+        with:
+          scan-args: |-
+            --lockfile=pnpm-lock.yaml
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz | tar -xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" detect --source . --redact --exit-code 1
       - name: Docker build
         run: docker build -t civiclink-api .
 

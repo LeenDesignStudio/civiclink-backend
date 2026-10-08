@@ -53,6 +53,12 @@ const testEnv: Record<string, string> = {
 export default defineConfig({
   test: {
     env: testEnv,
+    coverage: {
+      provider: 'v8',
+      include: ['src/modules/**/*.ts'],
+      exclude: ['**/*.test.ts', '**/*.int.test.ts'],
+      thresholds: { lines: 80 },
+    },
     projects: [
       {
         extends: true,

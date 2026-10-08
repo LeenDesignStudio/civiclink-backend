@@ -13,7 +13,6 @@ const REDACT_PATHS = [
   '*.refreshToken',
   'idToken',
   '*.idToken',
-  'code',
   '*.code',
   'email',
   '*.email',

@@ -2,15 +2,16 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '../generated/prisma/client.js';
 import { env } from '../config/env.js';
 import {
+  CODE_META,
   ConflictError,
   DatabaseUnavailableError,
+  ForbiddenError,
   InternalError,
   NotFoundError,
   RelatedRecordMissingError,
   TimeoutError,
   TryAgainError,
   ValidationError,
-  CODE_META,
   errorForConstraint,
   isAppError,
   type AppError,
@@ -83,6 +84,7 @@ export function mapDbError(err: unknown): AppError {
   if (info.prismaCode === 'P2002' || info.pgCode === '23505') return new ConflictError();
   if (info.prismaCode === 'P2025') return new NotFoundError();
   if (info.prismaCode === 'P2003' || info.pgCode === '23503') return new RelatedRecordMissingError({ cause: err });
+  if (info.pgCode === '42501') return new ForbiddenError();
   if (info.pgCode === '23514') {
     const details = info.constraint ? { constraint: info.constraint } : undefined;
     return new ValidationError('That value is not allowed.', [], {

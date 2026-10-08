@@ -95,6 +95,7 @@ REST routes return `{ "error": { "code", "message", "requestId" } }` with the HT
 - Zod failure → `VALIDATION` via `fromZod()`; each issue → `{ path, code, message }`.
 - Known DB constraint names → their domain code (table above); unknown unique → `CONFLICT`;
   check violation → `VALIDATION` (constraint name logged, not exposed).
+  PG `42501` (change_log append-only trigger, or revoked UPDATE/DELETE) → `FORBIDDEN`.
 - Provider failures → domain upstream code (`GEOCODER_UNAVAILABLE`, `BILLING_UNAVAILABLE`) or
   `UPSTREAM_UNAVAILABLE`; provider messages never reach clients.
 - Pothos scope failure → `UNAUTHENTICATED` if no principal, `TERMS_REQUIRED` / `ACCOUNT_PENDING_DELETION`

@@ -8,7 +8,7 @@ import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { useCSRFPrevention } from '@graphql-yoga/plugin-csrf-prevention';
 import { createYoga } from 'graphql-yoga';
-import { GraphQLError, Kind, NoSchemaIntrospectionCustomRule, getOperationAST, type DocumentNode } from 'graphql';
+import { Kind, NoSchemaIntrospectionCustomRule, getOperationAST, type DocumentNode } from 'graphql';
 import type { Plugin } from 'graphql-yoga';
 import type { GraphQLContext } from '../graphql/context.js';
 import { env } from '../config/env.js';
@@ -16,7 +16,7 @@ import { Authz } from '../authz/authz.js';
 import { anonymousPrincipal, type Principal } from '../authz/authz.js';
 import { hashIp } from '../lib/crypto.js';
 import { CODE_META, isAppError } from '../lib/errors.js';
-import { logger as rootLogger, withRequest } from '../lib/logger.js';
+import { logger as rootLogger } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
 import { REQUEST_ID, ulid } from '../lib/ulid.js';
 import { depthLimitRule, limitsPlugin } from '../graphql/limits.js';
@@ -247,6 +247,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       if (!isDocumentNode(document)) return;
       const operation = getOperationAST(document, typeof operationName === 'string' ? operationName : undefined);
       const selection = operation?.selectionSet.selections.find((node) => node.kind === Kind.FIELD);
+      const store = requestAls.getStore();
+      if (store && selection) store.operation = selection.name.value;
       if (!selection) return;
       const rate = OPERATION_RATES[selection.name.value];
       if (!rate) return;
@@ -276,6 +278,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     landingPage: env.APP_ENV === 'development',
     graphiql: env.APP_ENV === 'development',
     batching: false,
+    logging: {
+      debug() {},
+      info() {},
+      warn() {},
+      // Yoga prints every replaced error with console.error. maskError already records it.
+      error() {},
+    },
     maskedErrors: {
       maskError: (error) => maskError(error),
     },
@@ -385,10 +394,4 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   return app;
-}
-
-export function logGraphQLFailure(error: unknown, requestId: string): void {
-  if (error instanceof GraphQLError) {
-    withRequest(rootLogger, requestId).info({ code: error.extensions.code }, 'graphql error');
-  }
 }
