@@ -147,7 +147,14 @@ function operations(): Operation[] {
       name: 'upsertJurisdiction',
       permission: 'admin.civic:write',
       query: 'mutation($input: UpsertJurisdictionInput!) { upsertJurisdiction(input: $input) { id name sourceRecordUrl } }',
-      success: (fx) => ({ input: { ...jurisdiction, sourceId: fx.sourceId, sourceRecordUrl: 'https://example.com/new-jurisdiction' } }),
+      success: (fx) => ({
+        input: {
+          ...jurisdiction,
+          parentId: fx.jurisdictionId,
+          sourceId: fx.sourceId,
+          sourceRecordUrl: 'https://example.com/new-jurisdiction',
+        },
+      }),
       invalid: (fx) => ({ input: { ...jurisdiction, name: 'x', sourceId: fx.sourceId } }),
     },
     {
@@ -304,7 +311,15 @@ function operations(): Operation[] {
       name: 'upsertService',
       permission: 'admin.civic:write',
       query: 'mutation($input: UpsertServiceInput!) { upsertService(input: $input) { id title } }',
-      success: (fx) => ({ input: { ...service, categoryId: fx.categoryId, sourceId: fx.sourceId } }),
+      success: (fx) => ({
+        input: {
+          ...service,
+          categoryId: fx.categoryId,
+          sourceId: fx.sourceId,
+          url: 'https://example.com/permits',
+          jurisdictionIds: [fx.jurisdictionId],
+        },
+      }),
       invalid: (fx) => ({ input: { ...service, title: 'x', categoryId: fx.categoryId, sourceId: fx.sourceId } }),
     },
     {
