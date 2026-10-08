@@ -27,6 +27,19 @@ import { schema } from '../graphql/schema.js';
 import type { AppServices } from '../app/services.js';
 import { registerHealthRoutes, type Readiness } from './routes/health.js';
 
+/** GraphiQL loads an inline script, Monaco workers, and assets from unpkg. API responses keep the strict Helmet policy. */
+const GRAPHIQL_CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' https://unpkg.com blob:",
+  "style-src 'unsafe-inline' https://unpkg.com",
+  "img-src https://raw.githubusercontent.com data:",
+  "font-src https://unpkg.com data:",
+  "connect-src 'self' https://unpkg.com",
+  "worker-src blob:",
+].join('; ');
+
 declare module 'fastify' {
   interface FastifyRequest {
     rawBody?: Buffer;
@@ -325,7 +338,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       response.headers.forEach((value, key) => {
         void reply.header(key, value);
       });
-      return reply.send(await response.text());
+      let body = await response.text();
+      const contentType = response.headers.get('content-type') ?? '';
+      if (env.APP_ENV === 'development' && contentType.includes('text/html')) {
+        body = body.replaceAll('__TITLE__', 'CivicLink GraphQL');
+        void reply.header('content-security-policy', GRAPHIQL_CONTENT_SECURITY_POLICY);
+        reply.raw.setHeader('content-security-policy', GRAPHIQL_CONTENT_SECURITY_POLICY);
+      }
+      return reply.send(body);
     },
   });
 
