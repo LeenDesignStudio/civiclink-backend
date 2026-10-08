@@ -55,6 +55,17 @@ describe('maskError', () => {
     expect(masked.message).not.toContain('sql exploded');
   });
 
+  it('rewrites a GraphQL validation error to BAD_REQUEST', () => {
+    const masked = requestAls.run({ requestId: 'req-validate' }, () =>
+      maskError(new GraphQLError('Cannot query field "nope" on type "Query". Did you mean "health"?', {
+        extensions: { code: 'GRAPHQL_VALIDATION_FAILED' },
+      })),
+    );
+    expect(masked.extensions.code).toBe('BAD_REQUEST');
+    expect(masked.message).not.toContain('Did you mean');
+    expect(JSON.stringify(masked)).not.toContain('stack');
+  });
+
   it('logs a syntax error as BAD_REQUEST without a stack', () => {
     const { lines, log } = capture();
     requestAls.run({ requestId: 'req-syntax', operation: 'unknown', log }, () => {

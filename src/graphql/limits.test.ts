@@ -116,6 +116,10 @@ describe('graphql limits', () => {
     expect(serialized).not.toContain('GraphQLError');
   }
 
+  it('reports an invalid document as BAD_REQUEST', async () => {
+    expectRejected(await execute('query { health(nope: true) }'));
+  });
+
   it('allows depth 8 and rejects depth 9', async () => {
     const ok = await execute(nestedProbe(8));
     expectAllowed(ok);

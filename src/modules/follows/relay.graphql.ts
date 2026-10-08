@@ -7,6 +7,8 @@ export const GovLevelEnum = builder.enumType('GovLevel', {
 });
 
 export function withoutNulls(input: unknown): unknown {
+  // A Date has no enumerable fields. Walking it would replace the timestamp with {}.
+  if (input instanceof Date) return input;
   if (Array.isArray(input)) return input.map((item) => withoutNulls(item));
   if (input && typeof input === 'object') {
     const out: Record<string, unknown> = {};

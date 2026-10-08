@@ -46,15 +46,40 @@ export interface DbErrorInfo {
   constraint?: string;
 }
 
+function quotedConstraint(message: unknown): string | undefined {
+  if (typeof message !== 'string') return undefined;
+  return /constraint "([^"]+)"/.exec(message)?.[1];
+}
+
+/** Prisma's pg adapter reports a unique index as `{ index: name }`, not a string. */
+function constraintFrom(value: unknown, depth = 0): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (!value || typeof value !== 'object' || depth > 4) return undefined;
+  const record = value as {
+    index?: unknown;
+    constraint?: unknown;
+    cause?: unknown;
+    originalMessage?: unknown;
+    message?: unknown;
+  };
+  if (typeof record.index === 'string' && record.index.length > 0) return record.index;
+  const named = quotedConstraint(record.originalMessage) ?? quotedConstraint(record.message);
+  if (named) return named;
+  const nested = constraintFrom(record.constraint, depth + 1);
+  if (nested) return nested;
+  return constraintFrom(record.cause, depth + 1);
+}
+
 export function readDbError(err: unknown): DbErrorInfo {
   if (!err || typeof err !== 'object') return {};
   const record = err as {
     code?: unknown;
     constraint?: unknown;
+    message?: unknown;
     meta?: {
       constraint?: unknown;
       code?: unknown;
-      driverAdapterError?: { cause?: { code?: unknown; constraint?: unknown; originalCode?: unknown } };
+      driverAdapterError?: { cause?: { code?: unknown; originalCode?: unknown } };
     };
   };
   const cause = record.meta?.driverAdapterError?.cause;
@@ -65,10 +90,10 @@ export function readDbError(err: unknown): DbErrorInfo {
     (typeof record.code === 'string' && /^\d{5}$/.test(record.code) ? record.code : undefined) ||
     (typeof record.meta?.code === 'string' && /^\d{5}$/.test(record.meta.code) ? record.meta.code : undefined);
   const constraint =
-    (typeof record.meta?.constraint === 'string' && record.meta.constraint) ||
-    (typeof cause?.constraint === 'string' && cause.constraint) ||
-    (typeof record.constraint === 'string' && record.constraint) ||
-    undefined;
+    constraintFrom(record.meta?.constraint) ??
+    constraintFrom(cause) ??
+    constraintFrom(record.constraint) ??
+    quotedConstraint(record.message);
   return {
     ...(prismaCode ? { prismaCode } : {}),
     ...(rawPg ? { pgCode: rawPg } : {}),

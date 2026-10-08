@@ -8,7 +8,7 @@ import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { useCSRFPrevention } from '@graphql-yoga/plugin-csrf-prevention';
 import { createYoga } from 'graphql-yoga';
-import { Kind, NoSchemaIntrospectionCustomRule, getOperationAST, type DocumentNode } from 'graphql';
+import { GraphQLError, Kind, NoSchemaIntrospectionCustomRule, getOperationAST, type DocumentNode } from 'graphql';
 import type { Plugin } from 'graphql-yoga';
 import type { GraphQLContext } from '../graphql/context.js';
 import { env } from '../config/env.js';
@@ -272,6 +272,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   };
 
+  // Yoga masks execute errors only. Validation errors are reported first, and the
+  // GRAPHQL_VALIDATION_FAILED code is attached after user plugins run.
+  const maskValidationPlugin: Plugin<GraphQLContext> = {
+    onValidate() {
+      return ({ valid, result, setResult }) => {
+        if (valid) return;
+        setResult(
+          result.map((error: unknown) => {
+            const message = error instanceof Error ? error.message : 'Invalid document';
+            return maskError(new GraphQLError(message, { extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }));
+          }),
+        );
+      };
+    },
+  };
+
   const yoga = createYoga<{ reply: FastifyReply }, GraphQLContext>({
     schema,
     graphqlEndpoint: '/graphql',
@@ -292,6 +308,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       useCSRFPrevention({ requestHeaders: ['x-civiclink-csrf'] }),
       limitsPlugin(),
       introspectionPlugin,
+      maskValidationPlugin,
       ratePlugin,
     ],
     context: async ({ request, reply }) => {
