@@ -158,7 +158,7 @@ export class AlertsService {
     const existing = await this.deps.repo.find(parsed.id);
     if (!existing) throw new NotFoundError();
     if (existing.status !== 'DRAFT') throw new AlertAlreadySentError();
-    const outcome = await this.withTx(async (tx) => {
+    await this.withTx(async (tx) => {
       const result = await this.deps.repo.deleteDraft(parsed.id);
       if (result === 'missing') throw new NotFoundError();
       if (result === 'sent') throw new AlertAlreadySentError();
@@ -172,9 +172,7 @@ export class AlertsService {
         after: null,
         requestId: ctx.requestId,
       });
-      return result;
     });
-    if (outcome !== 'deleted') throw new AlertAlreadySentError();
     return { id: parsed.id };
   }
 
@@ -254,7 +252,7 @@ export class AlertsService {
     });
     await this.deps.enqueue.enqueue(this.deps.fanoutQueue ?? 'notify.fanout', {
       alertId: alert.id,
-      recipientCount: alert.recipientCount ?? 0,
+      recipientCount: alert.recipientCount,
       type: 'ALERT',
       title: alert.title,
       body: alert.body,

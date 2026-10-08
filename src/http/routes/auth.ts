@@ -44,7 +44,7 @@ export interface AuthRouteDeps {
   clock?: Clock;
 }
 
-export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): Promise<void> {
+export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): void {
   const clock = deps.clock ?? systemClock;
 
   app.get<{ Params: { provider: string }; Querystring: { intent?: string; returnTo?: string } }>(
@@ -54,7 +54,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDe
       try {
         const provider = request.params.provider;
         if (provider !== 'google' && provider !== 'apple') {
-          return sendAuthError(reply, new ValidationError('Unknown provider.'), request.id);
+          return await sendAuthError(reply, new ValidationError('Unknown provider.'), request.id);
         }
         const intent = parseIntent(request.query.intent);
         const returnTo = assertReturnTo(request.query.returnTo);
@@ -73,7 +73,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDe
           },
           clock.now(),
         );
-        return reply.redirect(start.url.toString(), 302);
+        return await reply.redirect(start.url.toString(), 302);
       } catch (err) {
         return sendAuthError(reply, err, request.id);
       }
@@ -118,7 +118,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDe
       const refreshToken = request.cookies[COOKIE_REFRESH];
       if (!refreshToken) {
         clearResidentAuthCookies(reply);
-        return sendAuthError(reply, new SessionExpiredError(), request.id);
+        return await sendAuthError(reply, new SessionExpiredError(), request.id);
       }
       const next = await deps.sessions.rotate(refreshToken);
       const access = await signAccessToken({
@@ -129,7 +129,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDe
       });
       setAccessCookie(reply, access);
       setRefreshCookie(reply, next.refreshToken);
-      return reply.status(204).send();
+      return await reply.status(204).send();
     } catch (err) {
       clearResidentAuthCookies(reply);
       return sendAuthError(reply, err, request.id);

@@ -52,6 +52,7 @@ const envSchema = z
     AWS_REGION: z.string().min(1),
     S3_BUCKET_EXPORTS: z.string().min(1),
     S3_BUCKET_SNAPSHOTS: z.string().min(1),
+    S3_EXPORTS_KMS_KEY_ID: optionalText,
     LIMIT_DEFAULT_MAX_SAVED_LOCATIONS: z.coerce.number().int().positive().default(5),
     LIMIT_DEFAULT_MAX_FOLLOWS: z.coerce.number().int().positive().default(50),
     ACCOUNT_PURGE_DAYS: z.coerce.number().int().positive().default(30),
@@ -63,7 +64,7 @@ const envSchema = z
       .transform((value) => value === 'true'),
   })
   .superRefine((value, ctx) => {
-    let cookieOk = false;
+    let cookieOk: boolean;
     try {
       cookieOk = Buffer.from(value.COOKIE_ENC_KEY, 'base64').length === 32;
     } catch {

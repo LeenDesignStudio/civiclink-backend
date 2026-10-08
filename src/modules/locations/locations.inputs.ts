@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasAsciiControls } from '../../lib/text.js';
 
 const plain = (min: number, max: number) =>
   z
@@ -6,7 +7,7 @@ const plain = (min: number, max: number) =>
     .trim()
     .min(min)
     .max(max)
-    .refine((value) => !/[\u0000-\u001F\u007F]/.test(value), 'Contains unsupported characters');
+    .refine((value) => !hasAsciiControls(value), 'Contains unsupported characters');
 
 export const saveLocationSchema = z
   .object({

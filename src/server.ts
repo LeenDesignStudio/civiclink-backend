@@ -46,14 +46,14 @@ export async function start(): Promise<void> {
       clientSecret: env.ADMIN_GOOGLE_CLIENT_SECRET,
     }),
   ]);
-  await registerAuthRoutes(app, {
+  registerAuthRoutes(app, {
     google: new GoogleOAuth(residentGoogle),
     apple: new AppleOAuth(appleClient),
     residents: container.services.residents,
     sessions: container.sessions,
     webUrl: env.PUBLIC_WEB_URL,
   });
-  await registerAdminAuthRoutes(app, {
+  registerAdminAuthRoutes(app, {
     google: new GoogleOAuth(adminGoogle, {
       audience: env.ADMIN_GOOGLE_CLIENT_ID,
       hostedDomain: env.ADMIN_GOOGLE_HD,
@@ -61,7 +61,7 @@ export async function start(): Promise<void> {
     adminAuth: container.adminAuth,
     webUrl: env.PUBLIC_WEB_URL,
   });
-  await registerUnsubscribeRoutes(app, {
+  registerUnsubscribeRoutes(app, {
     notifications: container.services.notifications,
     webUrl: env.PUBLIC_WEB_URL,
   });

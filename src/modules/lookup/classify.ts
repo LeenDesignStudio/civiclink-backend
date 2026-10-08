@@ -1,9 +1,9 @@
 import { ValidationError } from '../../lib/errors.js';
+import { hasAsciiControls } from '../../lib/text.js';
 
 export const LOOKUP_METHODS = ['ADDRESS', 'ZIP', 'CITY_STATE', 'DEVICE'] as const;
 export type ClassifiedMethod = (typeof LOOKUP_METHODS)[number];
 
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 const ZIP_PATTERN = /^\d{5}(-\d{4})?$/;
 const CITY_STATE_PATTERN = /^(.+),\s*([A-Za-z]{2})$/;
 
@@ -14,7 +14,7 @@ export interface ClassifyInput {
 }
 
 export function classifyLocation(input: ClassifyInput): ClassifiedMethod {
-  if (typeof input.query === 'string' && CONTROL_CHARS.test(input.query)) {
+  if (typeof input.query === 'string' && hasAsciiControls(input.query)) {
     throw new ValidationError('Search text cannot include control characters.', [
       {
         path: 'input.query',

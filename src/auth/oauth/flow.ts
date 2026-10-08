@@ -46,7 +46,7 @@ export class OAuthCodeFlow {
     this.random = options.random ?? systemRandom;
   }
 
-  async begin(redirectUri: string): Promise<OAuthStart> {
+  begin(redirectUri: string): Promise<OAuthStart> {
     const state = this.random.token(16);
     const nonce = this.random.token(16);
     const codeVerifier = this.random.token(48);
@@ -59,7 +59,7 @@ export class OAuthCodeFlow {
       ...(this.options.responseMode ? { responseMode: this.options.responseMode } : {}),
       ...(this.options.hostedDomain ? { hostedDomain: this.options.hostedDomain } : {}),
     });
-    return { url, state, nonce, codeVerifier };
+    return Promise.resolve({ url, state, nonce, codeVerifier });
   }
 
   async complete(input: OAuthCompleteInput): Promise<VerifiedIdentity> {

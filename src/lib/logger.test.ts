@@ -7,7 +7,9 @@ describe('logger redaction', () => {
     const lines: string[] = [];
     const stream = new Writable({
       write(chunk, _enc, cb) {
-        lines.push(chunk.toString());
+        if (typeof chunk === 'string') lines.push(chunk);
+        else if (Buffer.isBuffer(chunk)) lines.push(chunk.toString());
+        else lines.push('');
         cb();
       },
     });

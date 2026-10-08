@@ -17,7 +17,7 @@ async function app(options?: { shuttingDown?: boolean; db?: boolean }) {
     rateGate: new MemoryRateGate(),
     readiness: {
       isShuttingDown: () => options?.shuttingDown ?? false,
-      pingDb: async () => options?.db ?? true,
+      pingDb: () => Promise.resolve(options?.db ?? true),
     },
   });
 }
@@ -45,7 +45,7 @@ describe('http server', () => {
     const server = await buildServer({
       services: services(),
       rateGate: new MemoryRateGate(),
-      readiness: { isShuttingDown: () => false, pingDb: async () => true },
+      readiness: { isShuttingDown: () => false, pingDb: () => Promise.resolve(true) },
       devExports,
     });
     const response = await server.inject({ method: 'GET', url: '/dev/exports/offices-1.csv' });

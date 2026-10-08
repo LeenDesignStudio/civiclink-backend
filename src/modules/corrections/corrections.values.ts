@@ -1,6 +1,7 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { z } from 'zod';
 import { ValidationError } from '../../lib/errors.js';
+import { hasAsciiControls } from '../../lib/text.js';
 import type { CivicEntityType, CorrectionField } from './corrections.dto.js';
 
 const ALL_FIELDS = [
@@ -86,7 +87,7 @@ function bounded(value: string, max: number, path: string): string {
   if (trimmed.length < 1 || trimmed.length > max) {
     throw invalid(path, `Use between 1 and ${max} characters.`);
   }
-  if (/[\u0000-\u001F\u007F]/.test(trimmed)) throw invalid(path, 'Contains unsupported characters.');
+  if (hasAsciiControls(trimmed)) throw invalid(path, 'Contains unsupported characters.');
   return trimmed;
 }
 

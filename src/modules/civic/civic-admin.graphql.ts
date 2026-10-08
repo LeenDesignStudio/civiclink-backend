@@ -172,7 +172,7 @@ builder.queryField('adminJurisdiction', (t) =>
     type: JurisdictionAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: async (_root, args, ctx) => civic(ctx).adminJurisdiction(ctx, String(args.id)),
+    resolve: async (_root, args, ctx) => civic(ctx).adminJurisdiction(ctx, args.id),
   }),
 );
 rememberScope('Query', 'adminJurisdiction', readScope);
@@ -437,7 +437,7 @@ builder.queryField('adminOffice', (t) =>
     type: OfficeAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: (_root, args, ctx) => civic(ctx).adminOffice(ctx, String(args.id)),
+    resolve: (_root, args, ctx) => civic(ctx).adminOffice(ctx, args.id),
   }),
 );
 rememberScope('Query', 'adminOffice', readScope);
@@ -447,7 +447,7 @@ builder.queryField('adminOfficial', (t) =>
     type: OfficialAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: (_root, args, ctx) => civic(ctx).adminOfficial(ctx, String(args.id)),
+    resolve: (_root, args, ctx) => civic(ctx).adminOfficial(ctx, args.id),
   }),
 );
 rememberScope('Query', 'adminOfficial', readScope);
@@ -457,7 +457,7 @@ builder.queryField('adminService', (t) =>
     type: ServiceAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: (_root, args, ctx) => civic(ctx).adminService(ctx, String(args.id)),
+    resolve: (_root, args, ctx) => civic(ctx).adminService(ctx, args.id),
   }),
 );
 rememberScope('Query', 'adminService', readScope);

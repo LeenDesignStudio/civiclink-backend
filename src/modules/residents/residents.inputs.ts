@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { hasAsciiControls } from '../../lib/text.js';
 
-const noControls = (value: string) => !/[\u0000-\u001F\u007F]/.test(value);
+const noControls = (value: string) => !hasAsciiControls(value);
 
 export const displayNameSchema = z
   .string()

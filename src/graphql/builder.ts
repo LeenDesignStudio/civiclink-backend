@@ -1,6 +1,5 @@
 import SchemaBuilder from '@pothos/core';
-import ScopeAuthPlugin from '@pothos/plugin-scope-auth';
-import type { AuthFailure } from '@pothos/plugin-scope-auth';
+import ScopeAuthPlugin, { AuthScopeFailureType, type AuthFailure } from '@pothos/plugin-scope-auth';
 import {
   AccountDeletedError,
   AccountPendingDeletionError,
@@ -15,12 +14,12 @@ export const rootFieldScopes = new Map<string, string>();
 
 function failedPermissions(failure: AuthFailure): string[] {
   switch (failure.kind) {
-    case 'AuthScope':
+    case AuthScopeFailureType.AuthScope:
       return failure.scope === 'permission' && typeof failure.parameter === 'string'
         ? [failure.parameter]
         : [failure.scope];
-    case 'AllAuthScopes':
-    case 'AnyAuthScopes':
+    case AuthScopeFailureType.AllAuthScopes:
+    case AuthScopeFailureType.AnyAuthScopes:
       return failure.failures.flatMap(failedPermissions);
     default:
       return [];

@@ -37,9 +37,9 @@ class MemoryFollows implements FollowsRepo {
     return Promise.resolve(this.terms.has(`${officialId}:${officeId}`));
   }
 
-  async findByUserOffice(userId: string, officeId: string): Promise<FollowDto | null> {
+  findByUserOffice(userId: string, officeId: string): Promise<FollowDto | null> {
     const row = this.rows.find((item) => item.userId === userId && item.officeId === officeId);
-    return row ? this.decorate(row) : null;
+    return Promise.resolve(row ? this.decorate(row) : null);
   }
 
   async countOwned(userId: string): Promise<number> {
@@ -69,13 +69,13 @@ class MemoryFollows implements FollowsRepo {
     return this.decorate(saved);
   }
 
-  async deleteByUserOffice(userId: string, officeId: string): Promise<boolean> {
+  deleteByUserOffice(userId: string, officeId: string): Promise<boolean> {
     const before = this.rows.length;
     this.rows = this.rows.filter((row) => !(row.userId === userId && row.officeId === officeId));
-    return this.rows.length !== before;
+    return Promise.resolve(this.rows.length !== before);
   }
 
-  async listOwned(userId: string, page: FollowPage): Promise<FollowDto[]> {
+  listOwned(userId: string, page: FollowPage): Promise<FollowDto[]> {
     const owned = this.rows
       .filter((row) => row.userId === userId)
       .filter((row) => {
@@ -86,7 +86,7 @@ class MemoryFollows implements FollowsRepo {
         return row.id < page.after.id;
       })
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1));
-    return owned.slice(0, page.limit).map((row) => this.decorate(row));
+    return Promise.resolve(owned.slice(0, page.limit).map((row) => this.decorate(row)));
   }
 
   private decorate(row: FollowDto): FollowDto {

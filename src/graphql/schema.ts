@@ -26,4 +26,28 @@ builder.queryField('health', (t) =>
 );
 rememberScope('Query', 'health', publicScope);
 
+// Depth-limit tests need a recursive public field. schema:print also sets APP_ENV=test,
+// but it does not set VITEST, so this field stays out of schema.graphql.
+if (process.env.APP_ENV === 'test' && process.env.VITEST === 'true') {
+  const Probe = builder.objectRef<{ value: string }>('Probe');
+  Probe.implement({
+    fields: (t) => ({
+      value: t.exposeString('value'),
+      next: t.field({
+        type: Probe,
+        nullable: true,
+        resolve: () => ({ value: 'ok' }),
+      }),
+    }),
+  });
+  builder.queryField('probe', (t) =>
+    t.field({
+      type: Probe,
+      authScopes: publicScope,
+      resolve: () => ({ value: 'ok' }),
+    }),
+  );
+  rememberScope('Query', 'probe', publicScope);
+}
+
 export const schema = builder.toSchema();

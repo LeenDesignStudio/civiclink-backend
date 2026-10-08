@@ -1,5 +1,5 @@
 import { dbCall, type Db } from '../../db/prisma.js';
-import type { ContactTopic, StoredContactMessage } from './contact.dto.js';
+import type { StoredContactMessage } from './contact.dto.js';
 import type { ContactRepo as ContactStore, NewContactMessage } from './contact.ports.js';
 
 export class ContactRepo implements ContactStore {
@@ -31,7 +31,7 @@ export class ContactRepo implements ContactStore {
       id: created.id,
       name: created.name,
       email: created.email,
-      topic: created.topic as ContactTopic,
+      topic: created.topic,
       message: created.message,
       ipHash: created.ipHash,
       createdAt: created.createdAt,

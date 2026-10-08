@@ -196,7 +196,7 @@ function principal(
   const adminPrincipal = {
     kind: 'admin' as const,
     adminId: id,
-    role: role ?? 'EDITOR',
+    role,
     sessionId: 'sess-admin',
   };
   return { requestId: 'req-1', principal: adminPrincipal, authz: new Authz(adminPrincipal), ipHash: 'ip-hash' };

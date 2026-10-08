@@ -1,7 +1,8 @@
 import eslint from '@eslint/js';
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: [
       'dist/**',
@@ -24,32 +25,9 @@ export default tseslint.config(
     },
   },
   {
-    files: ['eslint.config.js'],
-    rules: {
-      '@typescript-eslint/no-deprecated': 'off',
-    },
-  },
-  {
     files: ['**/*.ts'],
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      '@typescript-eslint/require-await': 'off',
-      '@typescript-eslint/return-await': 'off',
-      '@typescript-eslint/no-unnecessary-condition': 'off',
-      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
-      '@typescript-eslint/no-unnecessary-type-conversion': 'off',
-      '@typescript-eslint/no-unnecessary-boolean-literal-compare': 'off',
-      '@typescript-eslint/no-non-null-assertion': 'off',
-      '@typescript-eslint/no-unsafe-enum-comparison': 'off',
-      '@typescript-eslint/no-unsafe-argument': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-deprecated': 'off',
-      '@typescript-eslint/prefer-promise-reject-errors': 'off',
-      '@typescript-eslint/no-base-to-string': 'off',
-      '@typescript-eslint/no-useless-constructor': 'off',
-      'no-control-regex': 'off',
-      'no-useless-assignment': 'off',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': [
         'error',

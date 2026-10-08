@@ -53,18 +53,18 @@ class MemoryLocations implements LocationsRepo {
   readonly rows: Row[] = [];
   private n = 0;
 
-  async listOwned(userId: string): Promise<SavedLocationDto[]> {
-    return this.rows.filter((row) => row.userId === userId).map(strip);
+  listOwned(userId: string): Promise<SavedLocationDto[]> {
+    return Promise.resolve(this.rows.filter((row) => row.userId === userId).map(strip));
   }
 
-  async findOwned(userId: string, id: string): Promise<SavedLocationDto | null> {
+  findOwned(userId: string, id: string): Promise<SavedLocationDto | null> {
     const row = this.rows.find((item) => item.userId === userId && item.id === id);
-    return row ? strip(row) : null;
+    return Promise.resolve(row ? strip(row) : null);
   }
 
-  async findLabel(userId: string, label: 'HOME' | 'WORK'): Promise<SavedLocationDto | null> {
+  findLabel(userId: string, label: 'HOME' | 'WORK'): Promise<SavedLocationDto | null> {
     const row = this.rows.find((item) => item.userId === userId && item.label === label);
-    return row ? strip(row) : null;
+    return Promise.resolve(row ? strip(row) : null);
   }
 
   async countOwned(userId: string): Promise<number> {
@@ -72,10 +72,11 @@ class MemoryLocations implements LocationsRepo {
     return this.rows.filter((row) => row.userId === userId).length;
   }
 
-  async clearDefault(userId: string): Promise<void> {
+  clearDefault(userId: string): Promise<void> {
     for (const row of this.rows) {
       if (row.userId === userId) row.isDefault = false;
     }
+    return Promise.resolve();
   }
 
   async insert(row: NewSavedLocation): Promise<SavedLocationDto> {
@@ -100,34 +101,34 @@ class MemoryLocations implements LocationsRepo {
     return strip(saved);
   }
 
-  async updateOwned(userId: string, id: string, patch: SavedLocationPatch): Promise<SavedLocationDto | null> {
+  updateOwned(userId: string, id: string, patch: SavedLocationPatch): Promise<SavedLocationDto | null> {
     const row = this.rows.find((item) => item.userId === userId && item.id === id);
-    if (!row) return null;
+    if (!row) return Promise.resolve(null);
     row.label = patch.label;
     row.customName = patch.customName;
-    return strip(row);
+    return Promise.resolve(strip(row));
   }
 
-  async markDefault(userId: string, id: string): Promise<SavedLocationDto | null> {
+  markDefault(userId: string, id: string): Promise<SavedLocationDto | null> {
     const row = this.rows.find((item) => item.userId === userId && item.id === id);
-    if (!row) return null;
+    if (!row) return Promise.resolve(null);
     row.isDefault = true;
-    return strip(row);
+    return Promise.resolve(strip(row));
   }
 
-  async deleteOwned(userId: string, id: string): Promise<boolean> {
+  deleteOwned(userId: string, id: string): Promise<boolean> {
     const index = this.rows.findIndex((item) => item.userId === userId && item.id === id);
-    if (index < 0) return false;
+    if (index < 0) return Promise.resolve(false);
     this.rows.splice(index, 1);
-    return true;
+    return Promise.resolve(true);
   }
 
-  async promoteNewest(userId: string): Promise<SavedLocationDto | null> {
+  promoteNewest(userId: string): Promise<SavedLocationDto | null> {
     const owned = this.rows.filter((row) => row.userId === userId);
     const newest = owned.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1))[0];
-    if (!newest) return null;
+    if (!newest) return Promise.resolve(null);
     newest.isDefault = true;
-    return strip(newest);
+    return Promise.resolve(strip(newest));
   }
 }
 

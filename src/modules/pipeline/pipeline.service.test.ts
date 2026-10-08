@@ -262,7 +262,7 @@ describe('PipelineService', () => {
     const second = changed.replace('"01001"', '"01001"') + '\n';
     await service.runSource(system(), { sourceId: store.sources[0]?.id });
     http.calls.length = 0;
-    const map = http as ReturnType<typeof fetcher>;
+    const map = http;
     const original = map.get.bind(map);
     map.get = (url, init) => {
       if (url.endsWith('tiger.json')) {

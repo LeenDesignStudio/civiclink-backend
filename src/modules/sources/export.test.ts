@@ -1,8 +1,9 @@
+import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
 import { Authz } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { ExportService, prefixCsvCell, toCsv } from './export.js';
-import { MemoryExportStore } from './export.store.js';
+import { MemoryExportStore, S3ExportStore } from './export.store.js';
 
 describe('csv injection prefix', () => {
   it('prefixes cells that start with = + - or @', () => {
@@ -36,5 +37,40 @@ describe('csv injection prefix', () => {
     const token = decodeURIComponent(result.url.slice(result.url.lastIndexOf('/') + 1));
     const file = store.read(token);
     expect(new TextDecoder().decode(file?.body ?? new Uint8Array())).toContain("'=Mayor");
+  });
+});
+
+describe('S3 export encryption', () => {
+  function fakeClient(): { client: S3Client; sent: PutObjectCommand[] } {
+    const sent: PutObjectCommand[] = [];
+    const client = {
+      send: (command: PutObjectCommand) => {
+        sent.push(command);
+        return Promise.resolve({});
+      },
+    } as unknown as S3Client;
+    return { client, sent };
+  }
+
+  const body = new TextEncoder().encode('name\nMayor\n');
+
+  it('sends aws:kms and the key id when S3_EXPORTS_KMS_KEY_ID is set', async () => {
+    const { client, sent } = fakeClient();
+    const store = new S3ExportStore('exports', 'us-east-1', 'arn:aws:kms:us-east-1:123:key/abc', client);
+    await store.put({ key: 'file.csv', body, contentType: 'text/csv' });
+    expect(sent[0]?.input).toMatchObject({
+      Bucket: 'exports',
+      Key: 'exports/file.csv',
+      ServerSideEncryption: 'aws:kms',
+      SSEKMSKeyId: 'arn:aws:kms:us-east-1:123:key/abc',
+    });
+  });
+
+  it('falls back to AES256 when no KMS key id is configured', async () => {
+    const { client, sent } = fakeClient();
+    const store = new S3ExportStore('exports', 'us-east-1', undefined, client);
+    await store.put({ key: 'file.csv', body, contentType: 'text/csv' });
+    expect(sent[0]?.input.ServerSideEncryption).toBe('AES256');
+    expect(sent[0]?.input.SSEKMSKeyId).toBeUndefined();
   });
 });

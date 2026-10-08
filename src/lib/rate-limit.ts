@@ -130,19 +130,20 @@ export class MemoryRateGate implements RateGate {
     private readonly limits: Record<RateClass, { points: number; duration: number }> = WINDOWS,
   ) {}
 
-  async consume(rateClass: RateClass, key: string): Promise<void> {
+  consume(rateClass: RateClass, key: string): Promise<void> {
     const limit = this.limits[rateClass];
     const now = this.clock.now().getTime();
     const bucketKey = `${rateClass}:${key}`;
     const current = this.buckets.get(bucketKey);
     if (!current || current.resetAt <= now) {
       this.buckets.set(bucketKey, { points: 1, resetAt: now + limit.duration * 1000 });
-      return;
+      return Promise.resolve();
     }
     if (current.points >= limit.points) {
-      throw new RateLimitedError(Math.max(1, Math.ceil((current.resetAt - now) / 1000)));
+      return Promise.reject(new RateLimitedError(Math.max(1, Math.ceil((current.resetAt - now) / 1000))));
     }
     current.points += 1;
+    return Promise.resolve();
   }
 }
 
@@ -171,7 +172,7 @@ export function createPostgresRateGate(pool: Pool): RateGate {
       } catch (error) {
         const ms =
           error && typeof error === 'object' && 'msBeforeNext' in error
-            ? Number((error as { msBeforeNext: number }).msBeforeNext)
+            ? (error as { msBeforeNext: number }).msBeforeNext
             : 1000;
         throw new RateLimitedError(Math.max(1, Math.ceil(ms / 1000)));
       }

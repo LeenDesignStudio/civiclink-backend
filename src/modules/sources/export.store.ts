@@ -14,19 +14,20 @@ export function exportCell(value: string | number | boolean | Date | null | unde
 export class MemoryExportStore implements ObjectStore {
   private readonly files = new Map<string, { body: Uint8Array; contentType: string; expiresAt: number }>();
 
-  async put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void> {
+  put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void> {
     this.files.set(input.key, {
       body: input.body,
       contentType: input.contentType,
       expiresAt: Date.now() + TEN_MINUTES_MS,
     });
+    return Promise.resolve();
   }
 
-  async presign(key: string, expiresSeconds: number, baseUrl?: string): Promise<string> {
+  presign(key: string, expiresSeconds: number, baseUrl?: string): Promise<string> {
     const file = this.files.get(key);
     if (file) file.expiresAt = Date.now() + expiresSeconds * 1000;
     const base = (baseUrl ?? 'http://127.0.0.1:4000').replace(/\/$/, '');
-    return `${base}/dev/exports/${encodeURIComponent(key)}`;
+    return Promise.resolve(`${base}/dev/exports/${encodeURIComponent(key)}`);
   }
 
   read(token: string): { body: Uint8Array; contentType: string } | undefined {
@@ -41,12 +42,11 @@ export class MemoryExportStore implements ObjectStore {
 
 export class S3ExportStore implements ObjectStore {
   private readonly client: S3Client;
+  private readonly kmsKeyId: string | undefined;
 
-  constructor(
-    private readonly bucket: string,
-    region: string,
-  ) {
-    this.client = new S3Client({ region });
+  constructor(private readonly bucket: string, region: string, kmsKeyId?: string, client?: S3Client) {
+    this.client = client ?? new S3Client({ region });
+    this.kmsKeyId = kmsKeyId;
   }
 
   async put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void> {
@@ -56,8 +56,15 @@ export class S3ExportStore implements ObjectStore {
         Key: `exports/${input.key}`,
         Body: input.body,
         ContentType: input.contentType,
+        ...this.encryption(),
       }),
     );
+  }
+
+  private encryption(): { ServerSideEncryption: 'aws:kms'; SSEKMSKeyId: string } | { ServerSideEncryption: 'AES256' } {
+    return this.kmsKeyId
+      ? { ServerSideEncryption: 'aws:kms', SSEKMSKeyId: this.kmsKeyId }
+      : { ServerSideEncryption: 'AES256' };
   }
 
   presign(key: string, expiresSeconds: number): Promise<string> {

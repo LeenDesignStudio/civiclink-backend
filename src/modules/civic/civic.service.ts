@@ -102,8 +102,8 @@ export interface AuditRecorder {
 }
 
 export const noopAudit: AuditRecorder = {
-  async record() {
-    return undefined;
+  record() {
+    return Promise.resolve();
   },
 };
 

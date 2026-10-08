@@ -8,21 +8,22 @@ describe('retry and circuit breaker', () => {
     const sleeps: number[] = [];
     let calls = 0;
     const result = await withRetry(
-      async () => {
+      () => {
         calls += 1;
         if (calls < 3) {
           const error = new Error('upstream') as Error & { retryAfterMs?: number };
           if (calls === 1) error.retryAfterMs = 25;
-          throw error;
+          return Promise.reject(error);
         }
-        return 'ok';
+        return Promise.resolve('ok');
       },
       {
         maxRetries: 3,
         baseDelayMs: 100,
         random: new FakeRandom([0.5]),
-        sleep: async (ms) => {
+        sleep: (ms) => {
           sleeps.push(ms);
+          return Promise.resolve();
         },
         isRetryable: () => true,
         retryAfterMs: (error) =>
@@ -39,17 +40,15 @@ describe('retry and circuit breaker', () => {
   it('opens after five failures and closes after cooldown', async () => {
     const clock = new FakeClock(new Date('2026-01-01T00:00:00Z'));
     const breaker = new CircuitBreaker(clock, { threshold: 5, cooldownMs: 30_000 });
-    const fail = async () => {
-      throw new Error('down');
-    };
+    const fail = (): Promise<never> => Promise.reject(new Error('down'));
     for (let i = 0; i < 5; i += 1) {
       await expect(breaker.exec(fail)).rejects.toThrow('down');
     }
     expect(breaker.currentState()).toBe('open');
-    await expect(breaker.exec(async () => 'nope')).rejects.toThrow('circuit open');
+    await expect(breaker.exec(() => Promise.resolve('nope'))).rejects.toThrow('circuit open');
     clock.advance(30_000);
     expect(breaker.currentState()).toBe('half-open');
-    await expect(breaker.exec(async () => 'up')).resolves.toBe('up');
+    await expect(breaker.exec(() => Promise.resolve('up'))).resolves.toBe('up');
     expect(breaker.currentState()).toBe('closed');
   });
 });

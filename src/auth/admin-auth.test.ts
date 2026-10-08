@@ -105,7 +105,9 @@ describe('AdminAuthService', () => {
     await expect(service.completeLogin(bad)).rejects.toBeInstanceOf(AdminLockedError);
     await expect(service.completeLogin(good)).rejects.toBeInstanceOf(AdminLockedError);
     clock.advance(ADMIN_LOCK_MS + 1000);
-    store.admin!.updatedAt = clock.now();
+    const admin = store.admin;
+    if (!admin) throw new Error('admin missing');
+    admin.updatedAt = clock.now();
     const session = await service.completeLogin(good);
     expect(session.principal.adminId).toBe('admin-1');
     expect(store.admin?.failedAttempts).toBe(0);

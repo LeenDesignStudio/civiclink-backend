@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { hasAsciiControls } from '../../lib/text.js';
 
-const noControls = (value: string) => !/[\u0000-\u001F\u007F]/.test(value);
+const noControls = (value: string) => !hasAsciiControls(value);
 
 export const adminRoleSchema = z.enum(['VIEWER', 'EDITOR', 'COMMUNICATIONS', 'SUPER_ADMIN']);
 export const adminStatusSchema = z.enum(['INVITED', 'ACTIVE', 'DEACTIVATED']);

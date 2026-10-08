@@ -48,7 +48,7 @@ export function assertReturnTo(value: unknown): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
     throw invalid('returnTo', 'returnTo must be a relative path.');
   }
-  let decoded = value;
+  let decoded: string;
   try {
     decoded = decodeURIComponent(value);
   } catch {

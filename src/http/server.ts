@@ -8,7 +8,7 @@ import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { useCSRFPrevention } from '@graphql-yoga/plugin-csrf-prevention';
 import { createYoga } from 'graphql-yoga';
-import { GraphQLError, NoSchemaIntrospectionCustomRule, getOperationAST } from 'graphql';
+import { GraphQLError, Kind, NoSchemaIntrospectionCustomRule, getOperationAST, type DocumentNode } from 'graphql';
 import type { Plugin } from 'graphql-yoga';
 import type { GraphQLContext } from '../graphql/context.js';
 import { env } from '../config/env.js';
@@ -19,7 +19,7 @@ import { CODE_META, isAppError } from '../lib/errors.js';
 import { logger as rootLogger, withRequest } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
 import { REQUEST_ID, ulid } from '../lib/ulid.js';
-import { armorPlugin, depthLimitRule } from '../graphql/armor.js';
+import { depthLimitRule, limitsPlugin } from '../graphql/limits.js';
 import {
   deferGraphqlOriginRejection,
   introspectionSkipsCsrf,
@@ -45,6 +45,17 @@ const GRAPHIQL_CONTENT_SECURITY_POLICY = [
   "connect-src 'self' https://unpkg.com",
   "worker-src blob:",
 ].join('; ');
+
+function bodyChunk(chunk: unknown): Buffer {
+  if (typeof chunk === 'string') return Buffer.from(chunk);
+  if (Buffer.isBuffer(chunk)) return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  throw new Error('Unexpected request body chunk');
+}
+
+function isDocumentNode(value: unknown): value is DocumentNode {
+  return typeof value === 'object' && value !== null && 'kind' in value && value.kind === Kind.DOCUMENT;
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -99,7 +110,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (request.url.split('?')[0] !== '/webhooks/stripe') return payload;
     const chunks: Buffer[] = [];
     for await (const chunk of payload) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      chunks.push(bodyChunk(chunk));
     }
     const raw = Buffer.concat(chunks);
     request.rawBody = raw;
@@ -191,7 +202,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     });
   });
 
-  await registerHealthRoutes(app, deps.readiness);
+  registerHealthRoutes(app, deps.readiness);
   if (deps.devExports && env.APP_ENV !== 'production' && env.APP_ENV !== 'staging') {
     const devExports = deps.devExports;
     app.get('/dev/exports/:token', async (request, reply) => {
@@ -231,9 +242,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   const ratePlugin: Plugin<GraphQLContext> = {
     async onExecute({ args }) {
-      const operation = getOperationAST(args.document, args.operationName ?? undefined);
-      const selection = operation?.selectionSet.selections.find((node) => node.kind === 'Field');
-      if (!selection || selection.kind !== 'Field') return;
+      const document: unknown = args.document;
+      const operationName: unknown = args.operationName;
+      if (!isDocumentNode(document)) return;
+      const operation = getOperationAST(document, typeof operationName === 'string' ? operationName : undefined);
+      const selection = operation?.selectionSet.selections.find((node) => node.kind === Kind.FIELD);
+      if (!selection) return;
       const rate = OPERATION_RATES[selection.name.value];
       if (!rate) return;
       const context = args.contextValue;
@@ -267,7 +281,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
     plugins: [
       useCSRFPrevention({ requestHeaders: ['x-civiclink-csrf'] }),
-      armorPlugin(),
+      limitsPlugin(),
       introspectionPlugin,
       ratePlugin,
     ],

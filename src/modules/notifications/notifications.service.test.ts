@@ -3,7 +3,7 @@ import { Authz, systemPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { InAppLockedError } from '../../lib/errors.js';
 import { FakeClock } from '../../lib/clock.js';
-import type { NotificationCategory, NotificationChannel, NotificationType } from '../../generated/prisma/enums.js';
+import type { NotificationCategory, NotificationChannel } from '../../generated/prisma/enums.js';
 import { signCategoryLink, LINK_TTL_MS } from './links.js';
 import type { DeliveryContext, DeliveryDto, FollowerRow, NotificationDto, PreferenceDto } from './notifications.dto.js';
 import type {
@@ -135,7 +135,7 @@ class MemoryNotifications implements NotificationsRepo {
     const notification: NotificationDto = {
       id: `00000000-0000-4000-8000-${this.n.toString(16).padStart(12, '0')}`,
       userId: row.userId,
-      type: row.type as NotificationType,
+      type: row.type,
       title: row.title,
       body: row.body,
       link: row.link,

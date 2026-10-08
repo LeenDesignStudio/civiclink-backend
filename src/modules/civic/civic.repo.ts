@@ -608,7 +608,7 @@ export class CivicRepo implements CivicStore {
       if (and.length > 0) where.AND = and;
       const totalCount = await this.db.jurisdiction.count({ where });
       const cursor = newestClause(query) ?? nameClause('name', query);
-      if (cursor) and.push(cursor as Prisma.JurisdictionWhereInput);
+      if (cursor) and.push(cursor);
       if (and.length > 0) where.AND = and;
       const rows = await this.db.jurisdiction.findMany({
         where,
@@ -660,7 +660,7 @@ export class CivicRepo implements CivicStore {
       if (and.length > 0) where.AND = and;
       const totalCount = await this.db.office.count({ where });
       const cursor = newestClause(query) ?? nameClause('name', query);
-      if (cursor) and.push(cursor as Prisma.OfficeWhereInput);
+      if (cursor) and.push(cursor);
       if (and.length > 0) where.AND = and;
       const rows = await this.db.office.findMany({
         where,
@@ -737,7 +737,7 @@ export class CivicRepo implements CivicStore {
       }
       const totalCount = await this.db.official.count({ where });
       const cursor = newestClause(query) ?? nameClause('fullName', query);
-      if (cursor) where.AND = [cursor as Prisma.OfficialWhereInput];
+      if (cursor) where.AND = [cursor];
       const rows = await this.db.official.findMany({
         where,
         orderBy: query.sort === 'NAME' ? [{ fullName: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -773,7 +773,7 @@ export class CivicRepo implements CivicStore {
       if (query.q) where.title = { contains: query.q, mode: 'insensitive' };
       const totalCount = await this.db.service.count({ where });
       const cursor = newestClause(query) ?? nameClause('title', query);
-      if (cursor) where.AND = [cursor as Prisma.ServiceWhereInput];
+      if (cursor) where.AND = [cursor];
       const rows = await this.db.service.findMany({
         where,
         orderBy: query.sort === 'NAME' ? [{ title: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],

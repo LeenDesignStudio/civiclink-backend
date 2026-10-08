@@ -614,11 +614,7 @@ export class PreconditionError extends ConflictError {
   }
 }
 
-export class LimitExceededError extends ConflictError {
-  constructor(codeMessage: string) {
-    super(codeMessage);
-  }
-}
+export class LimitExceededError extends ConflictError {}
 
 export class SavedLocationLimitError extends LimitExceededError {
   override readonly code = 'SAVED_LOCATION_LIMIT' as const;
@@ -875,18 +871,18 @@ const CONSTRAINT_CODES = {
   saved_locations_one_default_per_user: 'CONFLICT',
 } as const satisfies Record<string, ErrorCode>;
 
+function isKnownConstraint(value: string): value is keyof typeof CONSTRAINT_CODES {
+  return Object.hasOwn(CONSTRAINT_CODES, value);
+}
+
 export function errorForConstraint(constraint: string | undefined): AppError | undefined {
-  if (!constraint) return undefined;
-  const code = CONSTRAINT_CODES[constraint as keyof typeof CONSTRAINT_CODES];
-  if (!code) return undefined;
-  switch (code) {
+  if (!constraint || !isKnownConstraint(constraint)) return undefined;
+  switch (CONSTRAINT_CODES[constraint]) {
     case 'LOCATION_LABEL_TAKEN':
       return new LocationLabelTakenError('that label');
     case 'DUPLICATE_CORRECTION':
       return new DuplicateCorrectionError();
     case 'CONFLICT':
       return new ConflictError();
-    default:
-      return undefined;
   }
 }

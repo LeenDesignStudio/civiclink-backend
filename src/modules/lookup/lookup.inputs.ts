@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import { fromZod, ValidationError } from '../../lib/errors.js';
+import { hasAsciiControls } from '../../lib/text.js';
 import { LOOKUP_METHODS, type LookupMethod } from './lookup.dto.js';
-
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
 const absent = (value: unknown) => (value === null || value === '' ? undefined : value);
 
@@ -13,7 +12,7 @@ const optionalQuery = z.preprocess(
     .trim()
     .min(3)
     .max(200)
-    .refine((value) => !/[\u0000-\u001F\u007F]/.test(value), 'Search text cannot include control characters.')
+    .refine((value) => !hasAsciiControls(value), 'Search text cannot include control characters.')
     .optional(),
 );
 
@@ -58,7 +57,7 @@ export interface ResolveLocationInput {
 export function parseResolveLocation(input: unknown): ResolveLocationInput {
   if (input && typeof input === 'object' && 'query' in input) {
     const query = input.query;
-    if (typeof query === 'string' && CONTROL_CHARS.test(query)) {
+    if (typeof query === 'string' && hasAsciiControls(query)) {
       throw new ValidationError('Search text cannot include control characters.', [
         {
           path: 'input.query',

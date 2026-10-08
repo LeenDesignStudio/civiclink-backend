@@ -442,7 +442,7 @@ describe('section H admin civic API', () => {
     server = await buildServer({
       services,
       rateGate: new MemoryRateGate(),
-      readiness: { isShuttingDown: () => false, pingDb: async () => true },
+      readiness: { isShuttingDown: () => false, pingDb: () => Promise.resolve(true) },
       resolvePrincipal: () => Promise.resolve(current),
     });
   });
@@ -481,9 +481,9 @@ describe('section H admin civic API', () => {
   });
 
   afterAll(async () => {
-    if (server) await server.close();
-    await app?.$disconnect();
-    await owner?.$disconnect();
+    await server.close();
+    await app.$disconnect();
+    await owner.$disconnect();
   });
 
   async function execute(role: Caller, query: string, variables?: Record<string, unknown>): Promise<GraphQLResult> {

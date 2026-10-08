@@ -81,7 +81,7 @@ modules/<m>/
 3. Auth: read `__Host-cl_at` (resident access JWT) or `__Host-cl_admin` (admin session) cookie →
    build `Principal` (`anonymous` | `resident` | `admin` | `system`). Invalid/expired → anonymous
    (the operation's authScopes then decide).
-4. Yoga: CSRF-prevention header check, graphql-armor limits, parse/validate.
+4. Yoga: CSRF-prevention header check, `src/graphql/limits.ts`, parse/validate.
 5. Rate limiter by operation class (see `20-security.mdc`).
 6. Resolver → service (validate → authorize → transact → audit → emit events) → repo.
 7. Errors are masked into catalog codes; response includes `extensions.requestId`.

@@ -75,10 +75,9 @@ export class PipelineService {
     if (!queued) throw new NotFoundError();
     const run = (await this.deps.store.markRunning(queued.id, now)) ?? queued;
     const cap = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory' ? this.caps.page : this.caps.bulk;
-    let bodyLength = 0;
     try {
       const snapshot = await collector.fetch({ source, fetch: this.deps.fetch, maxBytes: cap });
-      bodyLength = snapshot.body.byteLength;
+      const bodyLength = snapshot.body.byteLength;
       if (bodyLength > cap) {
         await this.fail(run.id, 'Download exceeded the size cap.');
         throw new ValidationError('Download exceeded the size cap.');

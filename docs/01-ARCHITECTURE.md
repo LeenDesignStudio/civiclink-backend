@@ -35,7 +35,7 @@ only needed for local development. The admin panel lives at `/admin` on the same
 | Language | TypeScript strict, ESM | 5.9.x (TS 7 native compiler later, once tooling catches up) |
 | Package manager | pnpm (via corepack) | latest stable at project start |
 | HTTP | Fastify + `@fastify/helmet`, `@fastify/cookie`, `@fastify/cors`, `@fastify/formbody` | 5.x |
-| GraphQL | graphql-yoga + `@graphql-yoga/plugin-csrf-prevention` + `@escape.tech/graphql-armor` | 5.x / 3.x |
+| GraphQL | graphql-yoga + `@graphql-yoga/plugin-csrf-prevention` + `src/graphql/limits.ts` | 5.x / graphql 17 |
 | Schema | Pothos `@pothos/core` + `@pothos/plugin-scope-auth` | 4.x |
 | ORM | Prisma ORM (`prisma-client` generator) + `@prisma/adapter-pg` | 7.10.x |
 | Database | PostgreSQL + PostGIS | 16 + 3.5 |
@@ -116,6 +116,7 @@ All validated by `src/config/env.ts` (Zod) at boot. `S` = secret (Secrets Manage
 | `POSTHOG_API_KEY` / `POSTHOG_HOST` | S / | |
 | `SENTRY_DSN` | S | optional in dev |
 | `AWS_REGION` / `S3_BUCKET_EXPORTS` / `S3_BUCKET_SNAPSHOTS` | | |
+| `S3_EXPORTS_KMS_KEY_ID` | | optional. Staging/production export uploads use `aws:kms` with this key id; when unset they use `AES256` |
 | `LIMIT_DEFAULT_MAX_SAVED_LOCATIONS` / `LIMIT_DEFAULT_MAX_FOLLOWS` | | `5` / `50` (D-08) |
 | `ACCOUNT_PURGE_DAYS` / `ANON_LOOKUP_TTL_DAYS` / `FRESHNESS_DEFAULT_DAYS` | | `30` / `30` / `90` |
 | `GRAPHQL_INTROSPECTION` | | `true` in dev only; forced `false` when `APP_ENV=production` |

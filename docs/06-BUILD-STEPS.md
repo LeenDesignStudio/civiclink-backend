@@ -41,7 +41,7 @@ Scaffold the CivicLink backend project. Do not write feature code yet.
    db:deploy (prisma migrate deploy), db:seed (tsx prisma/seed.ts), db:studio, prisma:generate,
    schema:print (prints SDL to schema.graphql), format.
 2. Install runtime deps at the versions in docs/01 section 2 (Fastify 5 + helmet/cookie/cors/formbody,
-   graphql, graphql-yoga 5, @graphql-yoga/plugin-csrf-prevention, @escape.tech/graphql-armor,
+   graphql, graphql-yoga 5, @graphql-yoga/plugin-csrf-prevention, src/graphql/limits.ts,
    @pothos/core 4, @pothos/plugin-scope-auth, prisma 7.10 + @prisma/client 7.10 + @prisma/adapter-pg 7.10
    + pg, zod 4, pg-boss, openid-client 6, jose 6, rate-limiter-flexible, stripe, pino, @sentry/node,
    libphonenumber-js, dotenv, @aws-sdk/client-s3, @aws-sdk/client-sesv2, @aws-sdk/s3-request-presigner).
@@ -221,7 +221,7 @@ Read @.cursor/rules/50-graphql-api.mdc, @.cursor/rules/60-rbac-authz.mdc, @.curs
 4. src/graphql/context.ts: per-request context { requestId, principal, authz, services, loaders,
    ipHash, userAgent, reply }. For now principal is always anonymous (auth comes in step 07).
 5. src/graphql/errors.ts: maskError per 30-errors-logging.mdc.
-6. src/graphql/armor.ts: graphql-armor with the limits in 20-security.mdc.
+6. src/graphql/limits.ts: depth, alias, directive, token, and cost limits from 20-security.mdc.
 7. Mount Yoga in Fastify at /graphql (POST only; GET + GraphiQL only in development), with
    useCSRFPrevention({ requestHeaders: ['x-civiclink-csrf'] }), introspection per env, batching off,
    maskedErrors with maskError.

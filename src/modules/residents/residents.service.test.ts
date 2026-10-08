@@ -293,7 +293,9 @@ describe('ResidentsService', () => {
     };
     await expect(service.upsertFromProvider(attempt)).rejects.toBeInstanceOf(AccountDeletedError);
 
-    store.users.get('user-1')!.status = 'PENDING_DELETION';
+    const deleted = store.users.get('user-1');
+    if (!deleted) throw new Error('user missing');
+    deleted.status = 'PENDING_DELETION';
     const pending = await service.upsertFromProvider(attempt);
     expect(pending.status).toBe('PENDING_DELETION');
   });

@@ -13,6 +13,7 @@ import {
   fromZod,
 } from '../../lib/errors.js';
 import { SessionService } from '../../auth/sessions.js';
+import { stripAsciiControls } from '../../lib/text.js';
 import type { RunTx, Tx } from '../../auth/tx.js';
 import type { DeletionResult, MeDto, ProviderAssertion, ResidentRecord } from './residents.dto.js';
 import {
@@ -50,13 +51,13 @@ function normalizeEmail(email: string): string {
 
 function cleanName(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const trimmed = value.trim().replace(/[\u0000-\u001F\u007F]/g, '');
+  const trimmed = stripAsciiControls(value.trim());
   if (trimmed.length === 0) return undefined;
   return trimmed.slice(0, 60);
 }
 
 function fallbackName(email: string): string {
-  const local = email.split('@')[0]?.replace(/[\u0000-\u001F\u007F]/g, '').trim() ?? '';
+  const local = stripAsciiControls(email.split('@')[0] ?? '').trim();
   if (local.length === 0) return 'Resident';
   return local.slice(0, 60);
 }

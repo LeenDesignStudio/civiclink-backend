@@ -16,7 +16,7 @@ async function settle<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
       },
       (err: unknown) => {
         signal.removeEventListener('abort', onAbort);
-        reject(err);
+        reject(err instanceof Error ? err : new Error('Stripe request failed'));
       },
     );
   });

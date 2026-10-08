@@ -1,6 +1,7 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { z } from 'zod';
 import { fromZod, ValidationError } from '../../lib/errors.js';
+import { hasAsciiControls } from '../../lib/text.js';
 import {
   FRESHNESS_OVERRIDES,
   GOV_LEVELS,
@@ -15,10 +16,8 @@ import {
   type TermStatus,
 } from './civic.dto.js';
 
-const CONTROL = /[\u0000-\u001F\u007F]/;
-
 function noControl(value: string): boolean {
-  return !CONTROL.test(value);
+  return !hasAsciiControls(value);
 }
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {

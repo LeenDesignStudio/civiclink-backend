@@ -1,6 +1,6 @@
 import { buildSchema, getIntrospectionQuery, parse, validate } from 'graphql';
 import { describe, expect, it } from 'vitest';
-import { depthLimitRule } from './armor.js';
+import { depthLimitRule } from './limits.js';
 import {
   deferGraphqlOriginRejection,
   documentIsOnlyIntrospection,

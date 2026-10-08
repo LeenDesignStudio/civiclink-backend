@@ -5,13 +5,13 @@ export interface Readiness {
   pingDb(): Promise<boolean>;
 }
 
-export async function registerHealthRoutes(app: FastifyInstance, readiness: Readiness): Promise<void> {
-  app.get('/healthz', async () => ({ ok: true }));
+export function registerHealthRoutes(app: FastifyInstance, readiness: Readiness): void {
+  app.get('/healthz', () => ({ ok: true }));
   app.get('/readyz', async (_request, reply) => {
     if (readiness.isShuttingDown()) {
       return reply.code(503).send({ ok: false });
     }
-    let ready = false;
+    let ready: boolean;
     try {
       ready = await Promise.race([
         readiness.pingDb(),

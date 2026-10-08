@@ -17,7 +17,7 @@ export function gql(principal: Principal, services: AppServices) {
       const app = await buildServer({
         services,
         rateGate: new MemoryRateGate(),
-        readiness: { isShuttingDown: () => false, pingDb: async () => true },
+        readiness: { isShuttingDown: () => false, pingDb: () => Promise.resolve(true) },
         resolvePrincipal: () => Promise.resolve(principal),
       });
       try {

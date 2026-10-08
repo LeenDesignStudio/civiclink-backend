@@ -247,9 +247,11 @@ describe('EntitlementsService', () => {
     if (!plan) throw new Error('plan missing');
     plan.entitlements = { maxSavedLocations: 2, maxFollows: 4 };
     await expect(entitlements.limits(USER)).resolves.toEqual({ maxSavedLocations: 2, maxFollows: 4 });
-    repo.subs[0]!.status = 'PAST_DUE';
+    const subscription = repo.subs[0];
+    if (!subscription) throw new Error('subscription missing');
+    subscription.status = 'PAST_DUE';
     await expect(entitlements.limits(USER)).resolves.toEqual({ maxSavedLocations: 2, maxFollows: 4 });
-    repo.subs[0]!.status = 'CANCELED';
+    subscription.status = 'CANCELED';
     await expect(entitlements.limits(USER)).resolves.toEqual({ maxSavedLocations: 5, maxFollows: 50 });
   });
 

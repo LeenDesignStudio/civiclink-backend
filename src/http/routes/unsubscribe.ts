@@ -11,7 +11,7 @@ export interface UnsubscribeRouteDeps {
   webUrl: string;
 }
 
-export async function registerUnsubscribeRoutes(app: FastifyInstance, deps: UnsubscribeRouteDeps): Promise<void> {
+export function registerUnsubscribeRoutes(app: FastifyInstance, deps: UnsubscribeRouteDeps): void {
   app.get('/u/unsub', async (request, reply) => {
     const token = queryValue(request.query, 't');
     reply.header('cache-control', 'no-store');
@@ -43,9 +43,9 @@ export async function registerUnsubscribeRoutes(app: FastifyInstance, deps: Unsu
       const safe = assertReturnTo(path);
       const target = new URL(safe, deps.webUrl);
       if (target.origin !== new URL(deps.webUrl).origin) {
-        return reply.type('text/html; charset=utf-8').send(FRIENDLY);
+        return await reply.type('text/html; charset=utf-8').send(FRIENDLY);
       }
-      return reply.redirect(target.toString(), 302);
+      return await reply.redirect(target.toString(), 302);
     } catch {
       return reply.type('text/html; charset=utf-8').send(FRIENDLY);
     }

@@ -10,43 +10,48 @@ import type { NewSession, SessionStore, StoredSession } from './sessions.types.j
 class MemorySessions implements SessionStore {
   rows: StoredSession[] = [];
 
-  async insert(session: NewSession): Promise<StoredSession> {
+  insert(session: NewSession): Promise<StoredSession> {
     const row: StoredSession = { ...session, rotatedAt: null, revokedAt: null };
     this.rows.push(row);
-    return row;
+    return Promise.resolve(row);
   }
 
-  async findByHash(hash: string): Promise<StoredSession | null> {
-    return this.rows.find((row) => row.refreshTokenHash === hash) ?? null;
+  findByHash(hash: string): Promise<StoredSession | null> {
+    return Promise.resolve(this.rows.find((row) => row.refreshTokenHash === hash) ?? null);
   }
 
-  async rotate(previousId: string, rotatedAt: Date, next: NewSession): Promise<StoredSession> {
+  rotate(previousId: string, rotatedAt: Date, next: NewSession): Promise<StoredSession> {
     const previous = this.rows.find((row) => row.id === previousId);
     if (previous) previous.rotatedAt = rotatedAt;
     return this.insert(next);
   }
 
-  async revokeFamily(familyId: string, at: Date): Promise<void> {
+  revokeFamily(familyId: string, at: Date): Promise<void> {
     for (const row of this.rows) {
       if (row.familyId === familyId) row.revokedAt = at;
     }
+    return Promise.resolve();
   }
 
-  async revokeById(id: string, at: Date): Promise<void> {
+  revokeById(id: string, at: Date): Promise<void> {
     const row = this.rows.find((item) => item.id === id);
     if (row) row.revokedAt = at;
+    return Promise.resolve();
   }
 
-  async revokeAllForUser(userId: string, at: Date): Promise<void> {
+  revokeAllForUser(userId: string, at: Date): Promise<void> {
     for (const row of this.rows) {
       if (row.userId === userId) row.revokedAt = at;
     }
+    return Promise.resolve();
   }
 
-  async countActive(userId: string, now: Date): Promise<number> {
-    return this.rows.filter(
-      (row) => row.userId === userId && !row.revokedAt && !row.rotatedAt && row.expiresAt.getTime() > now.getTime(),
-    ).length;
+  countActive(userId: string, now: Date): Promise<number> {
+    return Promise.resolve(
+      this.rows.filter(
+        (row) => row.userId === userId && !row.revokedAt && !row.rotatedAt && row.expiresAt.getTime() > now.getTime(),
+      ).length,
+    );
   }
 
   setStatus(userId: string, status: UserStatus): void {

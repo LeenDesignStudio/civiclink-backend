@@ -1,5 +1,4 @@
 import { Prisma } from '../../generated/prisma/client.js';
-import type { ActorType } from '../../generated/prisma/enums.js';
 import { dbCall, type Db } from '../../db/prisma.js';
 import type { Tx } from '../../auth/tx.js';
 import type { AuditJson, ChangeLogDto, ChangeLogEntry } from './audit.dto.js';
@@ -73,7 +72,7 @@ export class AuditRepo implements AuditStore {
       total,
       rows: rows.map((row) => ({
         id: row.id,
-        actorType: row.actorType as ActorType,
+        actorType: row.actorType,
         actorId: row.actorId,
         entityType: row.entityType,
         entityId: row.entityId,

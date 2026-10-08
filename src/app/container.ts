@@ -297,7 +297,7 @@ export function buildContainer(): AppContainer {
     env.APP_ENV === 'development' || env.APP_ENV === 'test' ? new MemoryExportStore() : undefined;
   const exportsService = new ExportService({
     reader: new PrismaExportReader(prisma),
-    store: devExports ?? new S3ExportStore(env.S3_BUCKET_EXPORTS, env.AWS_REGION),
+    store: devExports ?? new S3ExportStore(env.S3_BUCKET_EXPORTS, env.AWS_REGION, env.S3_EXPORTS_KMS_KEY_ID),
     audit,
     withTx: runTx,
   });

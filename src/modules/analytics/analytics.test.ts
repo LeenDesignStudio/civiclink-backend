@@ -34,7 +34,9 @@ describe('analytics properties', () => {
       apiKey: 'ph',
       host: 'https://analytics.example',
       fetchFn: (url, init) => {
-        calls.push({ url, body: String(init.body) });
+        const raw = init.body;
+        const body = typeof raw === 'string' ? raw : raw instanceof Uint8Array ? new TextDecoder().decode(raw) : '';
+        calls.push({ url, body });
         return Promise.resolve(new Response('{}', { status: 200 }));
       },
     });

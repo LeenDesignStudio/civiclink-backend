@@ -42,7 +42,7 @@ alwaysApply: false
 - CORS: explicit allowlist from env, `credentials: true`, no wildcard. Admin and web origins listed separately.
 
 ## GraphQL hardening
-- `@escape.tech/graphql-armor`: maxDepth 8, maxAliases 10, maxDirectives 20, maxTokens 2000,
+- `src/graphql/limits.ts`: maxDepth 8, maxAliases 10, maxDirectives 20, maxTokens 2000,
   costLimit 5000. Introspection and field suggestions **disabled in production**.
 - Batched queries disabled. Max body 100 KB. Persisted operations optional (not required in Phase 1).
 - Every list field is paginated (`first` ≤ 100) — no unbounded lists.

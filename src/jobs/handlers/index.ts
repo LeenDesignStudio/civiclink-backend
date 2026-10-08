@@ -18,7 +18,7 @@ export interface WorkerServices {
 }
 
 export function isPermanent(err: unknown): boolean {
-  return isAppError(err) && err.retryable === false;
+  return isAppError(err) && !err.retryable;
 }
 
 export async function registerHandlers(boss: Boss, services: WorkerServices): Promise<void> {

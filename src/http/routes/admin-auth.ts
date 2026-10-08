@@ -31,10 +31,7 @@ export interface AdminAuthRouteDeps {
   clock?: Clock;
 }
 
-export async function registerAdminAuthRoutes(
-  app: FastifyInstance,
-  deps: AdminAuthRouteDeps,
-): Promise<void> {
+export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRouteDeps): void {
   const clock = deps.clock ?? systemClock;
 
   app.get('/admin-auth/google/start', async (request, reply) => {
@@ -54,7 +51,7 @@ export async function registerAdminAuthRoutes(
         },
         clock.now(),
       );
-      return reply.redirect(start.url.toString(), 302);
+      return await reply.redirect(start.url.toString(), 302);
     } catch (err) {
       return sendAuthError(reply, err, request.id);
     }
@@ -98,7 +95,7 @@ export async function registerAdminAuthRoutes(
       );
       clearOAuthCookie(reply, 'lax');
       setAdminCookie(reply, session.token);
-      return reply.redirect(new URL('/admin', deps.webUrl).toString(), 302);
+      return await reply.redirect(new URL('/admin', deps.webUrl).toString(), 302);
     } catch (err) {
       clearOAuthCookie(reply, 'lax');
       clearAdminCookie(reply);

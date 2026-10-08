@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { hasAsciiControls } from '../../lib/text.js';
 
-const control = (value: string) => !/[\u0000-\u001F\u007F]/.test(value);
+const control = (value: string) => !hasAsciiControls(value);
 
 const plain = (min: number, max: number) =>
   z
