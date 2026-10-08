@@ -134,6 +134,50 @@ describe('http server', () => {
     await server.close();
   });
 
+  it('allows Apollo Studio introspection without the CSRF header', async () => {
+    const server = await app();
+    const response = await server.inject({
+      method: 'POST',
+      url: '/graphql',
+      headers: {
+        origin: 'https://studio.apollographql.com',
+        'content-type': 'application/json',
+      },
+      payload: { query: '{ __schema { queryType { name } } }' },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ data?: { __schema?: { queryType?: { name?: string } } }; errors?: unknown[] }>();
+    expect(body.errors).toBeUndefined();
+    expect(body.data?.__schema?.queryType?.name).toBe('Query');
+    await server.close();
+  });
+
+  it('still requires CSRF for ordinary operations from Apollo Studio', async () => {
+    const server = await app();
+    const headers = { origin: 'https://studio.apollographql.com', 'content-type': 'application/json' };
+    const health = await server.inject({ method: 'POST', url: '/graphql', headers, payload: { query: '{ health }' } });
+    expect(health.statusCode).toBe(403);
+    expect(health.json<{ error: { code: string } }>().error.code).toBe('FORBIDDEN');
+    const me = await server.inject({ method: 'POST', url: '/graphql', headers, payload: { query: '{ me { id } }' } });
+    expect(me.statusCode).toBe(403);
+    expect(me.body).not.toContain('"id"');
+    const mutation = await server.inject({
+      method: 'POST',
+      url: '/graphql',
+      headers,
+      payload: { query: 'mutation { adminSignOut { signedOut } }' },
+    });
+    expect(mutation.statusCode).toBe(403);
+    const mixed = await server.inject({
+      method: 'POST',
+      url: '/graphql',
+      headers,
+      payload: { query: '{ __schema { queryType { name } } health }' },
+    });
+    expect(mixed.statusCode).toBe(403);
+    await server.close();
+  });
+
   it('still rejects a protected field when the caller is anonymous', async () => {
     const server = await app();
     const missing = await server.inject({

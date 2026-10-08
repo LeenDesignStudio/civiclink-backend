@@ -2,8 +2,10 @@ import { buildSchema, getIntrospectionQuery, parse, validate } from 'graphql';
 import { describe, expect, it } from 'vitest';
 import { depthLimitRule } from './armor.js';
 import {
+  deferGraphqlOriginRejection,
   documentIsOnlyIntrospection,
   introspectionSkipsCsrf,
+  rejectsDisallowedOrigin,
   skipDepthForIntrospection,
   sourceIsIntrospectionRequest,
 } from './introspection.js';
@@ -84,6 +86,20 @@ describe('introspection CSRF exception', () => {
     expect(sourceIsIntrospectionRequest(query)).toBe(false);
     expect(documentIsOnlyIntrospection(parse(STUDIO))).toBe(true);
     expect(documentIsOnlyIntrospection(parse(query))).toBe(false);
+  });
+
+  it('rejects a disallowed Origin in production and for ordinary operations', () => {
+    const studio = {
+      method: 'POST',
+      origin: 'https://studio.apollographql.com',
+      allowedOrigins: ['http://localhost:3000'],
+    };
+    expect(rejectsDisallowedOrigin({ ...studio, appEnv: 'production', introspectionOnly: true })).toBe(true);
+    expect(rejectsDisallowedOrigin({ ...studio, appEnv: 'development', introspectionOnly: false })).toBe(true);
+    expect(rejectsDisallowedOrigin({ ...studio, appEnv: 'test', introspectionOnly: true })).toBe(false);
+    expect(deferGraphqlOriginRejection('production', 'POST', '/graphql')).toBe(false);
+    expect(deferGraphqlOriginRejection('development', 'POST', '/graphql')).toBe(true);
+    expect(deferGraphqlOriginRejection('test', 'POST', '/auth/refresh')).toBe(false);
   });
 
   it('still rejects a non-introspection query that exceeds the depth limit', () => {

@@ -14,6 +14,29 @@ export function introspectionSkipsCsrf(input: {
   return sourceIsIntrospectionRequest(source.query, source.operationName);
 }
 
+/**
+ * The early origin check runs before the body exists. In development and test,
+ * `/graphql` is classified in the route handler so an introspection document can pass.
+ */
+export function deferGraphqlOriginRejection(appEnv: string, method: string, url: string): boolean {
+  if (appEnv !== 'development' && appEnv !== 'test') return false;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return false;
+  return (url.split('?')[0] ?? '') === '/graphql';
+}
+
+/** True when an Origin outside the CORS allowlist must be rejected. */
+export function rejectsDisallowedOrigin(input: {
+  appEnv: string;
+  method: string;
+  origin: string | undefined;
+  allowedOrigins: readonly string[];
+  introspectionOnly: boolean;
+}): boolean {
+  if (input.method === 'GET' || input.method === 'HEAD' || input.method === 'OPTIONS') return false;
+  if (!input.origin || input.allowedOrigins.includes(input.origin)) return false;
+  return !(input.introspectionOnly && (input.appEnv === 'development' || input.appEnv === 'test'));
+}
+
 /** True when every operation in the document is an introspection query. */
 export function documentIsOnlyIntrospection(document: DocumentNode): boolean {
   const operations = operationDefinitions(document);

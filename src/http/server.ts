@@ -20,7 +20,12 @@ import { logger as rootLogger, withRequest } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
 import { REQUEST_ID, ulid } from '../lib/ulid.js';
 import { armorPlugin, depthLimitRule } from '../graphql/armor.js';
-import { introspectionSkipsCsrf, skipDepthForIntrospection } from '../graphql/introspection.js';
+import {
+  deferGraphqlOriginRejection,
+  introspectionSkipsCsrf,
+  rejectsDisallowedOrigin,
+  skipDepthForIntrospection,
+} from '../graphql/introspection.js';
 import { createLoaders } from '../graphql/loaders.js';
 import { maskError, requestAls } from '../graphql/errors.js';
 import { schema } from '../graphql/schema.js';
@@ -101,6 +106,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       request.method !== 'HEAD' &&
       request.method !== 'OPTIONS'
     ) {
+      if (deferGraphqlOriginRejection(env.APP_ENV, request.method, request.url)) return;
       await reply.code(403).send({
         error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
       });
@@ -275,14 +281,26 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     handler: async (request, reply) => {
       const csrf = request.headers['x-civiclink-csrf'];
       const hasCsrf = typeof csrf === 'string' && csrf.length > 0;
-      const introspectionOnly =
-        !hasCsrf &&
-        introspectionSkipsCsrf({
+      const introspectionOnly = introspectionSkipsCsrf({
+        appEnv: env.APP_ENV,
+        method: request.method,
+        url: request.url,
+        body: request.body,
+      });
+      const originHeader = request.headers.origin;
+      if (
+        rejectsDisallowedOrigin({
           appEnv: env.APP_ENV,
           method: request.method,
-          url: request.url,
-          body: request.body,
+          origin: typeof originHeader === 'string' ? originHeader : undefined,
+          allowedOrigins: env.CORS_ORIGINS,
+          introspectionOnly,
+        })
+      ) {
+        return reply.code(403).send({
+          error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
         });
+      }
       if (request.method !== 'OPTIONS' && !hasCsrf && !introspectionOnly) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
