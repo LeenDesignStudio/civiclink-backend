@@ -5,6 +5,8 @@ import {
   AccountDeletedError,
   AccountPendingDeletionError,
   InternalError,
+  isAppError,
+  UpstreamError,
   NotPendingDeletionError,
   TermsVersionMismatchError,
   UnauthenticatedError,
@@ -27,7 +29,7 @@ export interface AccountBilling {
 }
 
 export interface DeletionNotifier {
-  enqueueConfirmation(userId: string): Promise<void>;
+  enqueue(name: 'email.accountDeletion', payload: { id: string }, options: { singletonKey: string }): Promise<void>;
 }
 
 export interface ResidentsServiceDeps {
@@ -198,10 +200,17 @@ export class ResidentsService {
         purgeAfter,
         requestedAt,
       });
+      if (this.deps.notifier) {
+        try {
+          await this.deps.notifier.enqueue('email.accountDeletion', { id: userId }, { singletonKey: userId });
+        } catch (error) {
+          if (isAppError(error)) throw error;
+          throw new UpstreamError(undefined, { cause: error });
+        }
+      }
     });
     await this.deps.sessions.revokeAll(userId);
     if (this.deps.billing) await this.deps.billing.cancelAtPeriodEnd(userId);
-    if (this.deps.notifier) await this.deps.notifier.enqueueConfirmation(userId);
     return { status: 'PENDING_DELETION', purgeAfter };
   }
 

@@ -963,9 +963,19 @@ type OfficeHolder {
   slug: String
 }
 
-type OfficeTermPayload {
+type OfficeTerm {
   id: ID
+  isCurrent: Boolean
   officeId: ID
+  officialId: ID
+  status: TermStatus
+  termEnd: DateTime
+  termStart: DateTime
+}
+
+type OfficeTermPayload {
+  office: AdminOffice
+  term: OfficeTerm
 }
 
 type Official {

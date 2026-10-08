@@ -48,6 +48,8 @@ export function maskError(error: unknown): GraphQLError {
 }
 
 function unwrap(error: unknown): unknown {
+  if (isAppError(error)) return error;
   if (error instanceof GraphQLError && error.originalError) return unwrap(error.originalError);
+  if (error instanceof Error && error.cause !== undefined) return unwrap(error.cause);
   return error;
 }

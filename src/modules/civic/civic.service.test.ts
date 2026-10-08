@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Authz, anonymousPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { FakeClock } from '../../lib/clock.js';
-import { ForbiddenError, NotFoundError, UnauthenticatedError } from '../../lib/errors.js';
+import { ForbiddenError, NotFoundError, UnauthenticatedError, UpstreamError } from '../../lib/errors.js';
 import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminServiceRecord } from './civic.dto.js';
 import type { LookupContext } from '../lookup/lookup.dto.js';
 import type { OfficeRecord, OfficialRecord, OfficialTermLink } from './civic.dto.js';
@@ -455,5 +455,74 @@ describe('CivicService public reads', () => {
     const one = await service.adminService(viewerContext(), serviceRow.id);
     expect(one.links).toHaveLength(1);
     expect(calls[0]?.linkBroken).toBe(false);
+  });
+
+  it('returns the office with the term and rolls back when fan-out cannot be queued', async () => {
+    const officeId = '11111111-1111-4111-8111-111111111111';
+    const officialId = '22222222-2222-4222-8222-222222222222';
+    const office = { id: officeId, name: 'Mayor' };
+    const official = { id: officialId, fullName: 'Ada Lovelace', displayName: null };
+    const term = {
+      id: '33333333-3333-4333-8333-333333333333',
+      officeId,
+      officialId,
+      status: 'ELECTED' as const,
+      termStart: null,
+      termEnd: null,
+      isCurrent: true,
+    };
+    const jobs: Array<{ name: string; key?: string }> = [];
+    let committed = false;
+    const store = {
+      transaction: async (fn: (inner: CivicStore, tx: unknown) => Promise<unknown>) => {
+        const result = await fn(store, {});
+        committed = true;
+        return result;
+      },
+      findAdminOffice: () => Promise.resolve(office),
+      findAdminOfficial: () => Promise.resolve(official),
+      endCurrentTerm: () => Promise.resolve(null),
+      setHolderUnknown: () => Promise.resolve(),
+      createTerm: () => Promise.resolve(term),
+    } as unknown as CivicStore;
+    const input = {
+      officeId,
+      officialId,
+      status: 'ELECTED',
+      makeCurrent: true,
+      notifyFollowers: true,
+    };
+    const editor = new Authz({ kind: 'admin', adminId: 'admin-1', role: 'EDITOR', sessionId: 'session-1' });
+    const editorCtx = {
+      requestId: 'req-1',
+      principal: { kind: 'admin' as const, adminId: 'admin-1', role: 'EDITOR' as const, sessionId: 'session-1' },
+      authz: editor,
+      ipHash: 'hash',
+    };
+    const service = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+      enqueue: (name, _payload, key) => {
+        jobs.push({ name, ...(key ? { key } : {}) });
+        return Promise.resolve();
+      },
+    });
+    await expect(service.setOfficeTerm(viewerContext(), input)).rejects.toBeInstanceOf(ForbiddenError);
+    const result = await service.setOfficeTerm(editorCtx, input);
+    expect(result.term.id).toBe(term.id);
+    expect(result.office.name).toBe('Mayor');
+    expect(jobs).toEqual([{ name: 'notify.fanout', key: officeId }]);
+    expect(committed).toBe(true);
+
+    committed = false;
+    const failing = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+      enqueue: () => Promise.reject(new Error('queue down')),
+    });
+    await expect(failing.setOfficeTerm(editorCtx, input)).rejects.toBeInstanceOf(UpstreamError);
+    expect(committed).toBe(false);
   });
 });

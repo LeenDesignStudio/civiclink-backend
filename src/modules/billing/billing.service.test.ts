@@ -252,6 +252,35 @@ describe('EntitlementsService', () => {
     repo.subs[0]!.status = 'CANCELED';
     await expect(entitlements.limits(USER)).resolves.toEqual({ maxSavedLocations: 5, maxFollows: 50 });
   });
+
+  it('enqueues billing.applyEvent and leaves applying the event to the worker', async () => {
+    const repo = new MemoryBilling();
+    const queued: Array<{ name: string; singletonKey: string }> = [];
+    const svc = new BillingService({
+      repo,
+      provider: new FakeStripe(),
+      publicWebUrl: 'https://civiclink.test',
+      queue: {
+        enqueue: (name, _data, options) => {
+          queued.push({ name, singletonKey: options.singletonKey });
+          return Promise.resolve();
+        },
+      },
+    });
+    await svc.acceptStripeEvent(subEvent('evt_queue', 'active', 1));
+    expect(queued).toEqual([{ name: 'billing.applyEvent', singletonKey: 'evt_queue' }]);
+    expect(repo.subs).toHaveLength(0);
+  });
+
+  it('returns a catalog error when the billing job cannot be queued', async () => {
+    const svc = new BillingService({
+      repo: new MemoryBilling(),
+      provider: new FakeStripe(),
+      publicWebUrl: 'https://civiclink.test',
+      queue: { enqueue: () => Promise.reject(new Error('queue down')) },
+    });
+    await expect(svc.acceptStripeEvent(subEvent('evt_fail', 'active', 1))).rejects.toBeInstanceOf(BillingUnavailableError);
+  });
 });
 
 describe('StripeBillingProvider', () => {

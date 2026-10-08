@@ -42,10 +42,15 @@ const INVOICE_STATUS: Record<string, InvoiceDto['status']> = {
   void: 'VOID',
 };
 
+export interface BillingJobQueue {
+  enqueue(name: 'billing.applyEvent', data: { event: unknown }, options: { singletonKey: string }): Promise<void>;
+}
+
 export interface BillingDeps {
   repo: BillingRepo;
   provider: BillingProvider;
   publicWebUrl: string;
+  queue?: BillingJobQueue;
 }
 
 export class BillingService {
@@ -141,6 +146,20 @@ export class BillingService {
    * Inserts the event id first; a second delivery is a duplicate no-op.
    * Subscription updates older than `lastEventAt` are ignored.
    */
+  async acceptStripeEvent(event: unknown): Promise<void> {
+    const parsed = parseEvent(event);
+    if (!this.deps.queue) {
+      await this.applyStripeEvent(event);
+      return;
+    }
+    try {
+      await this.deps.queue.enqueue('billing.applyEvent', { event }, { singletonKey: parsed.id });
+    } catch (error) {
+      if (isAppError(error)) throw error;
+      throw new BillingUnavailableError({ cause: error });
+    }
+  }
+
   async applyStripeEvent(event: unknown): Promise<ApplyStripeEventResult> {
     const parsed = parseEvent(event);
     const inserted = await this.deps.repo.insertEvent(parsed.id, parsed.type);

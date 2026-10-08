@@ -5,6 +5,7 @@ import type {
   AdminJurisdictionNode,
   AdminOfficeRecord,
   AdminOfficialRecord,
+  OfficeTermRecord,
   AdminOfficialTerm,
   AdminServiceLink,
   AdminServiceRecord,
@@ -126,8 +127,8 @@ export interface CivicStore {
   setOfficialStatus(id: string, status: RecordStatus): Promise<void>;
   endCurrentTerm(officeId: string, termEnd: Date): Promise<{ id: string } | null>;
   setHolderUnknown(officeId: string, holderUnknown: boolean): Promise<void>;
-  createTerm(input: CreateTermInput): Promise<{ id: string }>;
-  findTerm(id: string): Promise<{ id: string; officeId: string; isCurrent: boolean } | null>;
+  createTerm(input: CreateTermInput): Promise<OfficeTermRecord>;
+  findTerm(id: string): Promise<OfficeTermRecord | null>;
   endTerm(id: string, termEnd: Date): Promise<void>;
   officialHasCurrentTerm(officialId: string): Promise<boolean>;
   createService(input: UpsertServiceInput): Promise<AdminServiceRecord>;
@@ -1027,7 +1028,7 @@ export class CivicRepo implements CivicStore {
     });
   }
 
-  createTerm(input: CreateTermInput): Promise<{ id: string }> {
+  createTerm(input: CreateTermInput): Promise<OfficeTermRecord> {
     return this.run(() =>
       this.db.officeTerm.create({
         data: {
@@ -1038,16 +1039,16 @@ export class CivicRepo implements CivicStore {
           termEnd: input.termEnd,
           isCurrent: input.isCurrent,
         },
-        select: { id: true },
+        select: termSelect,
       }),
     );
   }
 
-  findTerm(id: string): Promise<{ id: string; officeId: string; isCurrent: boolean } | null> {
+  findTerm(id: string): Promise<OfficeTermRecord | null> {
     return this.run(() =>
       this.db.officeTerm.findUnique({
         where: { id },
-        select: { id: true, officeId: true, isCurrent: true },
+        select: termSelect,
       }),
     );
   }
@@ -1215,6 +1216,16 @@ export class CivicRepo implements CivicStore {
     await this.db.serviceLink.createMany({ data });
   }
 }
+
+const termSelect = {
+  id: true,
+  officeId: true,
+  officialId: true,
+  status: true,
+  termStart: true,
+  termEnd: true,
+  isCurrent: true,
+} as const;
 
 const adminTermSelect = {
   orderBy: [{ isCurrent: 'desc' as const }, { createdAt: 'desc' as const }],

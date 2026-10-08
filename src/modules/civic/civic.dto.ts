@@ -270,6 +270,21 @@ export interface AdminOfficeRecord {
   addresses: OfficeAddressDto[];
 }
 
+export interface OfficeTermRecord {
+  id: string;
+  officeId: string;
+  officialId: string;
+  status: TermStatus;
+  termStart: Date | null;
+  termEnd: Date | null;
+  isCurrent: boolean;
+}
+
+export interface OfficeTermPayload {
+  term: OfficeTermRecord;
+  office: AdminOfficeRecord;
+}
+
 export interface AdminOfficialTerm {
   id: string;
   officeId: string;

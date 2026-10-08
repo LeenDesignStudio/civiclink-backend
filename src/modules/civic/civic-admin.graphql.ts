@@ -3,7 +3,7 @@ import type { Connection } from '../../lib/pagination.js';
 import { PageInfoRef } from '../audit/audit.graphql.js';
 import { withoutNulls } from '../follows/relay.graphql.js';
 import { CivicService } from './civic.service.js';
-import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminOfficialTerm, AdminServiceLink, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, ServiceCategoryRecord } from './civic.dto.js';
+import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminOfficialTerm, AdminServiceLink, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, OfficeTermPayload, OfficeTermRecord, ServiceCategoryRecord } from './civic.dto.js';
 import { FreshnessEnum, FreshnessOverrideEnum, JurisdictionTypeEnum, SelectionMethodEnum, TermStatusEnum } from './civic.graphql.js';
 import { GovLevelEnum } from '../follows/relay.graphql.js';
 
@@ -318,10 +318,22 @@ builder.mutationField('upsertOfficial', (t) =>
 );
 rememberScope('Mutation', 'upsertOfficial', writeScope);
 
-const TermPayload = builder.objectRef<{ id: string; officeId: string }>('OfficeTermPayload').implement({
+const OfficeTermRef = builder.objectRef<OfficeTermRecord>('OfficeTerm').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
     officeId: t.exposeID('officeId'),
+    officialId: t.exposeID('officialId'),
+    status: t.field({ type: TermStatusEnum, resolve: (row) => row.status }),
+    termStart: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.termStart }),
+    termEnd: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.termEnd }),
+    isCurrent: t.exposeBoolean('isCurrent'),
+  }),
+});
+
+const TermPayload = builder.objectRef<OfficeTermPayload>('OfficeTermPayload').implement({
+  fields: (t) => ({
+    term: t.field({ type: OfficeTermRef, resolve: (row) => row.term }),
+    office: t.field({ type: OfficeAdmin, resolve: (row) => row.office }),
   }),
 });
 

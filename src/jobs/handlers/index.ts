@@ -12,6 +12,7 @@ export interface WorkerServices {
   pipeline: Pick<PipelineService, 'runSource' | 'locationsReresolve' | 'linkCheck'>;
   retention: Pick<RetentionService, 'purge' | 'lookups' | 'sessions' | 'stripeEvents'>;
   billingSync?: (ctx: ServiceContext) => Promise<void>;
+  applyBillingEvent?: (ctx: ServiceContext, event: unknown) => Promise<void>;
   sendContact?: (ctx: ServiceContext, id: string) => Promise<void>;
   sendAccountDeletion?: (ctx: ServiceContext, id: string) => Promise<void>;
 }
@@ -47,8 +48,9 @@ export async function registerHandlers(boss: Boss, services: WorkerServices): Pr
   await work(boss, QUEUES.billingSync, async () => {
     if (services.billingSync) await services.billingSync(system('billing.syncPlans'));
   });
-  await work(boss, QUEUES.billingApply, async () => {
-    if (services.billingSync) await services.billingSync(system('billing.applyEvent'));
+  await work(boss, QUEUES.billingApply, async (data) => {
+    const event = objectOf(data).event;
+    if (services.applyBillingEvent) await services.applyBillingEvent(system('billing.applyEvent'), event);
   });
   await work(boss, QUEUES.emailContact, async (data) => {
     const id = objectOf(data).id;

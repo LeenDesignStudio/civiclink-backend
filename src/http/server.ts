@@ -225,7 +225,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         error: { code: 'BAD_REQUEST', message: CODE_META.BAD_REQUEST.defaultMessage, requestId: request.id },
       });
     }
-    await deps.services.billing.applyStripeEvent(event);
+    await deps.services.billing.acceptStripeEvent(event);
     return { received: true };
   });
 

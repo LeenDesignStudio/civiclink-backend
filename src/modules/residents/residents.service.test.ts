@@ -10,6 +10,7 @@ import {
   AccountDeletedError,
   NotPendingDeletionError,
   TermsVersionMismatchError,
+  UpstreamError,
 } from '../../lib/errors.js';
 import { FakeRandom } from '../../lib/random.js';
 import type { AuthProvider, UserStatus } from '../../generated/prisma/enums.js';
@@ -191,7 +192,7 @@ describe('ResidentsService', () => {
     const sessions = new MemorySessions();
     const ensured: string[] = [];
     const cancelled: string[] = [];
-    const mailed: string[] = [];
+    const mailed: Array<{ name: string; id: string; singletonKey: string }> = [];
     const billing: AccountBilling = {
       cancelAtPeriodEnd: (userId) => {
         cancelled.push(userId);
@@ -199,8 +200,8 @@ describe('ResidentsService', () => {
       },
     };
     const notifier: DeletionNotifier = {
-      enqueueConfirmation: (userId) => {
-        mailed.push(userId);
+      enqueue: (name, payload, options) => {
+        mailed.push({ name, id: payload.id, singletonKey: options.singletonKey });
         return Promise.resolve();
       },
     };
@@ -354,7 +355,36 @@ describe('ResidentsService', () => {
     expect(store.users.get('user-1')?.status).toBe('PENDING_DELETION');
     expect(sessions.revokedUsers).toEqual(['user-1']);
     expect(cancelled).toEqual(['user-1']);
-    expect(mailed).toEqual(['user-1']);
+    expect(mailed).toEqual([{ name: 'email.accountDeletion', id: 'user-1', singletonKey: 'user-1' }]);
+  });
+
+  it('rolls the deletion back when the confirmation job cannot be queued', async () => {
+    const { store, sessions } = setup();
+    const service = new ResidentsService({
+      store,
+      sessions: new SessionService({ store: sessions, clock: new FakeClock(now), random: new FakeRandom() }),
+      clock: new FakeClock(now),
+      random: new FakeRandom(),
+      prefs: { ensureDefaults: () => Promise.resolve() },
+      runTx: async (fn) => {
+        const user = store.users.get('user-1');
+        const status = user?.status;
+        const deletions = store.deletions.length;
+        try {
+          return await fn(undefined);
+        } catch (error) {
+          if (user && status) user.status = status;
+          store.deletions.length = deletions;
+          throw error;
+        }
+      },
+      purgeDays: 30,
+      notifier: { enqueue: () => Promise.reject(new Error('queue down')) },
+    });
+    await seed(store, { providerSubject: 'google-1', emailVerified: true, termsVersion: 'terms-2', privacyVersion: 'privacy-2' });
+    await expect(service.requestAccountDeletion(ctx('user-1'), { confirm: 'DELETE' })).rejects.toBeInstanceOf(UpstreamError);
+    expect(store.users.get('user-1')?.status).toBe('ACTIVE');
+    expect(store.deletions).toHaveLength(0);
   });
 
   it('restores a pending account and rejects any other status', async () => {

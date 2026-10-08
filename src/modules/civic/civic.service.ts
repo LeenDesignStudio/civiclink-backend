@@ -6,9 +6,11 @@ import {
   ConflictError,
   HasActiveChildrenError,
   HasCurrentTermError,
+  isAppError,
   JurisdictionCycleError,
   LookupNotFoundError,
   NotFoundError,
+  UpstreamError,
   ValidationError,
 } from '../../lib/errors.js';
 import { buildConnection, clampFirst, decodeCursor, encodeCursor, type Connection } from '../../lib/pagination.js';
@@ -16,6 +18,7 @@ import { slugify } from '../../lib/slug.js';
 import type {
   AdminJurisdictionNode,
   AdminOfficeRecord,
+  OfficeTermPayload,
   AdminOfficialRecord,
   AdminServiceRecord,
   Freshness,
@@ -119,7 +122,7 @@ export interface CivicServiceDeps {
   lookups: LookupReader;
   clock: Clock;
   audit?: AuditRecorder;
-  enqueue?: (job: string, payload: Record<string, unknown>) => Promise<void>;
+  enqueue?: (job: string, payload: Record<string, unknown>, singletonKey?: string) => Promise<void>;
 }
 
 export function computeFreshness(
@@ -255,7 +258,7 @@ export class CivicService {
   private readonly lookups: LookupReader;
   private readonly clock: Clock;
   private readonly auditLog: AuditRecorder;
-  private readonly enqueue?: (job: string, payload: Record<string, unknown>) => Promise<void>;
+  private readonly enqueue?: (job: string, payload: Record<string, unknown>, singletonKey?: string) => Promise<void>;
 
   constructor(deps: CivicServiceDeps) {
     this.repo = deps.repo;
@@ -527,7 +530,7 @@ export class CivicService {
   async upsertOffice(ctx: ServiceContext, input: unknown): Promise<AdminOfficeRecord> {
     ctx.authz.require('admin.civic:write');
     const parsed = parseUpsertOffice(input);
-    const saved = await this.repo.transaction(async (store, tx) => {
+    return this.repo.transaction(async (store, tx) => {
       if (!(await store.sourceExists(parsed.sourceId))) throw new NotFoundError();
       if (!(await store.findJurisdiction(parsed.jurisdictionId))) throw new NotFoundError();
       const before = parsed.id ? await store.findAdminOffice(parsed.id) : null;
@@ -545,17 +548,14 @@ export class CivicService {
         before ? snapshot(before) : null,
         snapshot(office),
       );
-      return { office, before };
+      if (parsed.notifyFollowers && contactChanged(before, office)) {
+        await this.notify(
+          { type: 'RECORD_UPDATE', entityType: 'OFFICE', entityId: office.id, officeId: office.id },
+          office.id,
+        );
+      }
+      return office;
     }, 'ReadCommitted');
-    if (parsed.notifyFollowers && contactChanged(saved.before, saved.office)) {
-      await this.notify({
-        type: 'RECORD_UPDATE',
-        entityType: 'OFFICE',
-        entityId: saved.office.id,
-        officeId: saved.office.id,
-      });
-    }
-    return saved.office;
   }
 
   retireOffice(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'RETIRED' }> {
@@ -569,7 +569,7 @@ export class CivicService {
   async upsertOfficial(ctx: ServiceContext, input: unknown): Promise<AdminOfficialRecord> {
     ctx.authz.require('admin.civic:write');
     const parsed = parseUpsertOfficial(input);
-    const saved = await this.repo.transaction(async (store, tx) => {
+    return this.repo.transaction(async (store, tx) => {
       if (!(await store.sourceExists(parsed.sourceId))) throw new NotFoundError();
       const before = parsed.id ? await store.findAdminOfficial(parsed.id) : null;
       if (parsed.id && !before) throw new NotFoundError();
@@ -586,17 +586,14 @@ export class CivicService {
         before ? snapshot(before) : null,
         snapshot(official),
       );
-      return { official, before };
+      if (parsed.notifyFollowers && officialChanged(before, official)) {
+        await this.notify(
+          { type: 'RECORD_UPDATE', entityType: 'OFFICIAL', entityId: official.id, officialId: official.id },
+          official.id,
+        );
+      }
+      return official;
     }, 'ReadCommitted');
-    if (parsed.notifyFollowers && officialChanged(saved.before, saved.official)) {
-      await this.notify({
-        type: 'RECORD_UPDATE',
-        entityType: 'OFFICIAL',
-        entityId: saved.official.id,
-        officialId: saved.official.id,
-      });
-    }
-    return saved.official;
   }
 
   async retireOfficial(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'RETIRED' }> {
@@ -624,10 +621,10 @@ export class CivicService {
     }, 'ReadCommitted');
   }
 
-  async setOfficeTerm(ctx: ServiceContext, input: unknown): Promise<{ id: string; officeId: string }> {
+  async setOfficeTerm(ctx: ServiceContext, input: unknown): Promise<OfficeTermPayload> {
     ctx.authz.require('admin.civic:write');
     const parsed = parseSetOfficeTerm(input);
-    const result = await this.repo.transaction(async (store, tx) => {
+    return this.repo.transaction(async (store, tx) => {
       const office = await store.findAdminOffice(parsed.officeId);
       if (!office) throw new NotFoundError();
       const official = await store.findAdminOfficial(parsed.officialId);
@@ -650,40 +647,46 @@ export class CivicService {
         status: parsed.status,
         isCurrent: parsed.makeCurrent,
       });
-      return { term, office, official };
+      const savedOffice = (await store.findAdminOffice(parsed.officeId)) ?? office;
+      if (parsed.notifyFollowers && parsed.makeCurrent) {
+        const name = official.displayName ?? official.fullName;
+        await this.notify(
+          {
+            type: 'RECORD_UPDATE',
+            entityType: 'OFFICE',
+            entityId: savedOffice.id,
+            officeId: savedOffice.id,
+            officialId: official.id,
+            message: `${name} is now ${savedOffice.name}`,
+          },
+          savedOffice.id,
+        );
+      }
+      return { term, office: savedOffice };
     }, 'Serializable');
-    if (parsed.notifyFollowers && parsed.makeCurrent) {
-      const name = result.official.displayName ?? result.official.fullName;
-      await this.notify({
-        type: 'RECORD_UPDATE',
-        entityType: 'OFFICE',
-        entityId: result.office.id,
-        officeId: result.office.id,
-        officialId: result.official.id,
-        message: `${name} is now ${result.office.name}`,
-      });
-    }
-    return { id: result.term.id, officeId: result.office.id };
   }
 
-  endOfficeTerm(ctx: ServiceContext, input: unknown): Promise<{ id: string; officeId: string }> {
+  endOfficeTerm(ctx: ServiceContext, input: unknown): Promise<OfficeTermPayload> {
     ctx.authz.require('admin.civic:write');
     const parsed = parseEndOfficeTerm(input);
     return this.repo.transaction(async (store, tx) => {
-      const term = await store.findTerm(parsed.termId);
-      if (!term) throw new NotFoundError();
+      const current = await store.findTerm(parsed.termId);
+      if (!current) throw new NotFoundError();
       const termEnd = parsed.termEnd ?? this.utcDay(this.clock.now());
-      await store.endTerm(term.id, termEnd);
+      await store.endTerm(current.id, termEnd);
       await this.record(
         tx,
         ctx,
         'OFFICE_TERM',
-        term.id,
+        current.id,
         'UPDATE',
-        { isCurrent: term.isCurrent },
+        { isCurrent: current.isCurrent },
         { isCurrent: false, termEnd: termEnd.toISOString() },
       );
-      return { id: term.id, officeId: term.officeId };
+      const term = await store.findTerm(current.id);
+      const office = await store.findAdminOffice(current.officeId);
+      if (!term || !office) throw new NotFoundError();
+      return { term, office };
     }, 'Serializable');
   }
 
@@ -846,9 +849,14 @@ export class CivicService {
     return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   }
 
-  private async notify(payload: Record<string, unknown>): Promise<void> {
+  private async notify(payload: Record<string, unknown>, singletonKey: string): Promise<void> {
     if (!this.enqueue) return;
-    await this.enqueue('notify.fanout', payload);
+    try {
+      await this.enqueue('notify.fanout', payload, singletonKey);
+    } catch (error) {
+      if (isAppError(error)) throw error;
+      throw new UpstreamError(undefined, { cause: error });
+    }
   }
 
   private async record(

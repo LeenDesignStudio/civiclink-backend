@@ -17,6 +17,9 @@ import { AuditRepo } from './modules/audit/audit.repo.js';
 import { AuditService } from './modules/audit/audit.service.js';
 import { PipelineRepo } from './modules/pipeline/pipeline.repo.js';
 import { PipelineService } from './modules/pipeline/pipeline.service.js';
+import { BillingRepo } from './modules/billing/billing.repo.js';
+import { BillingService } from './modules/billing/billing.service.js';
+import { StripeBillingProvider } from './modules/billing/stripe.provider.js';
 
 export function isWorkerMain(metaUrl: string, argv1: string | undefined): boolean {
   if (!argv1) return false;
@@ -78,7 +81,17 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     clock: systemClock,
   });
   const retention = new RetentionService(new RetentionRepo(prisma), systemClock);
-  const services: WorkerServices = { notifications, pipeline, retention };
+  const billing = new BillingService({
+    repo: new BillingRepo(prisma),
+    provider: StripeBillingProvider.fromApiKey(env.STRIPE_SECRET_KEY),
+    publicWebUrl: env.PUBLIC_WEB_URL,
+  });
+  const services: WorkerServices = {
+    notifications,
+    pipeline,
+    retention,
+    applyBillingEvent: (_ctx, event) => billing.applyStripeEvent(event).then(() => undefined),
+  };
   await registerHandlers(boss, services);
   await registerSchedules(boss);
   return {

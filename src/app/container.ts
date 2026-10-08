@@ -116,7 +116,8 @@ export function buildContainer(): AppContainer {
     lookups: { findActive: (token, now) => new LookupRepo(prisma).findActive(token, now) },
     clock: systemClock,
     audit,
-    enqueue: (job, payload) => jobs.send(job, payload),
+    enqueue: (job, payload, singletonKey) =>
+      jobs.send(job, payload, singletonKey ?? (typeof payload.entityId === 'string' ? payload.entityId : undefined)),
   });
   const analytics = new PostHogAnalytics({
     fetchFn: fetch,
@@ -174,6 +175,9 @@ export function buildContainer(): AppContainer {
     },
     runTx,
     purgeDays: env.ACCOUNT_PURGE_DAYS,
+    notifier: {
+      enqueue: (name, payload, options) => jobs.send(name, payload, options.singletonKey),
+    },
     billing: {
       async cancelAtPeriodEnd(userId) {
         await prisma.subscription.updateMany({
@@ -234,6 +238,9 @@ export function buildContainer(): AppContainer {
     repo: new BillingRepo(prisma),
     provider: StripeBillingProvider.fromApiKey(env.STRIPE_SECRET_KEY),
     publicWebUrl: env.PUBLIC_WEB_URL,
+    queue: {
+      enqueue: (name, data, options) => jobs.send(name, data, options.singletonKey),
+    },
   });
   const contact = new ContactService({
     repo: new ContactRepo(prisma),
