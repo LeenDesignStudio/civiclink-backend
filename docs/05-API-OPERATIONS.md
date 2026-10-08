@@ -122,8 +122,8 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 | `retireOffice` / `restoreOffice` | Mutation | `admin.civic:retire` | `{ id }` | Retired offices hidden from cards; follows kept, hidden | `NOT_FOUND` |
 | `adminOfficials` / `adminOfficial(id)` | Query | `admin.civic:read` | `filter { status?, q?, officeId? }` | — | — |
 | `upsertOfficial` | Mutation | `admin.civic:write` | `{ id?, fullName 2–120, displayName?, party? ≤60, photoUrl? https, website?, sourceId, sourceRecordUrl?, lastUpdatedAt, freshnessOverride, freshnessNote?, notifyFollowers? }` | audit | `VALIDATION` |
-| `setOfficeTerm` | Mutation | `admin.civic:write` | `{ officeId, officialId, status: ELECTED\|APPOINTED\|ACTING, termStart?, termEnd?, makeCurrent: bool, notifyFollowers? }` | makeCurrent ends existing current term (is_current=false, term_end default today) in a serializable tx; clears holderUnknown; audit; optional fan-out "X is now Y" | `NOT_FOUND`, `VALIDATION` (dates) |
-| `endOfficeTerm` | Mutation | `admin.civic:write` | `{ termId, termEnd? }` | Office becomes vacant | `NOT_FOUND` |
+| `setOfficeTerm` | Mutation | `admin.civic:write` | `{ officeId, officialId, status: ELECTED\|APPOINTED\|ACTING, termStart?, termEnd?, makeCurrent: bool, notifyFollowers? }` | Returns `{ id, officeId }`. makeCurrent ends existing current term (is_current=false, term_end default today) in a serializable tx; clears holderUnknown; audit; optional fan-out "X is now Y" | `NOT_FOUND`, `VALIDATION` (dates) |
+| `endOfficeTerm` | Mutation | `admin.civic:write` | `{ termId, termEnd? }` | Returns `{ id, officeId }`. Office becomes vacant | `NOT_FOUND` |
 | `retireOfficial` / `restoreOfficial` | Mutation | `admin.civic:retire` | `{ id }` | Must have no current term | `HAS_CURRENT_TERM` |
 | `adminServices` / `adminService(id)` | Query | `admin.civic:read` | `filter { categoryId?, status?, linkBroken?, q? }` | — | — |
 | `upsertService` | Mutation | `admin.civic:write` | `{ id?, title 3–120, categoryId, description 20–400, url? https, phoneContact? ≤120 (url or phone required), jurisdictionIds[], officeIds[] (≥1 total), lastValidatedAt, sourceId }` | Replace links in same tx; audit | `VALIDATION` |
@@ -135,7 +135,7 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 | `pendingSourceChanges` | Query | `admin.civic:read` | `filter { sourceId?, decision? }` | — | — |
 | `decideSourceChange` | Mutation | `admin.source:decide` | `{ id, decision: ACCEPTED\|REJECTED }` | Accept applies value with audit actor ADMIN | `ALREADY_DECIDED` |
 | `changeLog` | Query | `admin.changelog:read` | `{ entityType, entityId, first, after }` | — | — |
-| `exportCsv` | Mutation | `admin.export:csv` | `{ list: JURISDICTIONS\|OFFICES\|OFFICIALS\|SERVICES\|SOURCES\|CORRECTIONS\|ALERTS, filter }` | Max 50,000 rows; streamed to S3, returns signed URL valid 10 min; no resident PII columns; CSV-injection safe (prefix `'` to cells starting with = + - @); audit | `EXPORT_TOO_LARGE` |
+| `exportCsv` | Mutation | `admin.export:csv` | `{ list: JURISDICTIONS\|OFFICES\|OFFICIALS\|SERVICES\|SOURCES\|CORRECTIONS\|ALERTS, filter }` | Max 50,000 rows; no resident PII columns; CSV-injection safe (prefix `'` to cells starting with = + - @); audit. Staging and production write the file to the exports S3 bucket and return a presigned URL valid 10 min. Development and test keep the file in memory and return a same-host `GET /dev/exports/:token` URL valid 10 min (that route is not registered in staging or production) | `EXPORT_TOO_LARGE` |
 
 ## I. Admin — corrections
 

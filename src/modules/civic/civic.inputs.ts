@@ -5,6 +5,7 @@ import {
   FRESHNESS_OVERRIDES,
   GOV_LEVELS,
   JURISDICTION_TYPES,
+  RECORD_STATUSES,
   SELECTION_METHODS,
   TERM_STATUSES,
   type FreshnessOverride,
@@ -548,6 +549,56 @@ export interface UpsertServiceCategoryInput {
   sortOrder: number;
   active: boolean;
 }
+
+const recordStatus = z.enum(RECORD_STATUSES);
+const freshness = z.enum(['CURRENT', 'MAY_BE_OUTDATED'] as const);
+
+export const adminJurisdictionListSchema = z
+  .object({
+    level: z.enum(GOV_LEVELS).optional(),
+    type: z.enum(JURISDICTION_TYPES).optional(),
+    state: z.string().regex(/^[A-Z]{2}$/).optional(),
+    status: recordStatus.optional(),
+    freshness: freshness.optional(),
+    q: z.string().trim().min(1).max(100).optional(),
+    first: z.number().int().min(1).max(100).default(20),
+    after: z.string().optional(),
+  })
+  .strict();
+
+export const adminOfficeListSchema = z
+  .object({
+    level: z.enum(GOV_LEVELS).optional(),
+    jurisdictionId: z.uuid().optional(),
+    vacantOnly: z.boolean().optional(),
+    staleOnly: z.boolean().optional(),
+    status: recordStatus.optional(),
+    q: z.string().trim().min(1).max(100).optional(),
+    first: z.number().int().min(1).max(100).default(20),
+    after: z.string().optional(),
+  })
+  .strict();
+
+export const adminOfficialListSchema = z
+  .object({
+    status: recordStatus.optional(),
+    officeId: z.uuid().optional(),
+    q: z.string().trim().min(1).max(100).optional(),
+    first: z.number().int().min(1).max(100).default(20),
+    after: z.string().optional(),
+  })
+  .strict();
+
+export const adminServiceListSchema = z
+  .object({
+    categoryId: z.uuid().optional(),
+    status: recordStatus.optional(),
+    linkBroken: z.boolean().optional(),
+    q: z.string().trim().min(1).max(100).optional(),
+    first: z.number().int().min(1).max(100).default(20),
+    after: z.string().optional(),
+  })
+  .strict();
 
 export function parseUpsertServiceCategory(input: unknown): UpsertServiceCategoryInput {
   const value = parse(upsertServiceCategorySchema, input);

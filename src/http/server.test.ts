@@ -2,6 +2,7 @@ import { getIntrospectionQuery } from 'graphql';
 import { describe, expect, it } from 'vitest';
 import type { AppServices } from '../app/services.js';
 import { MemoryRateGate } from '../lib/rate-limit.js';
+import { MemoryExportStore } from '../modules/sources/export.store.js';
 import { buildServer } from './server.js';
 
 function services(): AppServices {
@@ -31,6 +32,26 @@ describe('http server', () => {
     expect(response.headers['referrer-policy']).toBe('no-referrer');
     expect(String(response.headers['content-security-policy'])).toContain("default-src 'none'");
     expect(String(response.headers['strict-transport-security'])).toContain('max-age=63072000');
+    await server.close();
+  });
+
+  it('serves a development CSV download', async () => {
+    const devExports = new MemoryExportStore();
+    await devExports.put({
+      key: 'offices-1.csv',
+      body: new TextEncoder().encode('name\nMayor\n'),
+      contentType: 'text/csv; charset=utf-8',
+    });
+    const server = await buildServer({
+      services: services(),
+      rateGate: new MemoryRateGate(),
+      readiness: { isShuttingDown: () => false, pingDb: async () => true },
+      devExports,
+    });
+    const response = await server.inject({ method: 'GET', url: '/dev/exports/offices-1.csv' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('Mayor');
+    expect(response.headers['content-type']).toContain('text/csv');
     await server.close();
   });
 

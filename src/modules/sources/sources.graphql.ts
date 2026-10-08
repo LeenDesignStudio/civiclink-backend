@@ -166,6 +166,30 @@ const ExportInput = builder.inputType('ExportCsvInput', {
 function sources(ctx: { services: unknown }): SourcesService {
   return (ctx.services as { sources: SourcesService }).sources;
 }
+
+function apiBase(request: {
+  protocol: string;
+  hostname: string;
+  headers: {
+    'x-forwarded-proto'?: string | string[];
+    'x-forwarded-host'?: string | string[];
+    host?: string | string[] | undefined;
+  };
+}): string {
+  const forwardedProto = request.headers['x-forwarded-proto'];
+  const forwardedHost = request.headers['x-forwarded-host'] ?? request.headers.host;
+  const proto = firstHeader(forwardedProto) ?? request.protocol;
+  const host = firstHeader(forwardedHost) ?? request.hostname;
+  return `${proto}://${host}`;
+}
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  if (!value) return undefined;
+  const first = value.split(',')[0]?.trim();
+  return first && first.length > 0 ? first : undefined;
+}
+
 function exportsOf(ctx: { services: unknown }): ExportService {
   return (ctx.services as { exports: ExportService }).exports;
 }
@@ -263,7 +287,8 @@ builder.mutationField('exportCsv', (t) =>
           throw new ValidationError('Filter must be JSON.');
         }
       }
-      return exportsOf(ctx).exportCsv(ctx, filter ? { list: input.list, filter } : { list: input.list });
+      const body = filter ? { list: input.list, filter } : { list: input.list };
+      return exportsOf(ctx).exportCsv(ctx, body, apiBase(ctx.reply.request));
     },
   }),
 );

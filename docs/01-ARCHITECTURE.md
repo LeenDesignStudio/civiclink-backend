@@ -124,7 +124,7 @@ All validated by `src/config/env.ts` (Zod) at boot. `S` = secret (Secrets Manage
 
 | Env | Database | Providers | Notes |
 |---|---|---|---|
-| development | Hetzner dev server via SSH tunnel (docs/07) or docker-compose `postgis/postgis:16-3.5` | console email/push, Stripe test, real Google key restricted to dev | GraphiQL on. Dev data only |
+| development | Hetzner dev server via SSH tunnel (docs/07) or docker-compose `postgis/postgis:16-3.5` | console email/push, Stripe test, real Google key restricted to dev | GraphiQL on. CSV exports are served by the API at `GET /dev/exports/:token` (no S3). Dev data only |
 | test | `civiclink_test` on the dev server (local) or Testcontainers (CI) | all fakes | no external provider calls |
 | staging | RDS (QubaLink AWS) | real providers in test mode | UAT happens here |
 | production | RDS Multi-AZ (QubaLink AWS) | live | migrations via CI job with owner role |

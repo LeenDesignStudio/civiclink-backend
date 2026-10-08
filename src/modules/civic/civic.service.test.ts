@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { Authz, anonymousPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { FakeClock } from '../../lib/clock.js';
-import { NotFoundError } from '../../lib/errors.js';
+import { NotFoundError, UnauthenticatedError } from '../../lib/errors.js';
+import type { AdminJurisdictionNode } from './civic.dto.js';
 import type { LookupContext } from '../lookup/lookup.dto.js';
 import type { OfficeRecord, OfficialRecord, OfficialTermLink } from './civic.dto.js';
 import type { CivicStore } from './civic.repo.js';
@@ -258,5 +259,45 @@ describe('CivicService public reads', () => {
 
     const missing = await service.getOffice(ctx, { slug: 'elsewhere', lookupToken: saved.token });
     expect(missing.whyItApplies).toBeNull();
+  });
+
+  it('lists admin jurisdictions for a viewer and rejects an anonymous caller', async () => {
+    const node: AdminJurisdictionNode = {
+      id: JURISDICTION_ID,
+      name: 'Dallas',
+      level: 'MUNICIPAL',
+      type: 'MUNICIPALITY',
+      subtype: null,
+      parentId: null,
+      districtCode: null,
+      geoid: null,
+      state: 'TX',
+      boundaryVintage: null,
+      website: null,
+      sourceId: '22222222-2222-4222-8222-222222222222',
+      sourceRecordUrl: null,
+      lastUpdatedAt: NOW,
+      freshnessOverride: 'NONE',
+      freshnessNote: null,
+      status: 'ACTIVE',
+      createdAt: NOW,
+      hasBoundary: false,
+    };
+    const store = {
+      listAdminJurisdictions: () => Promise.resolve([node]),
+    } as unknown as CivicStore;
+    const service = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    expect(() => service.adminJurisdictions(context(), {})).toThrow(UnauthenticatedError);
+    const admin = new Authz({ kind: 'admin', adminId: 'admin-1', role: 'VIEWER', sessionId: 'session-1' });
+    const page = await service.adminJurisdictions(
+      { requestId: 'req-1', principal: { kind: 'admin', adminId: 'admin-1', role: 'VIEWER', sessionId: 'session-1' }, authz: admin, ipHash: 'hash' },
+      { q: 'Dallas' },
+    );
+    expect(page.edges[0]?.node.name).toBe('Dallas');
+    expect(page.edges[0]?.node.hasBoundary).toBe(false);
   });
 });

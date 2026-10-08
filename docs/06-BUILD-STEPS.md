@@ -410,7 +410,7 @@ Read @docs/05-API-OPERATIONS.md section H and @docs/02-RBAC-PERMISSIONS.md secti
 Implement every operation in section H with its validation, rules, errors and audit.
 - setOfficeTerm makes the new term current and ends the old one atomically.
 - notifyFollowers enqueues notify.fanout with a RECORD_UPDATE payload (queue only; delivery is step 14).
-- exportCsv streams to S3 (exports bucket), CSV-injection safe, ≤50,000 rows, presigned URL 10 min, audited.
+- exportCsv is CSV-injection safe, ≤50,000 rows, audited, URL valid 10 min. Staging and production stream to the exports S3 bucket. Development and test store the file in memory and serve `GET /dev/exports/:token` so the API can be tested before AWS is live.
 - Tests: role matrix per operation; JURISDICTION_CYCLE; HAS_ACTIVE_CHILDREN; HAS_CURRENT_TERM;
   RUN_IN_PROGRESS; UNKNOWN_COLLECTOR; audit before/after contains only changed fields; CSV cell
   starting with "=" is prefixed.

@@ -241,6 +241,11 @@ export interface JurisdictionRecord {
   status: RecordStatus;
 }
 
+export interface AdminJurisdictionNode extends JurisdictionRecord {
+  createdAt: Date;
+  hasBoundary: boolean;
+}
+
 export interface AdminOfficeRecord {
   id: string;
   slug: string;

@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { dbCall, prisma, withTx, type Db } from '../../db/prisma.js';
 import { NotFoundError } from '../../lib/errors.js';
 import type {
+  AdminJurisdictionNode,
   AdminOfficeRecord,
   AdminOfficialRecord,
   AdminServiceRecord,
@@ -25,6 +26,38 @@ import type {
   UpsertServiceCategoryInput,
   UpsertServiceInput,
 } from './civic.inputs.js';
+
+export interface AdminPageQuery {
+  first: number;
+  after?: { createdAt: Date; id: string };
+  q?: string;
+  status?: RecordStatus;
+}
+
+export interface JurisdictionAdminQuery extends AdminPageQuery {
+  level?: JurisdictionRecord['level'];
+  type?: JurisdictionRecord['type'];
+  state?: string;
+  freshness?: 'CURRENT' | 'MAY_BE_OUTDATED';
+  freshnessCutoff: Date;
+}
+
+export interface OfficeAdminQuery extends AdminPageQuery {
+  level?: JurisdictionRecord['level'];
+  jurisdictionId?: string;
+  vacantOnly?: boolean;
+  staleOnly?: boolean;
+  freshnessCutoff: Date;
+}
+
+export interface OfficialAdminQuery extends AdminPageQuery {
+  officeId?: string;
+}
+
+export interface ServiceAdminQuery extends AdminPageQuery {
+  categoryId?: string;
+  linkBroken?: boolean;
+}
 
 export interface ListServicesArgs {
   jurisdictionIds: string[];
@@ -60,6 +93,10 @@ export interface CivicStore {
   officesForJurisdictions(ids: string[]): Promise<OfficeRecord[]>;
   servicesForLinks(jurisdictionIds: string[], officeIds: string[], limit: number): Promise<ServiceRecord[]>;
   findJurisdiction(id: string): Promise<JurisdictionRecord | null>;
+  listAdminJurisdictions(query: JurisdictionAdminQuery): Promise<AdminJurisdictionNode[]>;
+  listAdminOffices(query: OfficeAdminQuery): Promise<Array<AdminOfficeRecord & { createdAt: Date }>>;
+  listAdminOfficials(query: OfficialAdminQuery): Promise<Array<AdminOfficialRecord & { createdAt: Date }>>;
+  listAdminServices(query: ServiceAdminQuery): Promise<Array<AdminServiceRecord & { createdAt: Date }>>;
   findAdminOffice(id: string): Promise<AdminOfficeRecord | null>;
   findAdminOfficial(id: string): Promise<AdminOfficialRecord | null>;
   findAdminService(id: string): Promise<AdminServiceRecord | null>;
@@ -89,6 +126,13 @@ export interface CivicStore {
   setServiceStatus(id: string, status: RecordStatus): Promise<void>;
   createCategory(input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
   updateCategory(id: string, input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
+}
+
+function createdBefore(after: { createdAt: Date; id: string } | undefined): { OR: [{ createdAt: { lt: Date } }, { createdAt: Date; id: { lt: string } }] } | undefined {
+  if (!after) return undefined;
+  return {
+    OR: [{ createdAt: { lt: after.createdAt } }, { createdAt: after.createdAt, id: { lt: after.id } }],
+  };
 }
 
 function stringList(value: Prisma.JsonValue): string[] {
@@ -513,6 +557,223 @@ export class CivicRepo implements CivicStore {
     });
   }
 
+  listAdminJurisdictions(query: JurisdictionAdminQuery): Promise<AdminJurisdictionNode[]> {
+    return this.run(async () => {
+      const where: Prisma.JurisdictionWhereInput = {};
+      if (query.level) where.level = query.level;
+      if (query.type) where.type = query.type;
+      if (query.state) where.state = query.state;
+      if (query.status) where.status = query.status;
+      if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
+      const and: Prisma.JurisdictionWhereInput[] = [];
+      if (query.freshness === 'CURRENT') {
+        and.push({
+          OR: [
+            { freshnessOverride: 'FORCE_CURRENT' },
+            { freshnessOverride: 'NONE', lastUpdatedAt: { gte: query.freshnessCutoff } },
+          ],
+        });
+      } else if (query.freshness === 'MAY_BE_OUTDATED') {
+        and.push({
+          OR: [
+            { freshnessOverride: 'FORCE_OUTDATED' },
+            { freshnessOverride: 'NONE', lastUpdatedAt: { lt: query.freshnessCutoff } },
+          ],
+        });
+      }
+      const cursor = createdBefore(query.after);
+      if (cursor) and.push(cursor);
+      if (and.length > 0) where.AND = and;
+      const rows = await this.db.jurisdiction.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: query.first + 1,
+        select: {
+          id: true,
+          name: true,
+          level: true,
+          type: true,
+          subtype: true,
+          parentId: true,
+          districtCode: true,
+          geoid: true,
+          state: true,
+          boundaryVintage: true,
+          website: true,
+          sourceId: true,
+          sourceRecordUrl: true,
+          lastUpdatedAt: true,
+          freshnessOverride: true,
+          freshnessNote: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+      const flags = await this.boundaryFlags(rows.map((row) => row.id));
+      return rows.map((row) => ({ ...row, hasBoundary: flags.get(row.id) ?? false }));
+    });
+  }
+
+  listAdminOffices(query: OfficeAdminQuery): Promise<Array<AdminOfficeRecord & { createdAt: Date }>> {
+    return this.run(async () => {
+      const where: Prisma.OfficeWhereInput = {};
+      if (query.jurisdictionId) where.jurisdictionId = query.jurisdictionId;
+      if (query.status) where.status = query.status;
+      if (query.level) where.jurisdiction = { level: query.level };
+      if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
+      if (query.vacantOnly) where.terms = { none: { isCurrent: true } };
+      const and: Prisma.OfficeWhereInput[] = [];
+      if (query.staleOnly) {
+        and.push({
+          OR: [
+            { freshnessOverride: 'FORCE_OUTDATED' },
+            { freshnessOverride: 'NONE', lastUpdatedAt: { lt: query.freshnessCutoff } },
+          ],
+        });
+      }
+      const cursor = createdBefore(query.after);
+      if (cursor) and.push(cursor);
+      if (and.length > 0) where.AND = and;
+      const rows = await this.db.office.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: query.first + 1,
+        select: {
+          id: true,
+          slug: true,
+          jurisdictionId: true,
+          name: true,
+          seatLabel: true,
+          selectionMethod: true,
+          displayOrder: true,
+          whyTemplate: true,
+          phone: true,
+          email: true,
+          website: true,
+          contactUrl: true,
+          holderUnknown: true,
+          sourceId: true,
+          sourceRecordUrl: true,
+          lastUpdatedAt: true,
+          freshnessOverride: true,
+          freshnessNote: true,
+          status: true,
+          createdAt: true,
+          addresses: {
+            orderBy: { sortOrder: 'asc' },
+            select: { id: true, label: true, street: true, city: true, state: true, zip: true, phone: true, hours: true },
+          },
+          _count: { select: { follows: true } },
+        },
+      });
+      return rows.map((row) => ({
+        id: row.id,
+        slug: row.slug,
+        jurisdictionId: row.jurisdictionId,
+        name: row.name,
+        seatLabel: row.seatLabel,
+        selectionMethod: row.selectionMethod,
+        displayOrder: row.displayOrder,
+        whyTemplate: row.whyTemplate,
+        phone: row.phone,
+        email: row.email,
+        website: row.website,
+        contactUrl: row.contactUrl,
+        holderUnknown: row.holderUnknown,
+        sourceId: row.sourceId,
+        sourceRecordUrl: row.sourceRecordUrl,
+        lastUpdatedAt: row.lastUpdatedAt,
+        freshnessOverride: row.freshnessOverride,
+        freshnessNote: row.freshnessNote,
+        status: row.status,
+        followerCount: row._count.follows,
+        addresses: row.addresses.map(mapAddress),
+        createdAt: row.createdAt,
+      }));
+    });
+  }
+
+  listAdminOfficials(query: OfficialAdminQuery): Promise<Array<AdminOfficialRecord & { createdAt: Date }>> {
+    return this.run(async () => {
+      const where: Prisma.OfficialWhereInput = {};
+      if (query.status) where.status = query.status;
+      if (query.officeId) where.terms = { some: { officeId: query.officeId } };
+      if (query.q) {
+        where.OR = [
+          { fullName: { contains: query.q, mode: 'insensitive' } },
+          { displayName: { contains: query.q, mode: 'insensitive' } },
+        ];
+      }
+      const cursor = createdBefore(query.after);
+      if (cursor) where.AND = [cursor];
+      return this.db.official.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: query.first + 1,
+        select: {
+          id: true,
+          slug: true,
+          fullName: true,
+          displayName: true,
+          party: true,
+          photoUrl: true,
+          website: true,
+          sourceId: true,
+          sourceRecordUrl: true,
+          lastUpdatedAt: true,
+          freshnessOverride: true,
+          freshnessNote: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+    });
+  }
+
+  listAdminServices(query: ServiceAdminQuery): Promise<Array<AdminServiceRecord & { createdAt: Date }>> {
+    return this.run(async () => {
+      const where: Prisma.ServiceWhereInput = {};
+      if (query.categoryId) where.categoryId = query.categoryId;
+      if (query.status) where.status = query.status;
+      if (query.linkBroken !== undefined) where.linkBroken = query.linkBroken;
+      if (query.q) where.title = { contains: query.q, mode: 'insensitive' };
+      const cursor = createdBefore(query.after);
+      if (cursor) where.AND = [cursor];
+      const rows = await this.db.service.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: query.first + 1,
+        select: {
+          id: true,
+          title: true,
+          categoryId: true,
+          description: true,
+          url: true,
+          phoneContact: true,
+          lastValidatedAt: true,
+          sourceId: true,
+          status: true,
+          createdAt: true,
+          links: { select: { jurisdictionId: true, officeId: true } },
+        },
+      });
+      return rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        categoryId: row.categoryId,
+        description: row.description,
+        url: row.url,
+        phoneContact: row.phoneContact,
+        lastValidatedAt: row.lastValidatedAt,
+        sourceId: row.sourceId,
+        status: row.status,
+        jurisdictionIds: row.links.flatMap((link) => (link.jurisdictionId ? [link.jurisdictionId] : [])),
+        officeIds: row.links.flatMap((link) => (link.officeId ? [link.officeId] : [])),
+        createdAt: row.createdAt,
+      }));
+    });
+  }
+
   findAdminOffice(id: string): Promise<AdminOfficeRecord | null> {
     return this.run(() => this.loadAdminOffice(id));
   }
@@ -875,6 +1136,16 @@ export class CivicRepo implements CivicStore {
         select: { id: true, name: true, sortOrder: true, active: true },
       }),
     );
+  }
+
+  private async boundaryFlags(ids: string[]): Promise<Map<string, boolean>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.db.$queryRaw<Array<{ id: string; has_boundary: boolean }>>`
+      SELECT id::text AS id, (boundary IS NOT NULL) AS has_boundary
+      FROM jurisdictions
+      WHERE id::text IN (${Prisma.join(ids)})
+    `;
+    return new Map(rows.map((row) => [row.id, row.has_boundary]));
   }
 
   private async loadJurisdiction(id: string): Promise<JurisdictionRecord | null> {

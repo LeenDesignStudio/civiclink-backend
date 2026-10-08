@@ -29,6 +29,7 @@ export async function start(): Promise<void> {
   const app = await buildServer({
     services: container.services,
     rateGate: createPostgresRateGate(pool),
+    ...(container.devExports ? { devExports: container.devExports } : {}),
     readiness: {
       isShuttingDown: () => shuttingDown,
       pingDb: async () => {
@@ -71,6 +72,7 @@ export async function start(): Promise<void> {
     const timer = setTimeout(() => process.exit(1), 20_000);
     try {
       await app.close();
+      await container.stopJobs();
       await pool.end();
       await prisma.$disconnect();
       clearTimeout(timer);

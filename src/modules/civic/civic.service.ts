@@ -1,5 +1,7 @@
+import { z } from 'zod';
 import type { ServiceContext } from '../../graphql/context.js';
 import type { Clock } from '../../lib/clock.js';
+import { fromZod } from '../../lib/errors.js';
 import {
   ConflictError,
   HasActiveChildrenError,
@@ -12,6 +14,7 @@ import {
 import { buildConnection, clampFirst, decodeCursor, type Connection } from '../../lib/pagination.js';
 import { slugify } from '../../lib/slug.js';
 import type {
+  AdminJurisdictionNode,
   AdminOfficeRecord,
   AdminOfficialRecord,
   AdminServiceRecord,
@@ -36,6 +39,10 @@ import type {
 } from './civic.dto.js';
 import type { CivicStore, ListServicesArgs } from './civic.repo.js';
 import {
+  adminJurisdictionListSchema,
+  adminOfficeListSchema,
+  adminOfficialListSchema,
+  adminServiceListSchema,
   parseEndOfficeTerm,
   parseId,
   parseOfficeQuery,
@@ -52,6 +59,12 @@ import {
 import type { LookupContext } from '../lookup/lookup.dto.js';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function parse<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) throw fromZod(parsed.error);
+  return parsed.data;
+}
 
 const DEFAULT_WHY: Record<JurisdictionType, string> = {
   NATION: '{office} serves {jurisdiction} ({district}).',
@@ -389,6 +402,67 @@ export class CivicService {
     return row;
   }
 
+  adminJurisdictions(ctx: ServiceContext, input: unknown): Promise<Connection<AdminJurisdictionNode>> {
+    ctx.authz.require('admin.civic:read');
+    const parsed = parse(adminJurisdictionListSchema, input);
+    return this.page(parsed.first, parsed.after, (query) =>
+      this.repo.listAdminJurisdictions({
+        ...query,
+        freshnessCutoff: this.freshnessCutoff(),
+        ...(parsed.level ? { level: parsed.level } : {}),
+        ...(parsed.type ? { type: parsed.type } : {}),
+        ...(parsed.state ? { state: parsed.state } : {}),
+        ...(parsed.status ? { status: parsed.status } : {}),
+        ...(parsed.freshness ? { freshness: parsed.freshness } : {}),
+        ...(parsed.q ? { q: parsed.q } : {}),
+      }),
+    );
+  }
+
+  adminOffices(ctx: ServiceContext, input: unknown): Promise<Connection<AdminOfficeRecord & { createdAt: Date }>> {
+    ctx.authz.require('admin.civic:read');
+    const parsed = parse(adminOfficeListSchema, input);
+    return this.page(parsed.first, parsed.after, (query) =>
+      this.repo.listAdminOffices({
+        ...query,
+        freshnessCutoff: this.freshnessCutoff(),
+        ...(parsed.level ? { level: parsed.level } : {}),
+        ...(parsed.jurisdictionId ? { jurisdictionId: parsed.jurisdictionId } : {}),
+        ...(parsed.vacantOnly ? { vacantOnly: parsed.vacantOnly } : {}),
+        ...(parsed.staleOnly ? { staleOnly: parsed.staleOnly } : {}),
+        ...(parsed.status ? { status: parsed.status } : {}),
+        ...(parsed.q ? { q: parsed.q } : {}),
+      }),
+    );
+  }
+
+  adminOfficials(ctx: ServiceContext, input: unknown): Promise<Connection<AdminOfficialRecord & { createdAt: Date }>> {
+    ctx.authz.require('admin.civic:read');
+    const parsed = parse(adminOfficialListSchema, input);
+    return this.page(parsed.first, parsed.after, (query) =>
+      this.repo.listAdminOfficials({
+        ...query,
+        ...(parsed.status ? { status: parsed.status } : {}),
+        ...(parsed.officeId ? { officeId: parsed.officeId } : {}),
+        ...(parsed.q ? { q: parsed.q } : {}),
+      }),
+    );
+  }
+
+  adminServices(ctx: ServiceContext, input: unknown): Promise<Connection<AdminServiceRecord & { createdAt: Date }>> {
+    ctx.authz.require('admin.civic:read');
+    const parsed = parse(adminServiceListSchema, input);
+    return this.page(parsed.first, parsed.after, (query) =>
+      this.repo.listAdminServices({
+        ...query,
+        ...(parsed.categoryId ? { categoryId: parsed.categoryId } : {}),
+        ...(parsed.status ? { status: parsed.status } : {}),
+        ...(parsed.linkBroken !== undefined ? { linkBroken: parsed.linkBroken } : {}),
+        ...(parsed.q ? { q: parsed.q } : {}),
+      }),
+    );
+  }
+
   upsertJurisdiction(ctx: ServiceContext, input: unknown): Promise<JurisdictionRecord> {
     ctx.authz.require('admin.civic:write');
     const parsed = parseUpsertJurisdiction(input);
@@ -546,7 +620,7 @@ export class CivicService {
     }, 'ReadCommitted');
   }
 
-  async setOfficeTerm(ctx: ServiceContext, input: unknown): Promise<{ id: string }> {
+  async setOfficeTerm(ctx: ServiceContext, input: unknown): Promise<{ id: string; officeId: string }> {
     ctx.authz.require('admin.civic:write');
     const parsed = parseSetOfficeTerm(input);
     const result = await this.repo.transaction(async (store, tx) => {
@@ -585,7 +659,7 @@ export class CivicService {
         message: `${name} is now ${result.office.name}`,
       });
     }
-    return result.term;
+    return { id: result.term.id, officeId: result.office.id };
   }
 
   endOfficeTerm(ctx: ServiceContext, input: unknown): Promise<{ id: string; officeId: string }> {
@@ -661,6 +735,21 @@ export class CivicService {
       );
       return category;
     }, 'ReadCommitted');
+  }
+
+  private freshnessCutoff(): Date {
+    return new Date(this.clock.now().getTime() - 90 * MS_PER_DAY);
+  }
+
+  private async page<T extends { createdAt: Date; id: string }>(
+    first: number,
+    after: string | undefined,
+    load: (query: { first: number; after?: { createdAt: Date; id: string } }) => Promise<T[]>,
+  ): Promise<Connection<T>> {
+    const cursor = after ? decodeCursor(after) : undefined;
+    if (after && !cursor) throw new ValidationError('That page cursor is not valid.');
+    const rows = await load(cursor ? { first, after: cursor } : { first });
+    return buildConnection(rows, first);
   }
 
   private setOfficeStatus<S extends 'ACTIVE' | 'RETIRED'>(

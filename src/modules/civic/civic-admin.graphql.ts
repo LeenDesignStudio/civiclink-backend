@@ -1,7 +1,10 @@
 import { builder, rememberScope } from '../../graphql/builder.js';
+import type { Connection } from '../../lib/pagination.js';
+import { PageInfoRef } from '../audit/audit.graphql.js';
 import { withoutNulls } from '../follows/relay.graphql.js';
 import { CivicService } from './civic.service.js';
-import { FreshnessOverrideEnum, JurisdictionTypeEnum, SelectionMethodEnum, TermStatusEnum } from './civic.graphql.js';
+import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, ServiceCategoryRecord } from './civic.dto.js';
+import { FreshnessEnum, FreshnessOverrideEnum, JurisdictionTypeEnum, SelectionMethodEnum, TermStatusEnum } from './civic.graphql.js';
 import { GovLevelEnum } from '../follows/relay.graphql.js';
 
 const readScope = { permission: 'admin.civic:read' as const };
@@ -20,13 +23,9 @@ IdStatus.implement({
   }),
 });
 
-const JurisdictionAdmin = builder.objectRef<{
-  id: string;
-  name: string;
-  level: 'FEDERAL' | 'STATE' | 'COUNTY' | 'MUNICIPAL' | 'EDUCATION' | 'SPECIAL';
-  type: string;
-  status: string;
-}>('AdminJurisdiction');
+type AdminJurisdictionView = JurisdictionRecord & { hasBoundary?: boolean };
+
+const JurisdictionAdmin = builder.objectRef<AdminJurisdictionView>('AdminJurisdiction');
 JurisdictionAdmin.implement({
   fields: (t) => ({
     id: t.exposeID('id'),
@@ -34,9 +33,105 @@ JurisdictionAdmin.implement({
     level: t.field({ type: GovLevelEnum, resolve: (row) => row.level }),
     type: t.field({
       type: JurisdictionTypeEnum,
-      resolve: (row) => row.type as never,
+      resolve: (row) => row.type,
     }),
     status: t.exposeString('status'),
+    subtype: t.exposeString('subtype', { nullable: true }),
+    parentId: t.exposeID('parentId', { nullable: true }),
+    districtCode: t.exposeString('districtCode', { nullable: true }),
+    geoid: t.exposeString('geoid', { nullable: true }),
+    state: t.exposeString('state', { nullable: true }),
+    boundaryVintage: t.exposeString('boundaryVintage', { nullable: true }),
+    hasBoundary: t.boolean({ resolve: (row) => row.hasBoundary ?? false }),
+    website: t.exposeString('website', { nullable: true }),
+    sourceId: t.exposeID('sourceId'),
+    lastUpdatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastUpdatedAt }),
+    freshnessOverride: t.field({ type: FreshnessOverrideEnum, resolve: (row) => row.freshnessOverride }),
+    freshnessNote: t.exposeString('freshnessNote', { nullable: true }),
+  }),
+});
+
+const RecordStatusEnum = builder.enumType('RecordStatus', { values: ['ACTIVE', 'RETIRED'] as const });
+
+const AdminAddress = builder.objectRef<OfficeAddressDto>('AdminOfficeAddress').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    label: t.exposeString('label'),
+    street: t.exposeString('street'),
+    city: t.exposeString('city'),
+    state: t.exposeString('state'),
+    zip: t.exposeString('zip'),
+    phone: t.exposeString('phone', { nullable: true }),
+    hours: t.exposeString('hours', { nullable: true }),
+  }),
+});
+
+const OfficeAdmin = builder.objectRef<AdminOfficeRecord>('AdminOffice').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    slug: t.exposeString('slug'),
+    jurisdictionId: t.exposeID('jurisdictionId'),
+    name: t.exposeString('name'),
+    seatLabel: t.exposeString('seatLabel', { nullable: true }),
+    selectionMethod: t.field({ type: SelectionMethodEnum, resolve: (row) => row.selectionMethod }),
+    displayOrder: t.exposeInt('displayOrder'),
+    whyTemplate: t.exposeString('whyTemplate', { nullable: true }),
+    phone: t.exposeString('phone', { nullable: true }),
+    email: t.exposeString('email', { nullable: true }),
+    website: t.exposeString('website', { nullable: true }),
+    contactUrl: t.exposeString('contactUrl', { nullable: true }),
+    holderUnknown: t.exposeBoolean('holderUnknown'),
+    sourceId: t.exposeID('sourceId'),
+    sourceRecordUrl: t.exposeString('sourceRecordUrl', { nullable: true }),
+    lastUpdatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastUpdatedAt }),
+    freshnessOverride: t.field({ type: FreshnessOverrideEnum, resolve: (row) => row.freshnessOverride }),
+    freshnessNote: t.exposeString('freshnessNote', { nullable: true }),
+    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    followerCount: t.exposeInt('followerCount'),
+    addresses: t.field({ type: [AdminAddress], resolve: (row) => row.addresses }),
+  }),
+});
+
+const OfficialAdmin = builder.objectRef<AdminOfficialRecord>('AdminOfficial').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    slug: t.exposeString('slug'),
+    fullName: t.exposeString('fullName'),
+    displayName: t.exposeString('displayName', { nullable: true }),
+    party: t.exposeString('party', { nullable: true }),
+    photoUrl: t.exposeString('photoUrl', { nullable: true }),
+    website: t.exposeString('website', { nullable: true }),
+    sourceId: t.exposeID('sourceId'),
+    sourceRecordUrl: t.exposeString('sourceRecordUrl', { nullable: true }),
+    lastUpdatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastUpdatedAt }),
+    freshnessOverride: t.field({ type: FreshnessOverrideEnum, resolve: (row) => row.freshnessOverride }),
+    freshnessNote: t.exposeString('freshnessNote', { nullable: true }),
+    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+  }),
+});
+
+const ServiceAdmin = builder.objectRef<AdminServiceRecord>('AdminService').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    title: t.exposeString('title'),
+    categoryId: t.exposeID('categoryId'),
+    description: t.exposeString('description'),
+    url: t.exposeString('url', { nullable: true }),
+    phoneContact: t.exposeString('phoneContact', { nullable: true }),
+    lastValidatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastValidatedAt }),
+    sourceId: t.exposeID('sourceId'),
+    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    jurisdictionIds: t.field({ type: ['ID'], resolve: (row) => row.jurisdictionIds }),
+    officeIds: t.field({ type: ['ID'], resolve: (row) => row.officeIds }),
+  }),
+});
+
+const CategoryAdmin = builder.objectRef<ServiceCategoryRecord>('AdminServiceCategory').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    name: t.exposeString('name'),
+    sortOrder: t.exposeInt('sortOrder'),
+    active: t.exposeBoolean('active'),
   }),
 });
 
@@ -129,7 +224,7 @@ idMutation('restoreService', retireScope);
 
 builder.mutationField('upsertOffice', (t) =>
   t.field({
-    type: 'ID',
+    type: OfficeAdmin,
     authScopes: writeScope,
     args: {
       input: t.arg({
@@ -157,14 +252,14 @@ builder.mutationField('upsertOffice', (t) =>
         required: true,
       }),
     },
-    resolve: async (_root, args, ctx) => (await civic(ctx).upsertOffice(ctx, withoutNulls(args.input))).id,
+    resolve: (_root, args, ctx) => civic(ctx).upsertOffice(ctx, withoutNulls(args.input)),
   }),
 );
 rememberScope('Mutation', 'upsertOffice', writeScope);
 
 builder.mutationField('upsertOfficial', (t) =>
   t.field({
-    type: 'ID',
+    type: OfficialAdmin,
     authScopes: writeScope,
     args: {
       input: t.arg({
@@ -186,14 +281,21 @@ builder.mutationField('upsertOfficial', (t) =>
         required: true,
       }),
     },
-    resolve: async (_root, args, ctx) => (await civic(ctx).upsertOfficial(ctx, withoutNulls(args.input))).id,
+    resolve: (_root, args, ctx) => civic(ctx).upsertOfficial(ctx, withoutNulls(args.input)),
   }),
 );
 rememberScope('Mutation', 'upsertOfficial', writeScope);
 
+const TermPayload = builder.objectRef<{ id: string; officeId: string }>('OfficeTermPayload').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    officeId: t.exposeID('officeId'),
+  }),
+});
+
 builder.mutationField('setOfficeTerm', (t) =>
   t.field({
-    type: 'ID',
+    type: TermPayload,
     authScopes: writeScope,
     args: {
       input: t.arg({
@@ -211,14 +313,14 @@ builder.mutationField('setOfficeTerm', (t) =>
         required: true,
       }),
     },
-    resolve: async (_root, args, ctx) => (await civic(ctx).setOfficeTerm(ctx, withoutNulls(args.input))).id,
+    resolve: (_root, args, ctx) => civic(ctx).setOfficeTerm(ctx, withoutNulls(args.input)),
   }),
 );
 rememberScope('Mutation', 'setOfficeTerm', writeScope);
 
 builder.mutationField('endOfficeTerm', (t) =>
   t.field({
-    type: 'ID',
+    type: TermPayload,
     authScopes: writeScope,
     args: {
       input: t.arg({
@@ -231,14 +333,14 @@ builder.mutationField('endOfficeTerm', (t) =>
         required: true,
       }),
     },
-    resolve: async (_root, args, ctx) => (await civic(ctx).endOfficeTerm(ctx, withoutNulls(args.input))).id,
+    resolve: (_root, args, ctx) => civic(ctx).endOfficeTerm(ctx, withoutNulls(args.input)),
   }),
 );
 rememberScope('Mutation', 'endOfficeTerm', writeScope);
 
 builder.mutationField('upsertService', (t) =>
   t.field({
-    type: 'ID',
+    type: ServiceAdmin,
     authScopes: writeScope,
     args: {
       input: t.arg({
@@ -259,14 +361,14 @@ builder.mutationField('upsertService', (t) =>
         required: true,
       }),
     },
-    resolve: async (_root, args, ctx) => (await civic(ctx).upsertService(ctx, withoutNulls(args.input))).id,
+    resolve: (_root, args, ctx) => civic(ctx).upsertService(ctx, withoutNulls(args.input)),
   }),
 );
 rememberScope('Mutation', 'upsertService', writeScope);
 
 builder.mutationField('upsertServiceCategory', (t) =>
   t.field({
-    type: 'ID',
+    type: CategoryAdmin,
     authScopes: writeScope,
     args: {
       input: t.arg({
@@ -281,37 +383,128 @@ builder.mutationField('upsertServiceCategory', (t) =>
         required: true,
       }),
     },
-    resolve: async (_root, args, ctx) => (await civic(ctx).upsertServiceCategory(ctx, withoutNulls(args.input))).id,
+    resolve: (_root, args, ctx) => civic(ctx).upsertServiceCategory(ctx, withoutNulls(args.input)),
   }),
 );
 rememberScope('Mutation', 'upsertServiceCategory', writeScope);
 
 builder.queryField('adminOffice', (t) =>
   t.field({
-    type: 'ID',
+    type: OfficeAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: async (_root, args, ctx) => (await civic(ctx).adminOffice(ctx, String(args.id))).id,
+    resolve: (_root, args, ctx) => civic(ctx).adminOffice(ctx, String(args.id)),
   }),
 );
 rememberScope('Query', 'adminOffice', readScope);
 
 builder.queryField('adminOfficial', (t) =>
   t.field({
-    type: 'ID',
+    type: OfficialAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: async (_root, args, ctx) => (await civic(ctx).adminOfficial(ctx, String(args.id))).id,
+    resolve: (_root, args, ctx) => civic(ctx).adminOfficial(ctx, String(args.id)),
   }),
 );
 rememberScope('Query', 'adminOfficial', readScope);
 
 builder.queryField('adminService', (t) =>
   t.field({
-    type: 'ID',
+    type: ServiceAdmin,
     authScopes: readScope,
     args: { id: t.arg.id({ required: true }) },
-    resolve: async (_root, args, ctx) => (await civic(ctx).adminService(ctx, String(args.id))).id,
+    resolve: (_root, args, ctx) => civic(ctx).adminService(ctx, String(args.id)),
   }),
 );
 rememberScope('Query', 'adminService', readScope);
+
+function connectionType<T extends { id: string }>(name: string, nodeType: unknown) {
+  const edge = builder.objectRef<{ cursor: string; node: T }>(`${name}Edge`).implement({
+    fields: (t) => ({
+      cursor: t.exposeString('cursor'),
+      node: t.field({ type: nodeType as never, resolve: (row) => row.node as never }),
+    }),
+  });
+  return builder.objectRef<Connection<T>>(`${name}Connection`).implement({
+    fields: (t) => ({
+      edges: t.field({ type: [edge], resolve: (page) => page.edges }),
+      pageInfo: t.field({ type: PageInfoRef, resolve: (page) => page.pageInfo }),
+    }),
+  });
+}
+
+const JurisdictionConnection = connectionType<AdminJurisdictionNode>('AdminJurisdiction', JurisdictionAdmin);
+const OfficeConnection = connectionType<AdminOfficeRecord & { createdAt: Date }>('AdminOffice', OfficeAdmin);
+const OfficialConnection = connectionType<AdminOfficialRecord & { createdAt: Date }>('AdminOfficial', OfficialAdmin);
+const ServiceConnection = connectionType<AdminServiceRecord & { createdAt: Date }>('AdminService', ServiceAdmin);
+
+builder.queryField('adminJurisdictions', (t) =>
+  t.field({
+    type: JurisdictionConnection,
+    authScopes: readScope,
+    args: {
+      first: t.arg.int({ required: false }),
+      after: t.arg.string({ required: false }),
+      level: t.arg({ type: GovLevelEnum, required: false }),
+      type: t.arg({ type: JurisdictionTypeEnum, required: false }),
+      state: t.arg.string({ required: false }),
+      status: t.arg({ type: RecordStatusEnum, required: false }),
+      freshness: t.arg({ type: FreshnessEnum, required: false }),
+      q: t.arg.string({ required: false }),
+    },
+    resolve: (_root, args, ctx) => civic(ctx).adminJurisdictions(ctx, withoutNulls(args)),
+  }),
+);
+rememberScope('Query', 'adminJurisdictions', readScope);
+
+builder.queryField('adminOffices', (t) =>
+  t.field({
+    type: OfficeConnection,
+    authScopes: readScope,
+    args: {
+      first: t.arg.int({ required: false }),
+      after: t.arg.string({ required: false }),
+      level: t.arg({ type: GovLevelEnum, required: false }),
+      jurisdictionId: t.arg.id({ required: false }),
+      vacantOnly: t.arg.boolean({ required: false }),
+      staleOnly: t.arg.boolean({ required: false }),
+      status: t.arg({ type: RecordStatusEnum, required: false }),
+      q: t.arg.string({ required: false }),
+    },
+    resolve: (_root, args, ctx) => civic(ctx).adminOffices(ctx, withoutNulls(args)),
+  }),
+);
+rememberScope('Query', 'adminOffices', readScope);
+
+builder.queryField('adminOfficials', (t) =>
+  t.field({
+    type: OfficialConnection,
+    authScopes: readScope,
+    args: {
+      first: t.arg.int({ required: false }),
+      after: t.arg.string({ required: false }),
+      status: t.arg({ type: RecordStatusEnum, required: false }),
+      officeId: t.arg.id({ required: false }),
+      q: t.arg.string({ required: false }),
+    },
+    resolve: (_root, args, ctx) => civic(ctx).adminOfficials(ctx, withoutNulls(args)),
+  }),
+);
+rememberScope('Query', 'adminOfficials', readScope);
+
+builder.queryField('adminServices', (t) =>
+  t.field({
+    type: ServiceConnection,
+    authScopes: readScope,
+    args: {
+      first: t.arg.int({ required: false }),
+      after: t.arg.string({ required: false }),
+      categoryId: t.arg.id({ required: false }),
+      status: t.arg({ type: RecordStatusEnum, required: false }),
+      linkBroken: t.arg.boolean({ required: false }),
+      q: t.arg.string({ required: false }),
+    },
+    resolve: (_root, args, ctx) => civic(ctx).adminServices(ctx, withoutNulls(args)),
+  }),
+);
+rememberScope('Query', 'adminServices', readScope);

@@ -17,7 +17,7 @@ export type ExportList =
 
 export interface ObjectStore {
   put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void>;
-  presign(key: string, expiresSeconds: number): Promise<string>;
+  presign(key: string, expiresSeconds: number, baseUrl?: string): Promise<string>;
 }
 
 export interface ExportReader {
@@ -74,7 +74,7 @@ export class ExportService {
     },
   ) {}
 
-  async exportCsv(ctx: ServiceContext, input: unknown): Promise<{ url: string }> {
+  async exportCsv(ctx: ServiceContext, input: unknown, baseUrl?: string): Promise<{ url: string }> {
     ctx.authz.require('admin.export:csv');
     const admin = ctx.authz.requireAdmin();
     const parsed = schema.safeParse(input);
@@ -85,13 +85,13 @@ export class ExportService {
     const table = await this.deps.reader.rows(parsed.data.list, filter, EXPORT_MAX_ROWS);
     if (table.rows.length > EXPORT_MAX_ROWS) throw new ExportTooLargeError();
     const csv = toCsv(table.headers, table.rows);
-    const key = `exports/${parsed.data.list.toLowerCase()}-${Date.now()}.csv`;
+    const key = `${parsed.data.list.toLowerCase()}-${Date.now()}.csv`;
     await this.deps.store.put({
       key,
       body: new TextEncoder().encode(csv),
       contentType: 'text/csv; charset=utf-8',
     });
-    const url = await this.deps.store.presign(key, 600);
+    const url = await this.deps.store.presign(key, 600, baseUrl);
     const run = this.deps.withTx ?? ((fn) => fn(undefined));
     await run(async (tx) => {
       await this.deps.audit.record(tx, {

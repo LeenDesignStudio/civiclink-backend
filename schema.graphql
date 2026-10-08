@@ -73,11 +73,33 @@ type AdminDashboardCounts {
 }
 
 type AdminJurisdiction {
+  boundaryVintage: String
+  districtCode: String
+  freshnessNote: String
+  freshnessOverride: FreshnessOverride
+  geoid: String
+  hasBoundary: Boolean
   id: ID
+  lastUpdatedAt: DateTime
   level: GovLevel
   name: String
+  parentId: ID
+  sourceId: ID
+  state: String
   status: String
+  subtype: String
   type: JurisdictionType
+  website: String
+}
+
+type AdminJurisdictionConnection {
+  edges: [AdminJurisdictionEdge!]
+  pageInfo: PageInfo
+}
+
+type AdminJurisdictionEdge {
+  cursor: String
+  node: AdminJurisdiction
 }
 
 type AdminMe {
@@ -88,11 +110,113 @@ type AdminMe {
   role: AdminRole
 }
 
+type AdminOffice {
+  addresses: [AdminOfficeAddress!]
+  contactUrl: String
+  displayOrder: Int
+  email: String
+  followerCount: Int
+  freshnessNote: String
+  freshnessOverride: FreshnessOverride
+  holderUnknown: Boolean
+  id: ID
+  jurisdictionId: ID
+  lastUpdatedAt: DateTime
+  name: String
+  phone: String
+  seatLabel: String
+  selectionMethod: SelectionMethod
+  slug: String
+  sourceId: ID
+  sourceRecordUrl: String
+  status: RecordStatus
+  website: String
+  whyTemplate: String
+}
+
+type AdminOfficeAddress {
+  city: String
+  hours: String
+  id: ID
+  label: String
+  phone: String
+  state: String
+  street: String
+  zip: String
+}
+
+type AdminOfficeConnection {
+  edges: [AdminOfficeEdge!]
+  pageInfo: PageInfo
+}
+
+type AdminOfficeEdge {
+  cursor: String
+  node: AdminOffice
+}
+
+type AdminOfficial {
+  displayName: String
+  freshnessNote: String
+  freshnessOverride: FreshnessOverride
+  fullName: String
+  id: ID
+  lastUpdatedAt: DateTime
+  party: String
+  photoUrl: String
+  slug: String
+  sourceId: ID
+  sourceRecordUrl: String
+  status: RecordStatus
+  website: String
+}
+
+type AdminOfficialConnection {
+  edges: [AdminOfficialEdge!]
+  pageInfo: PageInfo
+}
+
+type AdminOfficialEdge {
+  cursor: String
+  node: AdminOfficial
+}
+
 enum AdminRole {
   COMMUNICATIONS
   EDITOR
   SUPER_ADMIN
   VIEWER
+}
+
+type AdminService {
+  categoryId: ID
+  description: String
+  id: ID
+  jurisdictionIds: [ID!]
+  lastValidatedAt: DateTime
+  officeIds: [ID!]
+  phoneContact: String
+  sourceId: ID
+  status: RecordStatus
+  title: String
+  url: String
+}
+
+type AdminServiceCategory {
+  active: Boolean
+  id: ID
+  name: String
+  sortOrder: Int
+}
+
+type AdminServiceConnection {
+  edges: [AdminServiceEdge!]
+  pageInfo: PageInfo
+}
+
+type AdminServiceEdge {
+  cursor: String
+  node: AdminService
 }
 
 type AdminSignOutPayload {
@@ -626,7 +750,7 @@ type Mutation {
   deleteNotification(input: DeleteNotificationInput!): DeleteNotificationPayload
   deleteSavedLocation(input: SavedLocationIdInput!): DeleteSavedLocationPayload
   dismissCorrection(input: DismissCorrectionInput!): AdminCorrectionPayload
-  endOfficeTerm(input: EndOfficeTermInput!): ID
+  endOfficeTerm(input: EndOfficeTermInput!): OfficeTermPayload
   exportCsv(input: ExportCsvInput!): ExportCsvPayload
   follow(input: FollowInput!): FollowPayload
   inviteAdmin(input: InviteAdminInput!): AdminUserPayload
@@ -651,7 +775,7 @@ type Mutation {
   sendTestNotification: SendTestNotificationPayload
   setAdminStatus(input: SetAdminStatusInput!): AdminUserPayload
   setDefaultLocation(input: SavedLocationIdInput!): SaveLocationPayload
-  setOfficeTerm(input: SetOfficeTermInput!): ID
+  setOfficeTerm(input: SetOfficeTermInput!): OfficeTermPayload
   signOut(input: SignOutInput): SignOutPayload
   submitContactMessage(input: SubmitContactMessageInput!): SubmitContactMessagePayload
   submitCorrection(input: SubmitCorrectionInput!): SubmitCorrectionPayload
@@ -662,10 +786,10 @@ type Mutation {
   updateProfile(input: UpdateProfileInput!): MePayload
   updateSavedLocation(input: UpdateSavedLocationInput!): SaveLocationPayload
   upsertJurisdiction(input: UpsertJurisdictionInput!): AdminJurisdiction
-  upsertOffice(input: UpsertOfficeInput!): ID
-  upsertOfficial(input: UpsertOfficialInput!): ID
-  upsertService(input: UpsertServiceInput!): ID
-  upsertServiceCategory(input: UpsertServiceCategoryInput!): ID
+  upsertOffice(input: UpsertOfficeInput!): AdminOffice
+  upsertOfficial(input: UpsertOfficialInput!): AdminOfficial
+  upsertService(input: UpsertServiceInput!): AdminService
+  upsertServiceCategory(input: UpsertServiceCategoryInput!): AdminServiceCategory
   upsertSource(input: UpsertSourceInput!): SourcePayload
 }
 
@@ -773,6 +897,11 @@ type OfficeHolder {
   slug: String
 }
 
+type OfficeTermPayload {
+  id: ID
+  officeId: ID
+}
+
 type Official {
   displayName: String
   freshness: Freshness
@@ -831,10 +960,14 @@ type Query {
   adminCorrections(after: String, filter: AdminCorrectionFilter, first: Int): AdminCorrectionConnection
   adminDashboardCounts: AdminDashboardCounts
   adminJurisdiction(id: ID!): AdminJurisdiction
+  adminJurisdictions(after: String, first: Int, freshness: Freshness, level: GovLevel, q: String, state: String, status: RecordStatus, type: JurisdictionType): AdminJurisdictionConnection
   adminMe: AdminMe
-  adminOffice(id: ID!): ID
-  adminOfficial(id: ID!): ID
-  adminService(id: ID!): ID
+  adminOffice(id: ID!): AdminOffice
+  adminOffices(after: String, first: Int, jurisdictionId: ID, level: GovLevel, q: String, staleOnly: Boolean, status: RecordStatus, vacantOnly: Boolean): AdminOfficeConnection
+  adminOfficial(id: ID!): AdminOfficial
+  adminOfficials(after: String, first: Int, officeId: ID, q: String, status: RecordStatus): AdminOfficialConnection
+  adminService(id: ID!): AdminService
+  adminServices(after: String, categoryId: ID, first: Int, linkBroken: Boolean, q: String, status: RecordStatus): AdminServiceConnection
   adminSource(id: UUID!): AdminSource
   adminSources(after: String, first: Int): SourceConnection
   adminUsers(after: String, filter: AdminUserFilter, first: Int): AdminUserConnection
@@ -861,6 +994,11 @@ type Query {
   services(after: String, categoryId: ID, first: Int, jurisdictionId: ID, lookupToken: String, officeId: ID): ServiceConnection
   subscription: Subscription
   unreadNotificationCount: Int
+}
+
+enum RecordStatus {
+  ACTIVE
+  RETIRED
 }
 
 type RecordStatusPayload {

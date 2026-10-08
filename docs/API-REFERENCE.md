@@ -40,6 +40,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminJurisdiction`
 - Scope: `{"permission":"admin.civic:read"}`
 
+### `adminJurisdictions`
+
+- Arguments: `after: String, first: Int, freshness: Freshness, level: GovLevel, q: String, state: String, status: RecordStatus, type: JurisdictionType`
+- Returns: `AdminJurisdictionConnection`
+- Scope: `{"permission":"admin.civic:read"}`
+
 ### `adminMe`
 
 - Arguments: `none`
@@ -49,19 +55,37 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 ### `adminOffice`
 
 - Arguments: `id: ID!`
-- Returns: `ID`
+- Returns: `AdminOffice`
+- Scope: `{"permission":"admin.civic:read"}`
+
+### `adminOffices`
+
+- Arguments: `after: String, first: Int, jurisdictionId: ID, level: GovLevel, q: String, staleOnly: Boolean, status: RecordStatus, vacantOnly: Boolean`
+- Returns: `AdminOfficeConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 
 ### `adminOfficial`
 
 - Arguments: `id: ID!`
-- Returns: `ID`
+- Returns: `AdminOfficial`
+- Scope: `{"permission":"admin.civic:read"}`
+
+### `adminOfficials`
+
+- Arguments: `after: String, first: Int, officeId: ID, q: String, status: RecordStatus`
+- Returns: `AdminOfficialConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 
 ### `adminService`
 
 - Arguments: `id: ID!`
-- Returns: `ID`
+- Returns: `AdminService`
+- Scope: `{"permission":"admin.civic:read"}`
+
+### `adminServices`
+
+- Arguments: `after: String, categoryId: ID, first: Int, linkBroken: Boolean, q: String, status: RecordStatus`
+- Returns: `AdminServiceConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 
 ### `adminSource`
@@ -297,7 +321,7 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 ### `endOfficeTerm`
 
 - Arguments: `input: EndOfficeTermInput!`
-- Returns: `ID`
+- Returns: `OfficeTermPayload`
 - Scope: `{"permission":"admin.civic:write"}`
 
 ### `exportCsv`
@@ -447,7 +471,7 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 ### `setOfficeTerm`
 
 - Arguments: `input: SetOfficeTermInput!`
-- Returns: `ID`
+- Returns: `OfficeTermPayload`
 - Scope: `{"permission":"admin.civic:write"}`
 
 ### `signOut`
@@ -513,25 +537,25 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 ### `upsertOffice`
 
 - Arguments: `input: UpsertOfficeInput!`
-- Returns: `ID`
+- Returns: `AdminOffice`
 - Scope: `{"permission":"admin.civic:write"}`
 
 ### `upsertOfficial`
 
 - Arguments: `input: UpsertOfficialInput!`
-- Returns: `ID`
+- Returns: `AdminOfficial`
 - Scope: `{"permission":"admin.civic:write"}`
 
 ### `upsertService`
 
 - Arguments: `input: UpsertServiceInput!`
-- Returns: `ID`
+- Returns: `AdminService`
 - Scope: `{"permission":"admin.civic:write"}`
 
 ### `upsertServiceCategory`
 
 - Arguments: `input: UpsertServiceCategoryInput!`
-- Returns: `ID`
+- Returns: `AdminServiceCategory`
 - Scope: `{"permission":"admin.civic:write"}`
 
 ### `upsertSource`

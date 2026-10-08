@@ -39,12 +39,14 @@ import { SourcesService } from '../modules/sources/sources.service.js';
 import { DashboardRepo } from '../modules/sources/dashboard.repo.js';
 import { DashboardService } from '../modules/sources/dashboard.js';
 import { ExportService } from '../modules/sources/export.js';
+import { MemoryExportStore, PrismaExportReader, S3ExportStore } from '../modules/sources/export.store.js';
 import { PipelineRepo } from '../modules/pipeline/pipeline.repo.js';
 import { SessionRepo } from '../auth/sessions.repo.js';
 import { SessionService } from '../auth/sessions.js';
 import { AdminAuthRepo } from '../auth/admin-auth.repo.js';
 import { AdminAuthService } from '../auth/admin-auth.js';
 import { AdminPrincipalCache } from '../auth/admin-principal-cache.js';
+import { startBoss, type Boss } from '../jobs/boss.js';
 import type { AppServices } from './services.js';
 import type { TxRunner } from '../modules/locations/locations.ports.js';
 
@@ -60,9 +62,28 @@ export interface AppContainer {
   services: AppServices;
   sessions: SessionService;
   adminAuth: AdminAuthService;
+  devExports?: MemoryExportStore;
+  stopJobs: () => Promise<void>;
+}
+
+function jobSender(): { send: (name: string, data: object, singletonKey?: string) => Promise<void>; stop: () => Promise<void> } {
+  let pending: Promise<Boss> | undefined;
+  return {
+    async send(name, data, singletonKey) {
+      pending ??= startBoss(env.DATABASE_URL);
+      const boss = await pending;
+      await boss.send(name, data, singletonKey ? { singletonKey } : {});
+    },
+    async stop() {
+      if (!pending) return;
+      const boss = await pending;
+      await boss.stop({ graceful: true, timeout: 5_000 });
+    },
+  };
 }
 
 export function buildContainer(): AppContainer {
+  const jobs = jobSender();
   const audit = new AuditService(new AuditRepo(prisma));
   const sessions = new SessionService({ store: new SessionRepo(prisma), clock: systemClock, random: systemRandom });
   const entitlements = new EntitlementsService(new BillingRepo(prisma));
@@ -95,6 +116,7 @@ export function buildContainer(): AppContainer {
     lookups: { findActive: (token, now) => new LookupRepo(prisma).findActive(token, now) },
     clock: systemClock,
     audit,
+    enqueue: (job, payload) => jobs.send(job, payload),
   });
   const analytics = new PostHogAnalytics({
     fetchFn: fetch,
@@ -204,6 +226,9 @@ export function buildContainer(): AppContainer {
     audit,
     withTx: runTx,
     clock: systemClock,
+    queue: {
+      enqueue: (name, payload) => jobs.send(name, payload, payload.entityId),
+    },
   });
   const billing = new BillingService({
     repo: new BillingRepo(prisma),
@@ -213,7 +238,7 @@ export function buildContainer(): AppContainer {
   const contact = new ContactService({
     repo: new ContactRepo(prisma),
     clock: systemClock,
-    queue: { async enqueue() { return undefined; } },
+    queue: { enqueue: (name, payload) => jobs.send(name, payload, payload.contactMessageId) },
     turnstile: {
       async verify(token, _ipHash) {
         const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
@@ -231,7 +256,7 @@ export function buildContainer(): AppContainer {
   const alerts = new AlertsService({
     repo: new AlertsRepo(prisma),
     email,
-    enqueue: { async enqueue() { return undefined; } },
+    enqueue: { enqueue: (name, data, options) => jobs.send(name, data, options?.singletonKey) },
     audit,
     webUrl: env.PUBLIC_WEB_URL,
   });
@@ -239,7 +264,7 @@ export function buildContainer(): AppContainer {
   const sources = new SourcesService({
     store: pipelineStore,
     audit,
-    enqueue: { async enqueue() { return undefined; } },
+    enqueue: { enqueue: (name, data, options) => jobs.send(name, data, options?.singletonKey) },
     dashboard: new DashboardService(new DashboardRepo(prisma), systemClock),
   });
   const adminAuth = new AdminAuthService({
@@ -261,28 +286,18 @@ export function buildContainer(): AppContainer {
     hostedDomain: env.ADMIN_GOOGLE_HD,
     cache: new AdminPrincipalCache(),
   });
+  const devExports =
+    env.APP_ENV === 'development' || env.APP_ENV === 'test' ? new MemoryExportStore() : undefined;
   const exportsService = new ExportService({
-    reader: {
-      async count() {
-        return 0;
-      },
-      async rows() {
-        return { headers: [] as string[], rows: [] as string[][] };
-      },
-    },
-    store: {
-      async put() {
-        return undefined;
-      },
-      async presign(key) {
-        return `${env.PUBLIC_WEB_URL}/exports/${key}`;
-      },
-    },
+    reader: new PrismaExportReader(prisma),
+    store: devExports ?? new S3ExportStore(env.S3_BUCKET_EXPORTS, env.AWS_REGION),
     audit,
+    withTx: runTx,
   });
   return {
     sessions,
     adminAuth,
+    ...(devExports ? { devExports } : {}),
     services: {
       civic,
       lookup,
@@ -299,5 +314,6 @@ export function buildContainer(): AppContainer {
       sources,
       exports: exportsService,
     },
+    stopJobs: () => jobs.stop(),
   };
 }

@@ -20,11 +20,17 @@ import { logger as rootLogger, withRequest } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
 import { REQUEST_ID, ulid } from '../lib/ulid.js';
 import { armorPlugin, depthLimitRule } from '../graphql/armor.js';
-import { deferGraphqlOriginRejection, skipDepthForIntrospection } from '../graphql/introspection.js';
+import {
+  deferGraphqlOriginRejection,
+  introspectionSkipsCsrf,
+  rejectsDisallowedOrigin,
+  skipDepthForIntrospection,
+} from '../graphql/introspection.js';
 import { createLoaders } from '../graphql/loaders.js';
 import { maskError, requestAls } from '../graphql/errors.js';
 import { schema } from '../graphql/schema.js';
 import type { AppServices } from '../app/services.js';
+import type { MemoryExportStore } from '../modules/sources/export.store.js';
 import { registerHealthRoutes, type Readiness } from './routes/health.js';
 
 /** GraphiQL loads an inline script, Monaco workers, and assets from unpkg. API responses keep the strict Helmet policy. */
@@ -51,6 +57,7 @@ export interface ServerDeps {
   readiness: Readiness;
   rateGate: RateGate;
   resolvePrincipal?: (request: { headers: Record<string, unknown>; cookies: Record<string, string | undefined> }) => Promise<Principal>;
+  devExports?: MemoryExportStore;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -185,6 +192,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   await registerHealthRoutes(app, deps.readiness);
+  if (deps.devExports && env.APP_ENV !== 'production' && env.APP_ENV !== 'staging') {
+    const devExports = deps.devExports;
+    app.get('/dev/exports/:token', async (request, reply) => {
+      const token = (request.params as { token: string }).token;
+      const file = devExports.read(token);
+      if (!file) {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: CODE_META.NOT_FOUND.defaultMessage, requestId: request.id },
+        });
+      }
+      void reply.header('content-type', file.contentType);
+      void reply.header('content-disposition', 'attachment');
+      return reply.send(Buffer.from(file.body));
+    });
+  }
 
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   app.post('/webhooks/stripe', async (request, reply) => {
@@ -287,34 +309,33 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     url: '/graphql',
     method: ['GET', 'POST', 'OPTIONS'],
     handler: async (request, reply) => {
-      // Temporary: GraphQL route CSRF and disallowed-origin checks are disabled.
-      // const csrf = request.headers['x-civiclink-csrf'];
-      // const hasCsrf = typeof csrf === 'string' && csrf.length > 0;
-      // const introspectionOnly = introspectionSkipsCsrf({
-      //   appEnv: env.APP_ENV,
-      //   method: request.method,
-      //   url: request.url,
-      //   body: request.body,
-      // });
-      // const originHeader = request.headers.origin;
-      // if (
-      //   rejectsDisallowedOrigin({
-      //     appEnv: env.APP_ENV,
-      //     method: request.method,
-      //     origin: typeof originHeader === 'string' ? originHeader : undefined,
-      //     allowedOrigins: env.CORS_ORIGINS,
-      //     introspectionOnly,
-      //   })
-      // ) {
-      //   return reply.code(403).send({
-      //     error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
-      //   });
-      // }
-      // if (request.method !== 'OPTIONS' && !hasCsrf && !introspectionOnly) {
-      //   return reply.code(403).send({
-      //     error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
-      //   });
-      // }
+      const csrf = request.headers['x-civiclink-csrf'];
+      const hasCsrf = typeof csrf === 'string' && csrf.length > 0;
+      const introspectionOnly = introspectionSkipsCsrf({
+        appEnv: env.APP_ENV,
+        method: request.method,
+        url: request.url,
+        body: request.body,
+      });
+      const originHeader = request.headers.origin;
+      if (
+        rejectsDisallowedOrigin({
+          appEnv: env.APP_ENV,
+          method: request.method,
+          origin: typeof originHeader === 'string' ? originHeader : undefined,
+          allowedOrigins: env.CORS_ORIGINS,
+          introspectionOnly,
+        })
+      ) {
+        return reply.code(403).send({
+          error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
+        });
+      }
+      if (request.method !== 'OPTIONS' && !hasCsrf && !introspectionOnly) {
+        return reply.code(403).send({
+          error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
+        });
+      }
       if (request.method === 'GET' && env.APP_ENV !== 'development') {
         return reply.code(404).send({
           error: { code: 'NOT_FOUND', message: CODE_META.NOT_FOUND.defaultMessage, requestId: request.id },
