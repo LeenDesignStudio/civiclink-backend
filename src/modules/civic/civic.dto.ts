@@ -270,6 +270,16 @@ export interface AdminOfficeRecord {
   addresses: OfficeAddressDto[];
 }
 
+export interface AdminOfficialTerm {
+  id: string;
+  officeId: string;
+  status: TermStatus;
+  termStart: Date | null;
+  termEnd: Date | null;
+  isCurrent: boolean;
+  office: { id: string; slug: string; name: string; status: RecordStatus };
+}
+
 export interface AdminOfficialRecord {
   id: string;
   slug: string;
@@ -284,6 +294,13 @@ export interface AdminOfficialRecord {
   freshnessOverride: FreshnessOverride;
   freshnessNote: string | null;
   status: RecordStatus;
+  terms: AdminOfficialTerm[];
+}
+
+export interface AdminServiceLink {
+  id: string;
+  jurisdictionId: string | null;
+  officeId: string | null;
 }
 
 export interface AdminServiceRecord {
@@ -296,6 +313,7 @@ export interface AdminServiceRecord {
   lastValidatedAt: Date;
   sourceId: string;
   status: RecordStatus;
+  links: AdminServiceLink[];
   jurisdictionIds: string[];
   officeIds: string[];
 }

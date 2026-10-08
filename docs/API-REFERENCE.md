@@ -42,7 +42,7 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 
 ### `adminJurisdictions`
 
-- Arguments: `after: String, first: Int, freshness: Freshness, level: GovLevel, q: String, state: String, status: RecordStatus, type: JurisdictionType`
+- Arguments: `after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort`
 - Returns: `AdminJurisdictionConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 
@@ -60,7 +60,7 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 
 ### `adminOffices`
 
-- Arguments: `after: String, first: Int, jurisdictionId: ID, level: GovLevel, q: String, staleOnly: Boolean, status: RecordStatus, vacantOnly: Boolean`
+- Arguments: `after: String, filter: AdminOfficeFilter, first: Int, sort: AdminCivicSort`
 - Returns: `AdminOfficeConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 
@@ -72,7 +72,7 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 
 ### `adminOfficials`
 
-- Arguments: `after: String, first: Int, officeId: ID, q: String, status: RecordStatus`
+- Arguments: `after: String, filter: AdminOfficialFilter, first: Int, sort: AdminCivicSort`
 - Returns: `AdminOfficialConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 
@@ -84,7 +84,7 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 
 ### `adminServices`
 
-- Arguments: `after: String, categoryId: ID, first: Int, linkBroken: Boolean, q: String, status: RecordStatus`
+- Arguments: `after: String, filter: AdminServiceFilter, first: Int, sort: AdminCivicSort`
 - Returns: `AdminServiceConnection`
 - Scope: `{"permission":"admin.civic:read"}`
 

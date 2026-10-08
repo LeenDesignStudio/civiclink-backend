@@ -11,7 +11,7 @@ import {
   NotFoundError,
   ValidationError,
 } from '../../lib/errors.js';
-import { buildConnection, clampFirst, decodeCursor, type Connection } from '../../lib/pagination.js';
+import { buildConnection, clampFirst, decodeCursor, encodeCursor, type Connection } from '../../lib/pagination.js';
 import { slugify } from '../../lib/slug.js';
 import type {
   AdminJurisdictionNode,
@@ -37,7 +37,7 @@ import type {
   ServiceRecord,
   TermStatus,
 } from './civic.dto.js';
-import type { CivicStore, ListServicesArgs } from './civic.repo.js';
+import type { AdminCursor, AdminSort, CivicStore, ListServicesArgs } from './civic.repo.js';
 import {
   adminJurisdictionListSchema,
   adminOfficeListSchema,
@@ -405,16 +405,17 @@ export class CivicService {
   adminJurisdictions(ctx: ServiceContext, input: unknown): Promise<Connection<AdminJurisdictionNode>> {
     ctx.authz.require('admin.civic:read');
     const parsed = parse(adminJurisdictionListSchema, input);
-    return this.page(parsed.first, parsed.after, (query) =>
+    const filter = parsed.filter ?? {};
+    return this.page(parsed.first, parsed.after, parsed.sort, (query) =>
       this.repo.listAdminJurisdictions({
         ...query,
         freshnessCutoff: this.freshnessCutoff(),
-        ...(parsed.level ? { level: parsed.level } : {}),
-        ...(parsed.type ? { type: parsed.type } : {}),
-        ...(parsed.state ? { state: parsed.state } : {}),
-        ...(parsed.status ? { status: parsed.status } : {}),
-        ...(parsed.freshness ? { freshness: parsed.freshness } : {}),
-        ...(parsed.q ? { q: parsed.q } : {}),
+        ...(filter.level ? { level: filter.level } : {}),
+        ...(filter.type ? { type: filter.type } : {}),
+        ...(filter.state ? { state: filter.state } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.freshness ? { freshness: filter.freshness } : {}),
+        ...(filter.q ? { q: filter.q } : {}),
       }),
     );
   }
@@ -422,16 +423,17 @@ export class CivicService {
   adminOffices(ctx: ServiceContext, input: unknown): Promise<Connection<AdminOfficeRecord & { createdAt: Date }>> {
     ctx.authz.require('admin.civic:read');
     const parsed = parse(adminOfficeListSchema, input);
-    return this.page(parsed.first, parsed.after, (query) =>
+    const filter = parsed.filter ?? {};
+    return this.page(parsed.first, parsed.after, parsed.sort, (query) =>
       this.repo.listAdminOffices({
         ...query,
         freshnessCutoff: this.freshnessCutoff(),
-        ...(parsed.level ? { level: parsed.level } : {}),
-        ...(parsed.jurisdictionId ? { jurisdictionId: parsed.jurisdictionId } : {}),
-        ...(parsed.vacantOnly ? { vacantOnly: parsed.vacantOnly } : {}),
-        ...(parsed.staleOnly ? { staleOnly: parsed.staleOnly } : {}),
-        ...(parsed.status ? { status: parsed.status } : {}),
-        ...(parsed.q ? { q: parsed.q } : {}),
+        ...(filter.level ? { level: filter.level } : {}),
+        ...(filter.jurisdictionId ? { jurisdictionId: filter.jurisdictionId } : {}),
+        ...(filter.vacantOnly ? { vacantOnly: filter.vacantOnly } : {}),
+        ...(filter.staleOnly ? { staleOnly: filter.staleOnly } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.q ? { q: filter.q } : {}),
       }),
     );
   }
@@ -439,12 +441,13 @@ export class CivicService {
   adminOfficials(ctx: ServiceContext, input: unknown): Promise<Connection<AdminOfficialRecord & { createdAt: Date }>> {
     ctx.authz.require('admin.civic:read');
     const parsed = parse(adminOfficialListSchema, input);
-    return this.page(parsed.first, parsed.after, (query) =>
+    const filter = parsed.filter ?? {};
+    return this.page(parsed.first, parsed.after, parsed.sort, (query) =>
       this.repo.listAdminOfficials({
         ...query,
-        ...(parsed.status ? { status: parsed.status } : {}),
-        ...(parsed.officeId ? { officeId: parsed.officeId } : {}),
-        ...(parsed.q ? { q: parsed.q } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.officeId ? { officeId: filter.officeId } : {}),
+        ...(filter.q ? { q: filter.q } : {}),
       }),
     );
   }
@@ -452,13 +455,14 @@ export class CivicService {
   adminServices(ctx: ServiceContext, input: unknown): Promise<Connection<AdminServiceRecord & { createdAt: Date }>> {
     ctx.authz.require('admin.civic:read');
     const parsed = parse(adminServiceListSchema, input);
-    return this.page(parsed.first, parsed.after, (query) =>
+    const filter = parsed.filter ?? {};
+    return this.page(parsed.first, parsed.after, parsed.sort, (query) =>
       this.repo.listAdminServices({
         ...query,
-        ...(parsed.categoryId ? { categoryId: parsed.categoryId } : {}),
-        ...(parsed.status ? { status: parsed.status } : {}),
-        ...(parsed.linkBroken !== undefined ? { linkBroken: parsed.linkBroken } : {}),
-        ...(parsed.q ? { q: parsed.q } : {}),
+        ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.linkBroken !== undefined ? { linkBroken: filter.linkBroken } : {}),
+        ...(filter.q ? { q: filter.q } : {}),
       }),
     );
   }
@@ -741,15 +745,20 @@ export class CivicService {
     return new Date(this.clock.now().getTime() - 90 * MS_PER_DAY);
   }
 
-  private async page<T extends { createdAt: Date; id: string }>(
+  private async page<T extends { createdAt: Date; id: string; name?: string; fullName?: string; title?: string }>(
     first: number,
     after: string | undefined,
-    load: (query: { first: number; after?: { createdAt: Date; id: string } }) => Promise<T[]>,
+    sort: AdminSort,
+    load: (query: { first: number; sort: AdminSort; after?: AdminCursor }) => Promise<{ rows: T[]; totalCount: number }>,
   ): Promise<Connection<T>> {
-    const cursor = after ? decodeCursor(after) : undefined;
-    if (after && !cursor) throw new ValidationError('That page cursor is not valid.');
-    const rows = await load(cursor ? { first, after: cursor } : { first });
-    return buildConnection(rows, first);
+    const cursor = after ? decodeAdminCursor(after, sort) : undefined;
+    if (after && !cursor) {
+      throw new ValidationError('That page cursor is not valid.', [
+        { path: 'after', code: 'custom', message: 'That page cursor is not valid.' },
+      ]);
+    }
+    const loaded = await load({ first, sort, ...(cursor ? { after: cursor } : {}) });
+    return adminConnection(loaded.rows, first, sort, loaded.totalCount);
   }
 
   private setOfficeStatus<S extends 'ACTIVE' | 'RETIRED'>(
@@ -933,4 +942,50 @@ function officialChanged(before: AdminOfficialRecord | null, after: AdminOfficia
     before.photoUrl !== after.photoUrl ||
     before.website !== after.website
   );
+}
+
+function adminSortName(row: { name?: string; fullName?: string; title?: string }): string {
+  if (typeof row.fullName === 'string') return row.fullName;
+  if (typeof row.title === 'string' && typeof row.name !== 'string') return row.title;
+  return row.name ?? '';
+}
+
+function decodeAdminCursor(cursor: string, sort: AdminSort): AdminCursor | undefined {
+  if (sort === 'NAME') {
+    if (!cursor.startsWith('name:')) return undefined;
+    try {
+      const raw = Buffer.from(cursor.slice('name:'.length), 'base64url').toString('utf8');
+      const sep = raw.indexOf('|');
+      if (sep <= 0) return undefined;
+      const name = raw.slice(0, sep);
+      const id = raw.slice(sep + 1);
+      if (id.length === 0) return undefined;
+      return { kind: 'name', name, id };
+    } catch {
+      return undefined;
+    }
+  }
+  const decoded = decodeCursor(cursor);
+  if (!decoded) return undefined;
+  return { kind: 'newest', createdAt: decoded.createdAt, id: decoded.id };
+}
+
+function adminConnection<T extends { createdAt: Date; id: string; name?: string; fullName?: string; title?: string }>(
+  rows: T[],
+  first: number,
+  sort: AdminSort,
+  totalCount: number,
+): Connection<T> {
+  const hasNextPage = rows.length > first;
+  const page = hasNextPage ? rows.slice(0, first) : rows;
+  const encode = (row: T): string =>
+    sort === 'NAME'
+      ? `name:${Buffer.from(`${adminSortName(row)}|${row.id}`, 'utf8').toString('base64url')}`
+      : encodeCursor(row.createdAt, row.id);
+  const last = page[page.length - 1];
+  return {
+    edges: page.map((node) => ({ cursor: encode(node), node })),
+    pageInfo: { hasNextPage, endCursor: last ? encode(last) : null },
+    totalCount,
+  };
 }

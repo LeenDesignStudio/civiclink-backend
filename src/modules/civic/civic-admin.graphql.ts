@@ -3,7 +3,7 @@ import type { Connection } from '../../lib/pagination.js';
 import { PageInfoRef } from '../audit/audit.graphql.js';
 import { withoutNulls } from '../follows/relay.graphql.js';
 import { CivicService } from './civic.service.js';
-import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, ServiceCategoryRecord } from './civic.dto.js';
+import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminOfficialTerm, AdminServiceLink, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, ServiceCategoryRecord } from './civic.dto.js';
 import { FreshnessEnum, FreshnessOverrideEnum, JurisdictionTypeEnum, SelectionMethodEnum, TermStatusEnum } from './civic.graphql.js';
 import { GovLevelEnum } from '../follows/relay.graphql.js';
 
@@ -45,6 +45,7 @@ JurisdictionAdmin.implement({
     hasBoundary: t.boolean({ resolve: (row) => row.hasBoundary ?? false }),
     website: t.exposeString('website', { nullable: true }),
     sourceId: t.exposeID('sourceId'),
+    sourceRecordUrl: t.exposeString('sourceRecordUrl', { nullable: true }),
     lastUpdatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastUpdatedAt }),
     freshnessOverride: t.field({ type: FreshnessOverrideEnum, resolve: (row) => row.freshnessOverride }),
     freshnessNote: t.exposeString('freshnessNote', { nullable: true }),
@@ -92,6 +93,35 @@ const OfficeAdmin = builder.objectRef<AdminOfficeRecord>('AdminOffice').implemen
   }),
 });
 
+const AdminTermOffice = builder.objectRef<AdminOfficialTerm['office']>('AdminOfficialTermOffice').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    slug: t.exposeString('slug'),
+    name: t.exposeString('name'),
+    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+  }),
+});
+
+const AdminTerm = builder.objectRef<AdminOfficialTerm>('AdminOfficialTerm').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    officeId: t.exposeID('officeId'),
+    status: t.field({ type: TermStatusEnum, resolve: (row) => row.status }),
+    termStart: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.termStart }),
+    termEnd: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.termEnd }),
+    isCurrent: t.exposeBoolean('isCurrent'),
+    office: t.field({ type: AdminTermOffice, resolve: (row) => row.office }),
+  }),
+});
+
+const AdminServiceLinkRef = builder.objectRef<AdminServiceLink>('AdminServiceLink').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    jurisdictionId: t.exposeID('jurisdictionId', { nullable: true }),
+    officeId: t.exposeID('officeId', { nullable: true }),
+  }),
+});
+
 const OfficialAdmin = builder.objectRef<AdminOfficialRecord>('AdminOfficial').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
@@ -107,6 +137,7 @@ const OfficialAdmin = builder.objectRef<AdminOfficialRecord>('AdminOfficial').im
     freshnessOverride: t.field({ type: FreshnessOverrideEnum, resolve: (row) => row.freshnessOverride }),
     freshnessNote: t.exposeString('freshnessNote', { nullable: true }),
     status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    terms: t.field({ type: [AdminTerm], resolve: (row) => row.terms }),
   }),
 });
 
@@ -121,6 +152,7 @@ const ServiceAdmin = builder.objectRef<AdminServiceRecord>('AdminService').imple
     lastValidatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastValidatedAt }),
     sourceId: t.exposeID('sourceId'),
     status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    links: t.field({ type: [AdminServiceLinkRef], resolve: (row) => row.links }),
     jurisdictionIds: t.field({ type: ['ID'], resolve: (row) => row.jurisdictionIds }),
     officeIds: t.field({ type: ['ID'], resolve: (row) => row.officeIds }),
   }),
@@ -429,9 +461,51 @@ function connectionType<T extends { id: string }>(name: string, nodeType: unknow
     fields: (t) => ({
       edges: t.field({ type: [edge], resolve: (page) => page.edges }),
       pageInfo: t.field({ type: PageInfoRef, resolve: (page) => page.pageInfo }),
+      totalCount: t.int({ resolve: (page) => page.totalCount ?? 0 }),
     }),
   });
 }
+
+const AdminCivicSort = builder.enumType('AdminCivicSort', { values: ['NEWEST', 'NAME'] as const });
+
+const JurisdictionFilter = builder.inputType('AdminJurisdictionFilter', {
+  fields: (t) => ({
+    level: t.field({ type: GovLevelEnum, required: false }),
+    type: t.field({ type: JurisdictionTypeEnum, required: false }),
+    state: t.string({ required: false }),
+    status: t.field({ type: RecordStatusEnum, required: false }),
+    freshness: t.field({ type: FreshnessEnum, required: false }),
+    q: t.string({ required: false }),
+  }),
+});
+
+const OfficeFilter = builder.inputType('AdminOfficeFilter', {
+  fields: (t) => ({
+    level: t.field({ type: GovLevelEnum, required: false }),
+    jurisdictionId: t.id({ required: false }),
+    vacantOnly: t.boolean({ required: false }),
+    staleOnly: t.boolean({ required: false }),
+    status: t.field({ type: RecordStatusEnum, required: false }),
+    q: t.string({ required: false }),
+  }),
+});
+
+const OfficialFilter = builder.inputType('AdminOfficialFilter', {
+  fields: (t) => ({
+    status: t.field({ type: RecordStatusEnum, required: false }),
+    officeId: t.id({ required: false }),
+    q: t.string({ required: false }),
+  }),
+});
+
+const ServiceFilter = builder.inputType('AdminServiceFilter', {
+  fields: (t) => ({
+    categoryId: t.id({ required: false }),
+    status: t.field({ type: RecordStatusEnum, required: false }),
+    linkBroken: t.boolean({ required: false }),
+    q: t.string({ required: false }),
+  }),
+});
 
 const JurisdictionConnection = connectionType<AdminJurisdictionNode>('AdminJurisdiction', JurisdictionAdmin);
 const OfficeConnection = connectionType<AdminOfficeRecord & { createdAt: Date }>('AdminOffice', OfficeAdmin);
@@ -443,14 +517,10 @@ builder.queryField('adminJurisdictions', (t) =>
     type: JurisdictionConnection,
     authScopes: readScope,
     args: {
+      filter: t.arg({ type: JurisdictionFilter, required: false }),
+      sort: t.arg({ type: AdminCivicSort, required: false }),
       first: t.arg.int({ required: false }),
       after: t.arg.string({ required: false }),
-      level: t.arg({ type: GovLevelEnum, required: false }),
-      type: t.arg({ type: JurisdictionTypeEnum, required: false }),
-      state: t.arg.string({ required: false }),
-      status: t.arg({ type: RecordStatusEnum, required: false }),
-      freshness: t.arg({ type: FreshnessEnum, required: false }),
-      q: t.arg.string({ required: false }),
     },
     resolve: (_root, args, ctx) => civic(ctx).adminJurisdictions(ctx, withoutNulls(args)),
   }),
@@ -462,14 +532,10 @@ builder.queryField('adminOffices', (t) =>
     type: OfficeConnection,
     authScopes: readScope,
     args: {
+      filter: t.arg({ type: OfficeFilter, required: false }),
+      sort: t.arg({ type: AdminCivicSort, required: false }),
       first: t.arg.int({ required: false }),
       after: t.arg.string({ required: false }),
-      level: t.arg({ type: GovLevelEnum, required: false }),
-      jurisdictionId: t.arg.id({ required: false }),
-      vacantOnly: t.arg.boolean({ required: false }),
-      staleOnly: t.arg.boolean({ required: false }),
-      status: t.arg({ type: RecordStatusEnum, required: false }),
-      q: t.arg.string({ required: false }),
     },
     resolve: (_root, args, ctx) => civic(ctx).adminOffices(ctx, withoutNulls(args)),
   }),
@@ -481,11 +547,10 @@ builder.queryField('adminOfficials', (t) =>
     type: OfficialConnection,
     authScopes: readScope,
     args: {
+      filter: t.arg({ type: OfficialFilter, required: false }),
+      sort: t.arg({ type: AdminCivicSort, required: false }),
       first: t.arg.int({ required: false }),
       after: t.arg.string({ required: false }),
-      status: t.arg({ type: RecordStatusEnum, required: false }),
-      officeId: t.arg.id({ required: false }),
-      q: t.arg.string({ required: false }),
     },
     resolve: (_root, args, ctx) => civic(ctx).adminOfficials(ctx, withoutNulls(args)),
   }),
@@ -497,12 +562,10 @@ builder.queryField('adminServices', (t) =>
     type: ServiceConnection,
     authScopes: readScope,
     args: {
+      filter: t.arg({ type: ServiceFilter, required: false }),
+      sort: t.arg({ type: AdminCivicSort, required: false }),
       first: t.arg.int({ required: false }),
       after: t.arg.string({ required: false }),
-      categoryId: t.arg.id({ required: false }),
-      status: t.arg({ type: RecordStatusEnum, required: false }),
-      linkBroken: t.arg.boolean({ required: false }),
-      q: t.arg.string({ required: false }),
     },
     resolve: (_root, args, ctx) => civic(ctx).adminServices(ctx, withoutNulls(args)),
   }),

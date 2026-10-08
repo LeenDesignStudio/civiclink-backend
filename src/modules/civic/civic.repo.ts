@@ -5,6 +5,8 @@ import type {
   AdminJurisdictionNode,
   AdminOfficeRecord,
   AdminOfficialRecord,
+  AdminOfficialTerm,
+  AdminServiceLink,
   AdminServiceRecord,
   JurisdictionBrief,
   JurisdictionRecord,
@@ -27,9 +29,16 @@ import type {
   UpsertServiceInput,
 } from './civic.inputs.js';
 
+export type AdminSort = 'NEWEST' | 'NAME';
+
+export type AdminCursor =
+  | { kind: 'newest'; createdAt: Date; id: string }
+  | { kind: 'name'; name: string; id: string };
+
 export interface AdminPageQuery {
   first: number;
-  after?: { createdAt: Date; id: string };
+  sort: AdminSort;
+  after?: AdminCursor;
   q?: string;
   status?: RecordStatus;
 }
@@ -93,10 +102,10 @@ export interface CivicStore {
   officesForJurisdictions(ids: string[]): Promise<OfficeRecord[]>;
   servicesForLinks(jurisdictionIds: string[], officeIds: string[], limit: number): Promise<ServiceRecord[]>;
   findJurisdiction(id: string): Promise<JurisdictionRecord | null>;
-  listAdminJurisdictions(query: JurisdictionAdminQuery): Promise<AdminJurisdictionNode[]>;
-  listAdminOffices(query: OfficeAdminQuery): Promise<Array<AdminOfficeRecord & { createdAt: Date }>>;
-  listAdminOfficials(query: OfficialAdminQuery): Promise<Array<AdminOfficialRecord & { createdAt: Date }>>;
-  listAdminServices(query: ServiceAdminQuery): Promise<Array<AdminServiceRecord & { createdAt: Date }>>;
+  listAdminJurisdictions(query: JurisdictionAdminQuery): Promise<{ rows: AdminJurisdictionNode[]; totalCount: number }>;
+  listAdminOffices(query: OfficeAdminQuery): Promise<{ rows: Array<AdminOfficeRecord & { createdAt: Date }>; totalCount: number }>;
+  listAdminOfficials(query: OfficialAdminQuery): Promise<{ rows: Array<AdminOfficialRecord & { createdAt: Date }>; totalCount: number }>;
+  listAdminServices(query: ServiceAdminQuery): Promise<{ rows: Array<AdminServiceRecord & { createdAt: Date }>; totalCount: number }>;
   findAdminOffice(id: string): Promise<AdminOfficeRecord | null>;
   findAdminOfficial(id: string): Promise<AdminOfficialRecord | null>;
   findAdminService(id: string): Promise<AdminServiceRecord | null>;
@@ -133,6 +142,20 @@ function createdBefore(after: { createdAt: Date; id: string } | undefined): { OR
   return {
     OR: [{ createdAt: { lt: after.createdAt } }, { createdAt: after.createdAt, id: { lt: after.id } }],
   };
+}
+
+function newestClause(query: { sort: AdminSort; after?: AdminCursor }): ReturnType<typeof createdBefore> {
+  if (query.sort !== 'NEWEST' || query.after?.kind !== 'newest') return undefined;
+  return createdBefore(query.after);
+}
+
+function nameClause(field: 'name' | 'fullName' | 'title', query: { sort: AdminSort; after?: AdminCursor }): { OR: object[] } | undefined {
+  if (query.sort !== 'NAME' || query.after?.kind !== 'name') return undefined;
+  const name = query.after.name;
+  const id = query.after.id;
+  if (field === 'fullName') return { OR: [{ fullName: { gt: name } }, { fullName: name, id: { gt: id } }] };
+  if (field === 'title') return { OR: [{ title: { gt: name } }, { title: name, id: { gt: id } }] };
+  return { OR: [{ name: { gt: name } }, { name, id: { gt: id } }] };
 }
 
 function stringList(value: Prisma.JsonValue): string[] {
@@ -557,7 +580,7 @@ export class CivicRepo implements CivicStore {
     });
   }
 
-  listAdminJurisdictions(query: JurisdictionAdminQuery): Promise<AdminJurisdictionNode[]> {
+  listAdminJurisdictions(query: JurisdictionAdminQuery): Promise<{ rows: AdminJurisdictionNode[]; totalCount: number }> {
     return this.run(async () => {
       const where: Prisma.JurisdictionWhereInput = {};
       if (query.level) where.level = query.level;
@@ -581,12 +604,14 @@ export class CivicRepo implements CivicStore {
           ],
         });
       }
-      const cursor = createdBefore(query.after);
-      if (cursor) and.push(cursor);
+      if (and.length > 0) where.AND = and;
+      const totalCount = await this.db.jurisdiction.count({ where });
+      const cursor = newestClause(query) ?? nameClause('name', query);
+      if (cursor) and.push(cursor as Prisma.JurisdictionWhereInput);
       if (and.length > 0) where.AND = and;
       const rows = await this.db.jurisdiction.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: query.sort === 'NAME' ? [{ name: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
         take: query.first + 1,
         select: {
           id: true,
@@ -610,11 +635,11 @@ export class CivicRepo implements CivicStore {
         },
       });
       const flags = await this.boundaryFlags(rows.map((row) => row.id));
-      return rows.map((row) => ({ ...row, hasBoundary: flags.get(row.id) ?? false }));
+      return { totalCount, rows: rows.map((row) => ({ ...row, hasBoundary: flags.get(row.id) ?? false })) };
     });
   }
 
-  listAdminOffices(query: OfficeAdminQuery): Promise<Array<AdminOfficeRecord & { createdAt: Date }>> {
+  listAdminOffices(query: OfficeAdminQuery): Promise<{ rows: Array<AdminOfficeRecord & { createdAt: Date }>; totalCount: number }> {
     return this.run(async () => {
       const where: Prisma.OfficeWhereInput = {};
       if (query.jurisdictionId) where.jurisdictionId = query.jurisdictionId;
@@ -631,12 +656,14 @@ export class CivicRepo implements CivicStore {
           ],
         });
       }
-      const cursor = createdBefore(query.after);
-      if (cursor) and.push(cursor);
+      if (and.length > 0) where.AND = and;
+      const totalCount = await this.db.office.count({ where });
+      const cursor = newestClause(query) ?? nameClause('name', query);
+      if (cursor) and.push(cursor as Prisma.OfficeWhereInput);
       if (and.length > 0) where.AND = and;
       const rows = await this.db.office.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: query.sort === 'NAME' ? [{ name: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
         take: query.first + 1,
         select: {
           id: true,
@@ -666,34 +693,37 @@ export class CivicRepo implements CivicStore {
           _count: { select: { follows: true } },
         },
       });
-      return rows.map((row) => ({
-        id: row.id,
-        slug: row.slug,
-        jurisdictionId: row.jurisdictionId,
-        name: row.name,
-        seatLabel: row.seatLabel,
-        selectionMethod: row.selectionMethod,
-        displayOrder: row.displayOrder,
-        whyTemplate: row.whyTemplate,
-        phone: row.phone,
-        email: row.email,
-        website: row.website,
-        contactUrl: row.contactUrl,
-        holderUnknown: row.holderUnknown,
-        sourceId: row.sourceId,
-        sourceRecordUrl: row.sourceRecordUrl,
-        lastUpdatedAt: row.lastUpdatedAt,
-        freshnessOverride: row.freshnessOverride,
-        freshnessNote: row.freshnessNote,
-        status: row.status,
-        followerCount: row._count.follows,
-        addresses: row.addresses.map(mapAddress),
-        createdAt: row.createdAt,
-      }));
+      return {
+        totalCount,
+        rows: rows.map((row) => ({
+          id: row.id,
+          slug: row.slug,
+          jurisdictionId: row.jurisdictionId,
+          name: row.name,
+          seatLabel: row.seatLabel,
+          selectionMethod: row.selectionMethod,
+          displayOrder: row.displayOrder,
+          whyTemplate: row.whyTemplate,
+          phone: row.phone,
+          email: row.email,
+          website: row.website,
+          contactUrl: row.contactUrl,
+          holderUnknown: row.holderUnknown,
+          sourceId: row.sourceId,
+          sourceRecordUrl: row.sourceRecordUrl,
+          lastUpdatedAt: row.lastUpdatedAt,
+          freshnessOverride: row.freshnessOverride,
+          freshnessNote: row.freshnessNote,
+          status: row.status,
+          followerCount: row._count.follows,
+          addresses: row.addresses.map(mapAddress),
+          createdAt: row.createdAt,
+        })),
+      };
     });
   }
 
-  listAdminOfficials(query: OfficialAdminQuery): Promise<Array<AdminOfficialRecord & { createdAt: Date }>> {
+  listAdminOfficials(query: OfficialAdminQuery): Promise<{ rows: Array<AdminOfficialRecord & { createdAt: Date }>; totalCount: number }> {
     return this.run(async () => {
       const where: Prisma.OfficialWhereInput = {};
       if (query.status) where.status = query.status;
@@ -704,11 +734,12 @@ export class CivicRepo implements CivicStore {
           { displayName: { contains: query.q, mode: 'insensitive' } },
         ];
       }
-      const cursor = createdBefore(query.after);
-      if (cursor) where.AND = [cursor];
-      return this.db.official.findMany({
+      const totalCount = await this.db.official.count({ where });
+      const cursor = newestClause(query) ?? nameClause('fullName', query);
+      if (cursor) where.AND = [cursor as Prisma.OfficialWhereInput];
+      const rows = await this.db.official.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: query.sort === 'NAME' ? [{ fullName: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
         take: query.first + 1,
         select: {
           id: true,
@@ -725,23 +756,26 @@ export class CivicRepo implements CivicStore {
           freshnessNote: true,
           status: true,
           createdAt: true,
+          terms: adminTermSelect,
         },
       });
+      return { totalCount, rows: rows.map((row) => ({ ...mapAdminOfficial(row), createdAt: row.createdAt })) };
     });
   }
 
-  listAdminServices(query: ServiceAdminQuery): Promise<Array<AdminServiceRecord & { createdAt: Date }>> {
+  listAdminServices(query: ServiceAdminQuery): Promise<{ rows: Array<AdminServiceRecord & { createdAt: Date }>; totalCount: number }> {
     return this.run(async () => {
       const where: Prisma.ServiceWhereInput = {};
       if (query.categoryId) where.categoryId = query.categoryId;
       if (query.status) where.status = query.status;
       if (query.linkBroken !== undefined) where.linkBroken = query.linkBroken;
       if (query.q) where.title = { contains: query.q, mode: 'insensitive' };
-      const cursor = createdBefore(query.after);
-      if (cursor) where.AND = [cursor];
+      const totalCount = await this.db.service.count({ where });
+      const cursor = newestClause(query) ?? nameClause('title', query);
+      if (cursor) where.AND = [cursor as Prisma.ServiceWhereInput];
       const rows = await this.db.service.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: query.sort === 'NAME' ? [{ title: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
         take: query.first + 1,
         select: {
           id: true,
@@ -754,23 +788,10 @@ export class CivicRepo implements CivicStore {
           sourceId: true,
           status: true,
           createdAt: true,
-          links: { select: { jurisdictionId: true, officeId: true } },
+          links: { select: { id: true, jurisdictionId: true, officeId: true } },
         },
       });
-      return rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        categoryId: row.categoryId,
-        description: row.description,
-        url: row.url,
-        phoneContact: row.phoneContact,
-        lastValidatedAt: row.lastValidatedAt,
-        sourceId: row.sourceId,
-        status: row.status,
-        jurisdictionIds: row.links.flatMap((link) => (link.jurisdictionId ? [link.jurisdictionId] : [])),
-        officeIds: row.links.flatMap((link) => (link.officeId ? [link.officeId] : [])),
-        createdAt: row.createdAt,
-      }));
+      return { totalCount, rows: rows.map((row) => ({ ...mapAdminService(row), createdAt: row.createdAt })) };
     });
   }
 
@@ -844,60 +865,11 @@ export class CivicRepo implements CivicStore {
   }
 
   findAdminOfficial(id: string): Promise<AdminOfficialRecord | null> {
-    return this.run(async () =>
-      this.db.official.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          slug: true,
-          fullName: true,
-          displayName: true,
-          party: true,
-          photoUrl: true,
-          website: true,
-          sourceId: true,
-          sourceRecordUrl: true,
-          lastUpdatedAt: true,
-          freshnessOverride: true,
-          freshnessNote: true,
-          status: true,
-        },
-      }),
-    );
+    return this.run(() => this.loadAdminOfficial(id));
   }
 
   findAdminService(id: string): Promise<AdminServiceRecord | null> {
-    return this.run(async () => {
-      const row = await this.db.service.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          title: true,
-          categoryId: true,
-          description: true,
-          url: true,
-          phoneContact: true,
-          lastValidatedAt: true,
-          sourceId: true,
-          status: true,
-          links: { select: { jurisdictionId: true, officeId: true } },
-        },
-      });
-      if (!row) return null;
-      return {
-        id: row.id,
-        title: row.title,
-        categoryId: row.categoryId,
-        description: row.description,
-        url: row.url,
-        phoneContact: row.phoneContact,
-        lastValidatedAt: row.lastValidatedAt,
-        sourceId: row.sourceId,
-        status: row.status,
-        jurisdictionIds: row.links.flatMap((link) => (link.jurisdictionId ? [link.jurisdictionId] : [])),
-        officeIds: row.links.flatMap((link) => (link.officeId ? [link.officeId] : [])),
-      };
-    });
+    return this.run(() => this.loadAdminService(id));
   }
 
   findCategoryById(id: string): Promise<ServiceCategoryRecord | null> {
@@ -1174,7 +1146,7 @@ export class CivicRepo implements CivicStore {
   }
 
   private async loadAdminOfficial(id: string): Promise<AdminOfficialRecord | null> {
-    return this.db.official.findUnique({
+    const row = await this.db.official.findUnique({
       where: { id },
       select: {
         id: true,
@@ -1190,8 +1162,10 @@ export class CivicRepo implements CivicStore {
         freshnessOverride: true,
         freshnessNote: true,
         status: true,
+        terms: adminTermSelect,
       },
     });
+    return row ? mapAdminOfficial(row) : null;
   }
 
   private async loadAdminService(id: string): Promise<AdminServiceRecord | null> {
@@ -1207,23 +1181,10 @@ export class CivicRepo implements CivicStore {
         lastValidatedAt: true,
         sourceId: true,
         status: true,
-        links: { select: { jurisdictionId: true, officeId: true } },
+        links: { select: { id: true, jurisdictionId: true, officeId: true } },
       },
     });
-    if (!row) return null;
-    return {
-      id: row.id,
-      title: row.title,
-      categoryId: row.categoryId,
-      description: row.description,
-      url: row.url,
-      phoneContact: row.phoneContact,
-      lastValidatedAt: row.lastValidatedAt,
-      sourceId: row.sourceId,
-      status: row.status,
-      jurisdictionIds: row.links.flatMap((link) => (link.jurisdictionId ? [link.jurisdictionId] : [])),
-      officeIds: row.links.flatMap((link) => (link.officeId ? [link.officeId] : [])),
-    };
+    return row ? mapAdminService(row) : null;
   }
 
   private async writeAddresses(officeId: string, addresses: OfficeAddressInput[]): Promise<void> {
@@ -1253,6 +1214,81 @@ export class CivicRepo implements CivicStore {
     if (data.length === 0) return;
     await this.db.serviceLink.createMany({ data });
   }
+}
+
+const adminTermSelect = {
+  orderBy: [{ isCurrent: 'desc' as const }, { createdAt: 'desc' as const }],
+  select: {
+    id: true,
+    officeId: true,
+    status: true,
+    termStart: true,
+    termEnd: true,
+    isCurrent: true,
+    office: { select: { id: true, slug: true, name: true, status: true } },
+  },
+};
+
+function mapAdminOfficial(row: {
+  id: string;
+  slug: string;
+  fullName: string;
+  displayName: string | null;
+  party: string | null;
+  photoUrl: string | null;
+  website: string | null;
+  sourceId: string;
+  sourceRecordUrl: string | null;
+  lastUpdatedAt: Date;
+  freshnessOverride: AdminOfficialRecord['freshnessOverride'];
+  freshnessNote: string | null;
+  status: RecordStatus;
+  terms: AdminOfficialTerm[];
+}): AdminOfficialRecord {
+  return {
+    id: row.id,
+    slug: row.slug,
+    fullName: row.fullName,
+    displayName: row.displayName,
+    party: row.party,
+    photoUrl: row.photoUrl,
+    website: row.website,
+    sourceId: row.sourceId,
+    sourceRecordUrl: row.sourceRecordUrl,
+    lastUpdatedAt: row.lastUpdatedAt,
+    freshnessOverride: row.freshnessOverride,
+    freshnessNote: row.freshnessNote,
+    status: row.status,
+    terms: row.terms,
+  };
+}
+
+function mapAdminService(row: {
+  id: string;
+  title: string;
+  categoryId: string;
+  description: string;
+  url: string | null;
+  phoneContact: string | null;
+  lastValidatedAt: Date;
+  sourceId: string;
+  status: RecordStatus;
+  links: AdminServiceLink[];
+}): AdminServiceRecord {
+  return {
+    id: row.id,
+    title: row.title,
+    categoryId: row.categoryId,
+    description: row.description,
+    url: row.url,
+    phoneContact: row.phoneContact,
+    lastValidatedAt: row.lastValidatedAt,
+    sourceId: row.sourceId,
+    status: row.status,
+    links: row.links,
+    jurisdictionIds: row.links.flatMap((link) => (link.jurisdictionId ? [link.jurisdictionId] : [])),
+    officeIds: row.links.flatMap((link) => (link.officeId ? [link.officeId] : [])),
+  };
 }
 
 function jurisdictionData(input: UpsertJurisdictionInput) {

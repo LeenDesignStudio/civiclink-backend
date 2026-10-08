@@ -20,6 +20,11 @@ input AdminAlertFilter {
   targetOfficeId: UUID
 }
 
+enum AdminCivicSort {
+  NAME
+  NEWEST
+}
+
 type AdminCorrection {
   assigneeId: ID
   createdAt: DateTime
@@ -85,6 +90,7 @@ type AdminJurisdiction {
   name: String
   parentId: ID
   sourceId: ID
+  sourceRecordUrl: String
   state: String
   status: String
   subtype: String
@@ -95,11 +101,21 @@ type AdminJurisdiction {
 type AdminJurisdictionConnection {
   edges: [AdminJurisdictionEdge!]
   pageInfo: PageInfo
+  totalCount: Int
 }
 
 type AdminJurisdictionEdge {
   cursor: String
   node: AdminJurisdiction
+}
+
+input AdminJurisdictionFilter {
+  freshness: Freshness
+  level: GovLevel
+  q: String
+  state: String
+  status: RecordStatus
+  type: JurisdictionType
 }
 
 type AdminMe {
@@ -148,11 +164,21 @@ type AdminOfficeAddress {
 type AdminOfficeConnection {
   edges: [AdminOfficeEdge!]
   pageInfo: PageInfo
+  totalCount: Int
 }
 
 type AdminOfficeEdge {
   cursor: String
   node: AdminOffice
+}
+
+input AdminOfficeFilter {
+  jurisdictionId: ID
+  level: GovLevel
+  q: String
+  staleOnly: Boolean
+  status: RecordStatus
+  vacantOnly: Boolean
 }
 
 type AdminOfficial {
@@ -168,17 +194,42 @@ type AdminOfficial {
   sourceId: ID
   sourceRecordUrl: String
   status: RecordStatus
+  terms: [AdminOfficialTerm!]
   website: String
 }
 
 type AdminOfficialConnection {
   edges: [AdminOfficialEdge!]
   pageInfo: PageInfo
+  totalCount: Int
 }
 
 type AdminOfficialEdge {
   cursor: String
   node: AdminOfficial
+}
+
+input AdminOfficialFilter {
+  officeId: ID
+  q: String
+  status: RecordStatus
+}
+
+type AdminOfficialTerm {
+  id: ID
+  isCurrent: Boolean
+  office: AdminOfficialTermOffice
+  officeId: ID
+  status: TermStatus
+  termEnd: DateTime
+  termStart: DateTime
+}
+
+type AdminOfficialTermOffice {
+  id: ID
+  name: String
+  slug: String
+  status: RecordStatus
 }
 
 enum AdminRole {
@@ -194,6 +245,7 @@ type AdminService {
   id: ID
   jurisdictionIds: [ID!]
   lastValidatedAt: DateTime
+  links: [AdminServiceLink!]
   officeIds: [ID!]
   phoneContact: String
   sourceId: ID
@@ -212,11 +264,25 @@ type AdminServiceCategory {
 type AdminServiceConnection {
   edges: [AdminServiceEdge!]
   pageInfo: PageInfo
+  totalCount: Int
 }
 
 type AdminServiceEdge {
   cursor: String
   node: AdminService
+}
+
+input AdminServiceFilter {
+  categoryId: ID
+  linkBroken: Boolean
+  q: String
+  status: RecordStatus
+}
+
+type AdminServiceLink {
+  id: ID
+  jurisdictionId: ID
+  officeId: ID
 }
 
 type AdminSignOutPayload {
@@ -960,14 +1026,14 @@ type Query {
   adminCorrections(after: String, filter: AdminCorrectionFilter, first: Int): AdminCorrectionConnection
   adminDashboardCounts: AdminDashboardCounts
   adminJurisdiction(id: ID!): AdminJurisdiction
-  adminJurisdictions(after: String, first: Int, freshness: Freshness, level: GovLevel, q: String, state: String, status: RecordStatus, type: JurisdictionType): AdminJurisdictionConnection
+  adminJurisdictions(after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort): AdminJurisdictionConnection
   adminMe: AdminMe
   adminOffice(id: ID!): AdminOffice
-  adminOffices(after: String, first: Int, jurisdictionId: ID, level: GovLevel, q: String, staleOnly: Boolean, status: RecordStatus, vacantOnly: Boolean): AdminOfficeConnection
+  adminOffices(after: String, filter: AdminOfficeFilter, first: Int, sort: AdminCivicSort): AdminOfficeConnection
   adminOfficial(id: ID!): AdminOfficial
-  adminOfficials(after: String, first: Int, officeId: ID, q: String, status: RecordStatus): AdminOfficialConnection
+  adminOfficials(after: String, filter: AdminOfficialFilter, first: Int, sort: AdminCivicSort): AdminOfficialConnection
   adminService(id: ID!): AdminService
-  adminServices(after: String, categoryId: ID, first: Int, linkBroken: Boolean, q: String, status: RecordStatus): AdminServiceConnection
+  adminServices(after: String, filter: AdminServiceFilter, first: Int, sort: AdminCivicSort): AdminServiceConnection
   adminSource(id: UUID!): AdminSource
   adminSources(after: String, first: Int): SourceConnection
   adminUsers(after: String, filter: AdminUserFilter, first: Int): AdminUserConnection

@@ -2,16 +2,32 @@ import { describe, expect, it } from 'vitest';
 import { Authz, anonymousPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { FakeClock } from '../../lib/clock.js';
-import { NotFoundError, UnauthenticatedError } from '../../lib/errors.js';
-import type { AdminJurisdictionNode } from './civic.dto.js';
+import { ForbiddenError, NotFoundError, UnauthenticatedError } from '../../lib/errors.js';
+import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminServiceRecord } from './civic.dto.js';
 import type { LookupContext } from '../lookup/lookup.dto.js';
 import type { OfficeRecord, OfficialRecord, OfficialTermLink } from './civic.dto.js';
-import type { CivicStore } from './civic.repo.js';
+import type { AdminCursor, CivicStore, OfficeAdminQuery, OfficialAdminQuery, ServiceAdminQuery } from './civic.repo.js';
 import { CivicService, type LookupReader } from './civic.service.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date('2026-06-01T00:00:00.000Z');
 const JURISDICTION_ID = '11111111-1111-4111-8111-111111111111';
+
+function residentContext(): ServiceContext {
+  const principal = {
+    kind: 'resident' as const,
+    userId: 'user-1',
+    status: 'ACTIVE' as const,
+    termsAccepted: true,
+    sessionId: 'session-1',
+  };
+  return { requestId: 'req-1', principal, authz: new Authz(principal), ipHash: 'hash' };
+}
+
+function viewerContext(): ServiceContext {
+  const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'VIEWER' as const, sessionId: 'session-1' };
+  return { requestId: 'req-1', principal, authz: new Authz(principal), ipHash: 'hash' };
+}
 
 function context(): ServiceContext {
   return {
@@ -284,7 +300,8 @@ describe('CivicService public reads', () => {
       hasBoundary: false,
     };
     const store = {
-      listAdminJurisdictions: () => Promise.resolve([node]),
+      listAdminJurisdictions: () => Promise.resolve({ rows: [{ ...node, sourceRecordUrl: 'https://example.test/dallas' }], totalCount: 4 }),
+      findJurisdiction: () => Promise.resolve({ ...node, sourceRecordUrl: 'https://example.test/dallas' }),
     } as unknown as CivicStore;
     const service = new CivicService({
       repo: store,
@@ -292,12 +309,151 @@ describe('CivicService public reads', () => {
       clock: new FakeClock(NOW),
     });
     expect(() => service.adminJurisdictions(context(), {})).toThrow(UnauthenticatedError);
-    const admin = new Authz({ kind: 'admin', adminId: 'admin-1', role: 'VIEWER', sessionId: 'session-1' });
-    const page = await service.adminJurisdictions(
-      { requestId: 'req-1', principal: { kind: 'admin', adminId: 'admin-1', role: 'VIEWER', sessionId: 'session-1' }, authz: admin, ipHash: 'hash' },
-      { q: 'Dallas' },
-    );
+    expect(() => service.adminJurisdictions(residentContext(), {})).toThrow(ForbiddenError);
+    await expect(service.adminJurisdiction(residentContext(), JURISDICTION_ID)).rejects.toBeInstanceOf(ForbiddenError);
+    const page = await service.adminJurisdictions(viewerContext(), { filter: { q: 'Dallas' }, sort: 'NAME' });
+    expect(page.totalCount).toBe(4);
     expect(page.edges[0]?.node.name).toBe('Dallas');
     expect(page.edges[0]?.node.hasBoundary).toBe(false);
+    expect(page.edges[0]?.node.sourceRecordUrl).toBe('https://example.test/dallas');
+    const one = await service.adminJurisdiction(viewerContext(), JURISDICTION_ID);
+    expect(one.sourceRecordUrl).toBe('https://example.test/dallas');
+  });
+
+  it('lists admin offices with a name cursor and rejects a resident', async () => {
+    const calls: OfficeAdminQuery[] = [];
+    const row: AdminOfficeRecord & { createdAt: Date } = {
+      id: 'office-1',
+      slug: 'clerk',
+      jurisdictionId: JURISDICTION_ID,
+      name: 'Clerk',
+      seatLabel: null,
+      selectionMethod: 'ELECTED',
+      displayOrder: 0,
+      whyTemplate: null,
+      phone: null,
+      email: null,
+      website: null,
+      contactUrl: null,
+      holderUnknown: false,
+      sourceId: '22222222-2222-4222-8222-222222222222',
+      sourceRecordUrl: null,
+      lastUpdatedAt: NOW,
+      freshnessOverride: 'NONE',
+      freshnessNote: null,
+      status: 'ACTIVE',
+      followerCount: 2,
+      addresses: [],
+      createdAt: NOW,
+    };
+    const store = {
+      listAdminOffices: (query: OfficeAdminQuery) => {
+        calls.push(query);
+        return Promise.resolve({ rows: [row], totalCount: 3 });
+      },
+    } as unknown as CivicStore;
+    const service = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    expect(() => service.adminOffices(residentContext(), {})).toThrow(ForbiddenError);
+    const page = await service.adminOffices(viewerContext(), { filter: { q: 'Clerk' }, sort: 'NAME' });
+    expect(page.totalCount).toBe(3);
+    expect(page.edges[0]?.node.followerCount).toBe(2);
+    await service.adminOffices(viewerContext(), { sort: 'NAME', after: page.pageInfo.endCursor ?? '' });
+    expect(calls[0]?.q).toBe('Clerk');
+    expect(calls[1]?.after).toEqual({ kind: 'name', name: 'Clerk', id: 'office-1' } satisfies AdminCursor);
+  });
+
+  it('returns official terms and rejects a resident', async () => {
+    const calls: OfficialAdminQuery[] = [];
+    const official: AdminOfficialRecord & { createdAt: Date } = {
+      id: 'official-1',
+      slug: 'ada',
+      fullName: 'Ada Lovelace',
+      displayName: null,
+      party: null,
+      photoUrl: null,
+      website: null,
+      sourceId: '22222222-2222-4222-8222-222222222222',
+      sourceRecordUrl: null,
+      lastUpdatedAt: NOW,
+      freshnessOverride: 'NONE',
+      freshnessNote: null,
+      status: 'ACTIVE',
+      createdAt: NOW,
+      terms: [
+        {
+          id: 'term-1',
+          officeId: 'office-1',
+          status: 'ELECTED',
+          termStart: NOW,
+          termEnd: null,
+          isCurrent: true,
+          office: { id: 'office-1', slug: 'mayor', name: 'Mayor', status: 'ACTIVE' },
+        },
+      ],
+    };
+    const store = {
+      listAdminOfficials: (query: OfficialAdminQuery) => {
+        calls.push(query);
+        return Promise.resolve({ rows: [official], totalCount: 1 });
+      },
+      findAdminOfficial: () => Promise.resolve(official),
+    } as unknown as CivicStore;
+    const service = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    expect(() => service.adminOfficials(residentContext(), {})).toThrow(ForbiddenError);
+    await expect(service.adminOfficial(residentContext(), official.id)).rejects.toBeInstanceOf(ForbiddenError);
+    const page = await service.adminOfficials(viewerContext(), { filter: { q: 'Ada' }, sort: 'NAME' });
+    expect(page.totalCount).toBe(1);
+    expect(page.edges[0]?.node.terms[0]?.office.name).toBe('Mayor');
+    const one = await service.adminOfficial(viewerContext(), official.id);
+    expect(one.terms[0]?.isCurrent).toBe(true);
+    expect(calls[0]?.q).toBe('Ada');
+    expect(calls[0]?.sort).toBe('NAME');
+  });
+
+  it('returns service links and rejects a resident', async () => {
+    const calls: ServiceAdminQuery[] = [];
+    const serviceRow: AdminServiceRecord & { createdAt: Date } = {
+      id: 'service-1',
+      title: 'Trash pickup',
+      categoryId: '33333333-3333-4333-8333-333333333333',
+      description: 'Weekly collection for households in the city.',
+      url: null,
+      phoneContact: null,
+      lastValidatedAt: NOW,
+      sourceId: '22222222-2222-4222-8222-222222222222',
+      status: 'ACTIVE',
+      createdAt: NOW,
+      links: [{ id: 'link-1', jurisdictionId: JURISDICTION_ID, officeId: null }],
+      jurisdictionIds: [JURISDICTION_ID],
+      officeIds: [],
+    };
+    const store = {
+      listAdminServices: (query: ServiceAdminQuery) => {
+        calls.push(query);
+        return Promise.resolve({ rows: [serviceRow], totalCount: 2 });
+      },
+      findAdminService: () => Promise.resolve(serviceRow),
+    } as unknown as CivicStore;
+    const service = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    expect(() => service.adminServices(residentContext(), {})).toThrow(ForbiddenError);
+    await expect(service.adminService(residentContext(), serviceRow.id)).rejects.toBeInstanceOf(ForbiddenError);
+    const page = await service.adminServices(viewerContext(), { filter: { linkBroken: false }, sort: 'NEWEST' });
+    expect(page.totalCount).toBe(2);
+    expect(page.edges[0]?.node.links[0]?.jurisdictionId).toBe(JURISDICTION_ID);
+    const one = await service.adminService(viewerContext(), serviceRow.id);
+    expect(one.links).toHaveLength(1);
+    expect(calls[0]?.linkBroken).toBe(false);
   });
 });

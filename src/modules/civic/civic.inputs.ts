@@ -553,14 +553,23 @@ export interface UpsertServiceCategoryInput {
 const recordStatus = z.enum(RECORD_STATUSES);
 const freshness = z.enum(['CURRENT', 'MAY_BE_OUTDATED'] as const);
 
+const adminSort = z.enum(['NEWEST', 'NAME']);
+const searchText = z.string().trim().min(1).max(100);
+
 export const adminJurisdictionListSchema = z
   .object({
-    level: z.enum(GOV_LEVELS).optional(),
-    type: z.enum(JURISDICTION_TYPES).optional(),
-    state: z.string().regex(/^[A-Z]{2}$/).optional(),
-    status: recordStatus.optional(),
-    freshness: freshness.optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    filter: z
+      .object({
+        level: z.enum(GOV_LEVELS).optional(),
+        type: z.enum(JURISDICTION_TYPES).optional(),
+        state: z.string().regex(/^[A-Z]{2}$/).optional(),
+        status: recordStatus.optional(),
+        freshness: freshness.optional(),
+        q: searchText.optional(),
+      })
+      .strict()
+      .optional(),
+    sort: adminSort.default('NEWEST'),
     first: z.number().int().min(1).max(100).default(20),
     after: z.string().optional(),
   })
@@ -568,12 +577,18 @@ export const adminJurisdictionListSchema = z
 
 export const adminOfficeListSchema = z
   .object({
-    level: z.enum(GOV_LEVELS).optional(),
-    jurisdictionId: z.uuid().optional(),
-    vacantOnly: z.boolean().optional(),
-    staleOnly: z.boolean().optional(),
-    status: recordStatus.optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    filter: z
+      .object({
+        level: z.enum(GOV_LEVELS).optional(),
+        jurisdictionId: z.uuid().optional(),
+        vacantOnly: z.boolean().optional(),
+        staleOnly: z.boolean().optional(),
+        status: recordStatus.optional(),
+        q: searchText.optional(),
+      })
+      .strict()
+      .optional(),
+    sort: adminSort.default('NEWEST'),
     first: z.number().int().min(1).max(100).default(20),
     after: z.string().optional(),
   })
@@ -581,9 +596,15 @@ export const adminOfficeListSchema = z
 
 export const adminOfficialListSchema = z
   .object({
-    status: recordStatus.optional(),
-    officeId: z.uuid().optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    filter: z
+      .object({
+        status: recordStatus.optional(),
+        officeId: z.uuid().optional(),
+        q: searchText.optional(),
+      })
+      .strict()
+      .optional(),
+    sort: adminSort.default('NEWEST'),
     first: z.number().int().min(1).max(100).default(20),
     after: z.string().optional(),
   })
@@ -591,10 +612,16 @@ export const adminOfficialListSchema = z
 
 export const adminServiceListSchema = z
   .object({
-    categoryId: z.uuid().optional(),
-    status: recordStatus.optional(),
-    linkBroken: z.boolean().optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    filter: z
+      .object({
+        categoryId: z.uuid().optional(),
+        status: recordStatus.optional(),
+        linkBroken: z.boolean().optional(),
+        q: searchText.optional(),
+      })
+      .strict()
+      .optional(),
+    sort: adminSort.default('NEWEST'),
     first: z.number().int().min(1).max(100).default(20),
     after: z.string().optional(),
   })
