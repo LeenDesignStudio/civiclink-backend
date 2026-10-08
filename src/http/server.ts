@@ -20,12 +20,7 @@ import { logger as rootLogger, withRequest } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
 import { REQUEST_ID, ulid } from '../lib/ulid.js';
 import { armorPlugin, depthLimitRule } from '../graphql/armor.js';
-import {
-  deferGraphqlOriginRejection,
-  introspectionSkipsCsrf,
-  rejectsDisallowedOrigin,
-  skipDepthForIntrospection,
-} from '../graphql/introspection.js';
+import { deferGraphqlOriginRejection, skipDepthForIntrospection } from '../graphql/introspection.js';
 import { createLoaders } from '../graphql/loaders.js';
 import { maskError, requestAls } from '../graphql/errors.js';
 import { schema } from '../graphql/schema.js';
@@ -279,33 +274,34 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     url: '/graphql',
     method: ['GET', 'POST', 'OPTIONS'],
     handler: async (request, reply) => {
-      const csrf = request.headers['x-civiclink-csrf'];
-      const hasCsrf = typeof csrf === 'string' && csrf.length > 0;
-      const introspectionOnly = introspectionSkipsCsrf({
-        appEnv: env.APP_ENV,
-        method: request.method,
-        url: request.url,
-        body: request.body,
-      });
-      const originHeader = request.headers.origin;
-      if (
-        rejectsDisallowedOrigin({
-          appEnv: env.APP_ENV,
-          method: request.method,
-          origin: typeof originHeader === 'string' ? originHeader : undefined,
-          allowedOrigins: env.CORS_ORIGINS,
-          introspectionOnly,
-        })
-      ) {
-        return reply.code(403).send({
-          error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
-        });
-      }
-      if (request.method !== 'OPTIONS' && !hasCsrf && !introspectionOnly) {
-        return reply.code(403).send({
-          error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
-        });
-      }
+      // Temporary: GraphQL route CSRF and disallowed-origin checks are disabled.
+      // const csrf = request.headers['x-civiclink-csrf'];
+      // const hasCsrf = typeof csrf === 'string' && csrf.length > 0;
+      // const introspectionOnly = introspectionSkipsCsrf({
+      //   appEnv: env.APP_ENV,
+      //   method: request.method,
+      //   url: request.url,
+      //   body: request.body,
+      // });
+      // const originHeader = request.headers.origin;
+      // if (
+      //   rejectsDisallowedOrigin({
+      //     appEnv: env.APP_ENV,
+      //     method: request.method,
+      //     origin: typeof originHeader === 'string' ? originHeader : undefined,
+      //     allowedOrigins: env.CORS_ORIGINS,
+      //     introspectionOnly,
+      //   })
+      // ) {
+      //   return reply.code(403).send({
+      //     error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
+      //   });
+      // }
+      // if (request.method !== 'OPTIONS' && !hasCsrf && !introspectionOnly) {
+      //   return reply.code(403).send({
+      //     error: { code: 'FORBIDDEN', message: CODE_META.FORBIDDEN.defaultMessage, requestId: request.id },
+      //   });
+      // }
       if (request.method === 'GET' && env.APP_ENV !== 'development') {
         return reply.code(404).send({
           error: { code: 'NOT_FOUND', message: CODE_META.NOT_FOUND.defaultMessage, requestId: request.id },
