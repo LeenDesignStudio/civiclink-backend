@@ -1,3 +1,7 @@
+overrides:
+  deepmerge-ts: 8.0.2
+  mysql2: 3.24.5
+
 allowBuilds:
   prisma: true
   '@prisma/engines': true
@@ -6,3 +10,6 @@ allowBuilds:
   protobufjs: true
   ssh2: false
   cpu-features: false
+
+minimumReleaseAgeExclude:
+  - graphql-yoga@5.24.4
