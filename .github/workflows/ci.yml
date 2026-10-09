@@ -47,6 +47,7 @@ jobs:
           CREATE ROLE civiclink_owner LOGIN PASSWORD 'owner';
           CREATE ROLE civiclink_app LOGIN PASSWORD 'app';
           CREATE DATABASE civiclink_test OWNER civiclink_owner;
+          CREATE DATABASE civiclink_shadow;
           SQL
           psql "postgresql://postgres:postgres@localhost:5432/civiclink_test" -v ON_ERROR_STOP=1 <<'SQL'
           CREATE SCHEMA IF NOT EXISTS extensions AUTHORIZATION civiclink_owner;
@@ -58,10 +59,10 @@ jobs:
           SQL
       - name: Unit and integration tests, 55% line coverage on src/modules
         run: pnpm exec vitest run --coverage
-      - run: pnpm exec prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code --shadow-database-url "$SHADOW"
+      - run: pnpm exec prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code
         env:
           MIGRATION_DATABASE_URL: postgresql://civiclink_owner:owner@localhost:5432/civiclink_test
-          SHADOW: postgresql://postgres:postgres@localhost:5432/postgres
+          SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/civiclink_shadow
       - run: pnpm schema:print && git diff --exit-code schema.graphql
       - run: pnpm audit --prod
       - name: osv-scanner
