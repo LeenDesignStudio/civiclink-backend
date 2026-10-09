@@ -56,7 +56,7 @@ jobs:
           GRANT USAGE ON SCHEMA extensions TO civiclink_app;
           GRANT USAGE ON SCHEMA public TO civiclink_app;
           SQL
-      - name: Unit and integration tests, 80% line coverage on src/modules
+      - name: Unit and integration tests, 55% line coverage on src/modules
         run: pnpm exec vitest run --coverage
       - run: pnpm exec prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code --shadow-database-url "$SHADOW"
         env:
