@@ -372,6 +372,7 @@ model SavedLocation {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([point], type: Gist, map: "saved_locations_point_gist")
   @@map("saved_locations")
 }
 
@@ -399,6 +400,7 @@ model Lookup {
 
   @@index([expiresAt])
   @@index([userId])
+  @@index([geom], type: Gist, map: "lookups_geom_gist")
   @@map("lookups")
 }
 
