@@ -1,0 +1,13 @@
+title = "CivicLink"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "The example env file holds placeholders, and tests use the fake Stripe key sk_test_placeholder."
+paths = [
+  '''(?:^|/)\.env\.example$''',
+]
+regexes = [
+  '''sk_test_placeholder''',
+]
