@@ -71,7 +71,8 @@ export function formatCounts(collectorKey: string, counts: RunCounts, dryRun: bo
   const head = dryRun ? `dry-run ${collectorKey}` : collectorKey;
   const skipped = counts.skipped ? ' skipped=true' : '';
   const sha = counts.sha ? ` sha=${counts.sha}` : '';
-  return `${head} added=${counts.added} changed=${counts.changed} retired=${counts.retired} pending=${counts.pending}${skipped}${sha}`;
+  const note = counts.note ? ` ${counts.note}` : '';
+  return `${head} added=${counts.added} changed=${counts.changed} retired=${counts.retired} pending=${counts.pending}${skipped}${sha}${note}`;
 }
 
 export function runInput(sourceId: string, scope: PilotScope): { sourceId: string; state?: string; county?: string; tigerYear?: number } {

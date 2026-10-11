@@ -16,8 +16,14 @@ export async function httpGet(
     const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
     throw new UpstreamError(timedOut ? 'Download timed out.' : undefined, { cause: err });
   }
+  const contentType = response.headers.get('content-type') ?? '';
+  const declared = Number(response.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > init.maxBytes) {
+    await response.body?.cancel();
+    return { status: response.status, body: new Uint8Array(), contentType, contentLength: declared };
+  }
   const body = await readAtMost(response, init.maxBytes);
-  return { status: response.status, body, contentType: response.headers.get('content-type') ?? '' };
+  return { status: response.status, body, contentType };
 }
 
 async function readAtMost(response: Response, maxBytes: number): Promise<Uint8Array> {

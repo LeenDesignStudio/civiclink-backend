@@ -18,6 +18,7 @@ import {
   USER_AGENT,
   type Collector,
   type CollectorContext,
+  type HttpResult,
   type NormalisedRecord,
   type RawSnapshot,
   type Selector,
@@ -32,8 +33,8 @@ async function load(
   ctx: CollectorContext,
   url: string,
   timeoutMs = 60_000,
-): Promise<{ status: number; body: Uint8Array; contentType: string }> {
-  let response: { status: number; body: Uint8Array; contentType: string };
+): Promise<HttpResult> {
+  let response: HttpResult;
   try {
     response = await ctx.fetch.get(url, {
       maxBytes: ctx.maxBytes,
@@ -65,9 +66,10 @@ export const tigerCollector: Collector = {
     const fips = stateFips(postal);
     const files: { id: string; sha256: string; bytes: number }[] = [];
     const features: TigerFeature[] = [];
+    const notes: string[] = [];
     let stateClip: Uint8Array | undefined;
     for (const layer of tigerLayerPlan(year, postal)) {
-      let response: { status: number; body: Uint8Array; contentType: string };
+      let response: HttpResult;
       try {
         response = await load(ctx, layer.url, TIGER_FETCH_TIMEOUT_MS);
       } catch (err) {
@@ -75,8 +77,19 @@ export const tigerCollector: Collector = {
         const timedOut = err instanceof UpstreamError && err.message === 'Download timed out.';
         throw new UpstreamError(timedOut ? `Boundary download timed out for ${layer.id}.` : `Boundary download failed for ${layer.id}.`);
       }
+      if (response.status === 404 && layer.missingOk) {
+        notes.push(`${layer.id} skipped: Census has no file for this state.`);
+        continue;
+      }
       if (response.status !== 200) throw new UpstreamError(`Boundary download failed for ${layer.id} (HTTP ${response.status}).`);
-      if (response.body.byteLength > ctx.maxBytes) throw new ValidationError('Download exceeded the size cap.');
+      const size = response.contentLength ?? response.body.byteLength;
+      if (size > ctx.maxBytes) {
+        if (layer.skipOverCap) {
+          notes.push(`${layer.id} skipped: file is over the 50 MB cap.`);
+          continue;
+        }
+        throw new ValidationError(`Download exceeded the size cap for ${layer.id}.`);
+      }
       assertZip(response.contentType);
       if (layer.clip && !stateClip) throw new ValidationError('State boundary is required before ZCTA.');
       const geojson = await ctx.convertZip({
@@ -101,6 +114,7 @@ export const tigerCollector: Collector = {
       files.push({ id: layer.id, sha256: sha256Bytes(response.body), bytes: response.body.byteLength });
     }
     const snap = snapshotFrom(tigerManifest(files), 'application/json');
+    if (notes.length > 0) snap.notice = notes.join(' ');
     tigerPrepared.set(snap, tigerRecordsFromFeatures(features, year, postal));
     return snap;
   },

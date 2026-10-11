@@ -22,6 +22,8 @@ export interface TigerLayerPlan {
   url: string;
   where?: string;
   clip: boolean;
+  missingOk?: boolean;
+  skipOverCap?: boolean;
 }
 
 export interface TigerFeature {
@@ -81,23 +83,34 @@ export function tigerLayerPlan(year: number, postal: string): TigerLayerPlan[] {
     where,
     clip: false,
   });
-  const stateFile = (id: TigerLayerId): TigerLayerPlan => ({
+  const stateFile = (id: TigerLayerId, missingOk = false): TigerLayerPlan => ({
     id,
     url: `${base}/${id}/tl_${year}_${fips}_${id.toLowerCase()}.zip`,
     clip: false,
+    ...(missingOk ? { missingOk: true } : {}),
   });
   return [
     national('STATE', `tl_${year}_us_state.zip`, `STUSPS='${state}'`),
-    national('CD', `tl_${year}_us_cd${congress}.zip`, `STATEFP='${fips}'`),
+    {
+      id: 'CD',
+      url: `${base}/CD/tl_${year}_${fips}_cd${congress}.zip`,
+      where: `STATEFP='${fips}'`,
+      clip: false,
+    },
     stateFile('SLDU'),
     stateFile('SLDL'),
-    national('COUNTY', `tl_${year}_us_county.zip`, `STATEFP='${fips}'`),
+    {
+      id: 'COUNTY',
+      url: `https://www2.census.gov/geo/tiger/GENZ${year}/shp/cb_${year}_us_county_500k.zip`,
+      where: `STATEFP='${fips}'`,
+      clip: false,
+    },
     stateFile('PLACE'),
     stateFile('COUSUB'),
     stateFile('UNSD'),
-    stateFile('ELSD'),
-    stateFile('SCSD'),
-    { id: 'ZCTA520', url: `${base}/ZCTA520/tl_${year}_us_zcta520.zip`, clip: true },
+    stateFile('ELSD', true),
+    stateFile('SCSD', true),
+    { id: 'ZCTA520', url: `${base}/ZCTA520/tl_${year}_us_zcta520.zip`, clip: true, skipOverCap: true },
   ];
 }
 

@@ -24,6 +24,7 @@ import {
   type Collector,
   type HttpFetcher,
   type NormalisedRecord,
+  type RawSnapshot,
   type RunCounts,
   type ZipConvertRequest,
 } from './types.js';
@@ -105,11 +106,11 @@ export class PipelineService {
       const previous = await this.deps.store.lastSucceededSha(source.id);
       if (previous && previous === snapshot.sha256 && snapshot.skipped !== 'robots') {
         await this.finish(run.id, { sha: snapshot.sha256, added: 0, changed: 0, retired: 0, pending: 0 });
-        return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
+        return withNotice({ skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 }, snapshot);
       }
       if (snapshot.skipped === 'robots') {
         await this.finish(run.id, { sha: snapshot.sha256, added: 0, changed: 0, retired: 0, pending: 0 });
-        return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
+        return withNotice({ skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 }, snapshot);
       }
       const page = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory';
       let added = 0;
@@ -142,7 +143,7 @@ export class PipelineService {
       const retired = await this.retireMissing(source, records, true);
       await this.finish(run.id, { sha: snapshot.sha256, added, changed, retired, pending });
       await this.deps.store.touchSource(source.id, this.clock.now());
-      return { skipped: false, added, changed, retired, pending, sha: snapshot.sha256 };
+      return withNotice({ skipped: false, added, changed, retired, pending, sha: snapshot.sha256 }, snapshot);
     } catch (err) {
       const message = err instanceof ValidationError ? err.message.slice(0, 500) : 'Source run failed.';
       await this.fail(run.id, message);
@@ -163,11 +164,11 @@ export class PipelineService {
     if (!collector) throw new UnknownCollectorError();
     const { snapshot, records } = await this.fetchRecords(source, collector);
     if (snapshot.skipped === 'robots') {
-      return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
+      return withNotice({ skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 }, snapshot);
     }
     const previous = await this.deps.store.lastSucceededSha(source.id);
     if (previous && previous === snapshot.sha256) {
-      return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
+      return withNotice({ skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 }, snapshot);
     }
     const page = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory';
     let added = 0;
@@ -183,7 +184,7 @@ export class PipelineService {
       else if (!sameAttributes(existing.fields, record.fields)) changed += 1;
     }
     const retired = await this.retireMissing(source, records, false);
-    return { skipped: false, added, changed, retired, pending, sha: snapshot.sha256 };
+    return withNotice({ skipped: false, added, changed, retired, pending, sha: snapshot.sha256 }, snapshot);
   }
 
   async locationsReresolve(ctx: ServiceContext): Promise<{ updated: number }> {
@@ -296,6 +297,11 @@ function applyScope(
   if (scope.county) config.county = scope.county;
   if (scope.tigerYear) config.tigerYear = scope.tigerYear;
   return { ...source, config };
+}
+
+function withNotice(counts: RunCounts, snapshot: RawSnapshot): RunCounts {
+  if (!snapshot.notice) return counts;
+  return { ...counts, note: snapshot.notice };
 }
 
 function countPending(existing: Record<string, string | null> | undefined, record: NormalisedRecord): number {

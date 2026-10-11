@@ -6,7 +6,8 @@ Federal legislators load for that state. County and city directories are whateve
 Page changes wait for an editor. They are not written straight onto live offices or officials.
 
 `ogr2ogr` (GDAL) must be on `PATH` for `tiger.boundaries`. It is not an npm package.
-Each downloaded file is capped at 50 MB. A national extract over that cap fails the run.
+Each downloaded file is capped at 50 MB. A required national extract over that cap fails the run.
+The national ZCTA file is skipped instead, and the command prints that.
 
 ## 1. Add a page.directory source
 
@@ -79,9 +80,13 @@ pnpm pipeline:run tiger.boundaries --state MD --dry-run
 pnpm pipeline:run page.directory --state MD --county "Montgomery"
 ```
 
-TIGER downloads only the pilot state's layers from `https://www2.census.gov/geo/tiger/TIGER{YEAR}/`
-(state, current Congress, state legislative districts, county, place, county subdivision,
-school districts, and ZCTA clipped to the state). Jurisdictions upsert on `(type, geoid)`
+TIGER downloads the pilot state's layers from `https://www2.census.gov/geo/tiger/TIGER{YEAR}/`
+(state, the state congressional file for the current Congress, state legislative districts,
+place, county subdivision, and school districts). County boundaries come from the Census
+cartographic file `cb_{YEAR}_us_county_500k.zip` because the TIGER/Line national county file
+is over 50 MB. A 404 on elementary or secondary school districts is skipped when Census does
+not publish that layer for the state. The national ZCTA file is over 50 MB, so that layer is
+skipped and the run says so. Jurisdictions upsert on `(type, geoid)`
 with `ST_Multi(ST_MakeValid(...))`. Parents are state, then county, then place.
 `boundary_vintage` is `TIGER{YEAR}`.
 

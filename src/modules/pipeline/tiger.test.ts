@@ -49,7 +49,9 @@ describe('tiger layer plan', () => {
     ]);
     expect(plan[0]?.url).toBe('https://www2.census.gov/geo/tiger/TIGER2025/STATE/tl_2025_us_state.zip');
     expect(tigerShapefileName(plan[0]?.url ?? '')).toBe('tl_2025_us_state.shp');
-    expect(plan.find((layer) => layer.id === 'CD')?.url).toContain('tl_2025_us_cd119.zip');
+    expect(plan.find((layer) => layer.id === 'CD')?.url).toBe('https://www2.census.gov/geo/tiger/TIGER2025/CD/tl_2025_24_cd119.zip');
+    expect(plan.find((layer) => layer.id === 'COUNTY')?.url).toContain('cb_2025_us_county_500k.zip');
+    expect(plan.find((layer) => layer.id === 'ELSD')?.missingOk).toBe(true);
     expect(plan.find((layer) => layer.id === 'PLACE')?.url).toContain('tl_2025_24_place.zip');
     expect(plan.find((layer) => layer.id === 'ZCTA520')?.clip).toBe(true);
     expect(ogrArguments({ zipPath: 'layer.zip', outPath: 'out.geojson', where: "STUSPS='MD'" })).toContain('-where');
@@ -134,5 +136,35 @@ describe('tiger collector', () => {
       }),
     ).rejects.toBeInstanceOf(ValidationError);
     expect(converted).toBe(0);
+  });
+
+  it('skips school-district files Census does not publish and a ZCTA file over the cap', async () => {
+    const plan = tigerLayerPlan(2025, 'MD');
+    const snap = await tigerCollector.fetch({
+      source: source({ state: 'MD', tigerYear: 2025 }),
+      maxBytes: 8,
+      fetch: {
+        get: (url) => {
+          const layer = plan.find((item) => item.url === url);
+          if (layer?.id === 'ELSD' || layer?.id === 'SCSD') {
+            return Promise.resolve({ status: 404, body: new Uint8Array(), contentType: 'text/html' });
+          }
+          if (layer?.id === 'ZCTA520') {
+            return Promise.resolve({ status: 200, body: new Uint8Array(), contentType: 'application/zip', contentLength: 9 });
+          }
+          return Promise.resolve({ status: 200, body: new Uint8Array([1]), contentType: 'application/zip' });
+        },
+      },
+      convertZip: (request) => {
+        const features = request.layer === 'COUNTY' ? fixture.features.filter((feature) => feature.properties.tigerLayer === 'COUNTY') : [];
+        return Promise.resolve(new TextEncoder().encode(JSON.stringify({ type: 'FeatureCollection', features })));
+      },
+    });
+    expect(snap.notice).toContain('ELSD skipped');
+    expect(snap.notice).toContain('SCSD skipped');
+    expect(snap.notice).toContain('ZCTA520 skipped');
+    const manifest = JSON.parse(new TextDecoder().decode(snap.body)) as { files: { id: string }[] };
+    expect(manifest.files.map((file) => file.id)).not.toContain('ZCTA520');
+    expect(tigerCollector.normalise(snap).map((row) => row.fields.geoid)).toEqual(['24031']);
   });
 });

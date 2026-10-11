@@ -39,6 +39,7 @@ export interface RawSnapshot {
   contentType: string;
   sha256: string;
   skipped?: 'robots';
+  notice?: string;
 }
 
 export interface NormalisedRecord {
@@ -55,6 +56,7 @@ export interface RunCounts {
   retired: number;
   pending: number;
   sha: string | null;
+  note?: string;
 }
 
 export interface ZipConvertRequest {
@@ -69,6 +71,7 @@ export interface HttpResult {
   status: number;
   body: Uint8Array;
   contentType: string;
+  contentLength?: number;
 }
 
 export interface HttpFetcher {
