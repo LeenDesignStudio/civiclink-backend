@@ -9,6 +9,7 @@ import type {
   SubscriptionRecord,
   StripeCustomerRecord,
   UpsertInvoice,
+  UpsertPlan,
   UpsertSubscription,
 } from './billing.ports.js';
 
@@ -289,5 +290,46 @@ export class BillingRepo implements BillingStore {
     await dbCall(() =>
       this.db.stripeEvent.update({ where: { id }, data: { processedAt: new Date() } }),
     );
+  }
+
+  async upsertPlan(row: UpsertPlan): Promise<void> {
+    const entitlements = { ...row.entitlements };
+    await dbCall(() =>
+      this.db.plan.upsert({
+        where: { stripePriceId: row.stripePriceId },
+        create: {
+          stripePriceId: row.stripePriceId,
+          name: row.name,
+          amountCents: row.amountCents,
+          currency: row.currency,
+          interval: row.interval,
+          features: row.features,
+          entitlements,
+          active: true,
+        },
+        update: {
+          name: row.name,
+          amountCents: row.amountCents,
+          currency: row.currency,
+          interval: row.interval,
+          features: row.features,
+          entitlements,
+          active: true,
+        },
+      }),
+    );
+  }
+
+  async deactivatePlansExcept(stripePriceIds: string[]): Promise<number> {
+    const result = await dbCall(() =>
+      this.db.plan.updateMany({
+        where:
+          stripePriceIds.length === 0
+            ? { active: true }
+            : { active: true, stripePriceId: { notIn: stripePriceIds } },
+        data: { active: false },
+      }),
+    );
+    return result.count;
   }
 }

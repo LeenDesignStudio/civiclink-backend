@@ -1,5 +1,6 @@
 import Stripe from 'stripe';
 import { BillingUnavailableError, isAppError } from '../../lib/errors.js';
+import { catalogPrice, type CatalogPrice, type ListedPrice } from './catalog.js';
 import type { BillingProvider, StripeCallOptions, StripeGateway } from './billing.provider.js';
 
 const TIMEOUT_MS = 10_000;
@@ -37,6 +38,21 @@ export class StripeBillingProvider implements BillingProvider {
         stripe.checkout.sessions.create(params, stripeOptions(options)),
       createPortalSession: (params, options) =>
         stripe.billingPortal.sessions.create(params, stripeOptions(options)),
+      listPrices: async (params, options) => {
+        const page = await stripe.prices.list(
+          {
+            active: params.active,
+            limit: params.limit,
+            expand: ['data.product'],
+            ...(params.starting_after ? { starting_after: params.starting_after } : {}),
+          },
+          stripeOptions(options),
+        );
+        return {
+          has_more: page.has_more,
+          data: page.data.map((price) => listedPrice(price)),
+        };
+      },
     };
     return new StripeBillingProvider(gateway);
   }
@@ -95,9 +111,38 @@ export class StripeBillingProvider implements BillingProvider {
     return { url: session.url };
   }
 
-  private async invoke<T>(fn: (options: StripeCallOptions) => Promise<T>, idempotencyKey: string): Promise<T> {
+  async listActivePrices(): Promise<CatalogPrice[]> {
+    const prices: CatalogPrice[] = [];
+    let startingAfter: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const listed = await this.invoke((options) =>
+        this.gateway.listPrices(
+          {
+            active: true,
+            limit: 100,
+            ...(startingAfter ? { starting_after: startingAfter } : {}),
+          },
+          options,
+        ),
+      );
+      for (const price of listed.data) {
+        const mapped = catalogPrice(price);
+        if (mapped) prices.push(mapped);
+      }
+      const last = listed.data[listed.data.length - 1];
+      if (!listed.has_more || !last) break;
+      startingAfter = last.id;
+    }
+    return prices;
+  }
+
+  private async invoke<T>(fn: (options: StripeCallOptions) => Promise<T>, idempotencyKey?: string): Promise<T> {
     const signal = this.signals();
-    const options: StripeCallOptions = { timeout: TIMEOUT_MS, signal, idempotencyKey };
+    const options: StripeCallOptions = {
+      timeout: TIMEOUT_MS,
+      signal,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
     try {
       return await settle(signal, fn(options));
     } catch (err) {
@@ -105,6 +150,22 @@ export class StripeBillingProvider implements BillingProvider {
       throw new BillingUnavailableError({ cause: err });
     }
   }
+}
+
+function listedPrice(price: Stripe.Price): ListedPrice {
+  return {
+    id: price.id,
+    unit_amount: price.unit_amount,
+    currency: price.currency,
+    recurring: price.recurring ? { interval: price.recurring.interval } : null,
+    product: productOf(price.product),
+  };
+}
+
+function productOf(product: Stripe.Price['product']): ListedPrice['product'] {
+  if (typeof product === 'string') return product;
+  if (product.deleted) return { deleted: true };
+  return { name: product.name, metadata: { ...product.metadata } };
 }
 
 function stripeOptions(options: StripeCallOptions): { timeout: number; idempotencyKey?: string } {

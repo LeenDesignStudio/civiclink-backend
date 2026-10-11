@@ -224,6 +224,18 @@ export class ResidentsRepo implements ResidentsStore {
     );
   }
 
+  async pendingDeletionNotice(userId: string): Promise<{ email: string; purgeAfter: Date } | null> {
+    const row = await dbCall(() =>
+      this.db.deletionRequest.findFirst({
+        where: { userId, restoredAt: null, purgedAt: null },
+        orderBy: { requestedAt: 'desc' },
+        select: { purgeAfter: true, user: { select: { email: true, status: true } } },
+      }),
+    );
+    if (!row || row.user.status !== 'PENDING_DELETION') return null;
+    return { email: row.user.email, purgeAfter: row.purgeAfter };
+  }
+
   async restore(tx: Tx, userId: string, restoredAt: Date): Promise<ResidentRecord> {
     const db = this.use(tx);
     const row = await dbCall(async () => {

@@ -3,6 +3,7 @@ import { logger } from '../../lib/logger.js';
 
 export interface EmailMessage {
   to: string;
+  replyTo?: string;
   subject: string;
   text: string;
   html: string;
@@ -51,6 +52,7 @@ export class SesEmailSender implements EmailSender {
         body: JSON.stringify({
           FromEmailAddress: this.options.from,
           Destination: { ToAddresses: [message.to] },
+          ...(message.replyTo ? { ReplyToAddresses: [message.replyTo] } : {}),
           Content: {
             Simple: {
               Subject: { Data: message.subject, Charset: 'UTF-8' },

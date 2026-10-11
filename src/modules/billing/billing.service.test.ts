@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Authz } from '../../authz/authz.js';
+import { Authz, systemPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
-import { AlreadySubscribedError, BillingUnavailableError, NoBillingAccountError } from '../../lib/errors.js';
+import { AlreadySubscribedError, BillingUnavailableError, ForbiddenError, NoBillingAccountError } from '../../lib/errors.js';
 import { FakeStripe } from '../../../test/fakes/stripe.js';
 import type { InvoiceDto, SubscriptionStatus } from './billing.dto.js';
 import { BillingService } from './billing.service.js';
@@ -13,6 +13,7 @@ import type {
   SubscriptionRecord,
   StripeCustomerRecord,
   UpsertInvoice,
+  UpsertPlan,
   UpsertSubscription,
 } from './billing.ports.js';
 import { EntitlementsService, type PlanLimits } from './entitlements.service.js';
@@ -135,6 +136,42 @@ class MemoryBilling implements BillingRepo {
   markEventProcessed(): Promise<void> {
     return Promise.resolve();
   }
+
+  upserts: UpsertPlan[] = [];
+
+  upsertPlan(row: UpsertPlan): Promise<void> {
+    this.upserts.push(row);
+    const existing = [...this.plans.values()].find((plan) => plan.stripePriceId === row.stripePriceId);
+    if (existing) {
+      existing.name = row.name;
+      existing.amountCents = row.amountCents;
+      existing.currency = row.currency;
+      existing.interval = row.interval;
+      existing.entitlements = row.entitlements;
+      existing.active = true;
+      return Promise.resolve();
+    }
+    this.n += 1;
+    const id = `plan-${this.n}`;
+    this.plans.set(id, { id, active: true, ...row });
+    return Promise.resolve();
+  }
+
+  deactivatePlansExcept(stripePriceIds: string[]): Promise<number> {
+    let count = 0;
+    for (const plan of this.plans.values()) {
+      if (plan.active && !stripePriceIds.includes(plan.stripePriceId)) {
+        plan.active = false;
+        count += 1;
+      }
+    }
+    return Promise.resolve(count);
+  }
+}
+
+function systemCtx(): ServiceContext {
+  const principal = systemPrincipal('billing.syncPlans');
+  return { requestId: 'job', principal, authz: new Authz(principal), ipHash: 'system' };
 }
 
 function resident(): ServiceContext {
@@ -283,7 +320,79 @@ describe('EntitlementsService', () => {
     });
     await expect(svc.acceptStripeEvent(subEvent('evt_fail', 'active', 1))).rejects.toBeInstanceOf(BillingUnavailableError);
   });
+
+  it('enqueues one billing.syncPlans key for product and price updates', async () => {
+    const repo = new MemoryBilling();
+    const queued: Array<{ name: string; singletonKey: string }> = [];
+    const svc = new BillingService({
+      repo,
+      provider: new FakeStripe(),
+      publicWebUrl: 'https://civiclink.test',
+      queue: {
+        enqueue: (name, _data, options) => {
+          queued.push({ name, singletonKey: options.singletonKey });
+          return Promise.resolve();
+        },
+      },
+    });
+    await svc.acceptStripeEvent(catalogEvent('evt_product', 'product.updated'));
+    await svc.acceptStripeEvent(catalogEvent('evt_price', 'price.updated'));
+    await svc.acceptStripeEvent(catalogEvent('evt_product', 'product.updated'));
+    expect(queued).toEqual([
+      { name: 'billing.syncPlans', singletonKey: 'billing.syncPlans' },
+      { name: 'billing.syncPlans', singletonKey: 'billing.syncPlans' },
+    ]);
+    expect(repo.subs).toHaveLength(0);
+  });
+
+  it('upserts active prices and deactivates a price that is no longer active', async () => {
+    const repo = new MemoryBilling();
+    repo.plans.set(PLAN, {
+      id: PLAN,
+      stripePriceId: 'price_old',
+      name: 'Old',
+      amountCents: 100,
+      currency: 'usd',
+      interval: 'month',
+      active: true,
+      entitlements: {},
+    });
+    const stripe = new FakeStripe();
+    stripe.prices = [
+      {
+        stripePriceId: 'price_plus',
+        name: 'Plus',
+        amountCents: 900,
+        currency: 'usd',
+        interval: 'month',
+        features: ['Alerts'],
+        entitlements: { maxSavedLocations: 10, maxFollows: 200 },
+      },
+    ];
+    const svc = new BillingService({ repo, provider: stripe, publicWebUrl: 'https://civiclink.test' });
+    await expect(svc.syncPlans(resident())).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc.applyStripeEventAsSystem(resident(), subEvent('evt_denied', 'active', 1))).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    const result = await svc.syncPlans(systemCtx());
+    expect(result).toEqual({ upserted: 1, deactivated: 1 });
+    expect(repo.upserts[0]).toMatchObject({
+      stripePriceId: 'price_plus',
+      name: 'Plus',
+      amountCents: 900,
+      currency: 'usd',
+      interval: 'month',
+      features: ['Alerts'],
+      entitlements: { maxSavedLocations: 10, maxFollows: 200 },
+    });
+    expect(repo.plans.get(PLAN)?.active).toBe(false);
+    expect([...repo.plans.values()].find((plan) => plan.stripePriceId === 'price_plus')?.active).toBe(true);
+  });
 });
+
+function catalogEvent(id: string, type: string) {
+  return { id, type, created: 1_700_000_000, data: { object: { id: 'price_1' } } };
+}
 
 describe('StripeBillingProvider', () => {
   it('passes a 10s AbortSignal and idempotency key, and hides provider errors', async () => {
@@ -295,6 +404,7 @@ describe('StripeBillingProvider', () => {
       },
       createCheckoutSession: () => Promise.resolve({ url: 'https://billing.test/c' }),
       createPortalSession: () => Promise.resolve({ url: 'https://billing.test/p' }),
+      listPrices: () => Promise.resolve({ data: [], has_more: false }),
     };
     const provider = new StripeBillingProvider(gateway);
     await provider.createCustomer({ userId: USER, email: 'ada@example.com', idempotencyKey: `cust:${USER}` });
@@ -306,5 +416,47 @@ describe('StripeBillingProvider', () => {
     await expect(
       failing.createCustomer({ userId: USER, email: 'ada@example.com', idempotencyKey: `cust:${USER}` }),
     ).rejects.toMatchObject({ code: 'BILLING_UNAVAILABLE' });
+  });
+
+  it('lists active prices with a 10s timeout and keeps billing errors on BILLING_UNAVAILABLE', async () => {
+    const seen: StripeCallOptions[] = [];
+    const gateway: StripeGateway = {
+      createCustomer: () => Promise.resolve({ id: 'cus_test' }),
+      createCheckoutSession: () => Promise.resolve({ url: 'https://billing.test/c' }),
+      createPortalSession: () => Promise.resolve({ url: 'https://billing.test/p' }),
+      listPrices: (_params, options) => {
+        seen.push(options);
+        return Promise.resolve({
+          has_more: false,
+          data: [
+            {
+              id: 'price_plus',
+              unit_amount: 900,
+              currency: 'usd',
+              recurring: { interval: 'month' },
+              product: {
+                name: 'Plus',
+                metadata: { features: 'Alerts', entitlements: '{"maxFollows":40}' },
+              },
+            },
+          ],
+        });
+      },
+    };
+    const provider = new StripeBillingProvider(gateway);
+    await expect(provider.listActivePrices()).resolves.toEqual([
+      {
+        stripePriceId: 'price_plus',
+        name: 'Plus',
+        amountCents: 900,
+        currency: 'usd',
+        interval: 'month',
+        features: ['Alerts'],
+        entitlements: { maxFollows: 40 },
+      },
+    ]);
+    expect(seen[0]?.timeout).toBe(10_000);
+    const failing = new StripeBillingProvider(gateway, () => AbortSignal.abort(new Error('timeout')));
+    await expect(failing.listActivePrices()).rejects.toMatchObject({ code: 'BILLING_UNAVAILABLE' });
   });
 });

@@ -38,6 +38,16 @@ export interface UpsertSubscription {
   lastEventAt: Date;
 }
 
+export interface UpsertPlan {
+  stripePriceId: string;
+  name: string;
+  amountCents: number;
+  currency: string;
+  interval: string;
+  features: string[];
+  entitlements: Partial<PlanLimits>;
+}
+
 export interface UpsertInvoice {
   stripeInvoiceId: string;
   stripeCustomerId: string;
@@ -71,4 +81,6 @@ export interface BillingRepo {
   upsertInvoice(row: UpsertInvoice): Promise<InvoiceDto>;
   insertEvent(id: string, type: string): Promise<'inserted' | 'duplicate'>;
   markEventProcessed(id: string): Promise<void>;
+  upsertPlan(row: UpsertPlan): Promise<void>;
+  deactivatePlansExcept(stripePriceIds: string[]): Promise<number>;
 }

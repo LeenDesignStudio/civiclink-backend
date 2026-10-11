@@ -1,6 +1,7 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Prisma, PrismaClient } from '../../generated/prisma/client.js';
+import { isAppError, UpstreamError } from '../../lib/errors.js';
 import type { ExportList, ExportReader, ObjectStore } from './export.js';
 
 const TEN_MINUTES_MS = 600_000;
@@ -50,15 +51,20 @@ export class S3ExportStore implements ObjectStore {
   }
 
   async put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void> {
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: `exports/${input.key}`,
-        Body: input.body,
-        ContentType: input.contentType,
-        ...this.encryption(),
-      }),
-    );
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: `exports/${input.key}`,
+          Body: input.body,
+          ContentType: input.contentType,
+          ...this.encryption(),
+        }),
+      );
+    } catch (err) {
+      if (isAppError(err)) throw err;
+      throw new UpstreamError(undefined, { cause: err });
+    }
   }
 
   private encryption(): { ServerSideEncryption: 'aws:kms'; SSEKMSKeyId: string } | { ServerSideEncryption: 'AES256' } {

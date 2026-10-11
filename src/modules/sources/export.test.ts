@@ -2,6 +2,7 @@ import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
 import { Authz } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
+import { UpstreamError } from '../../lib/errors.js';
 import { ExportService, prefixCsvCell, toCsv } from './export.js';
 import { MemoryExportStore, S3ExportStore } from './export.store.js';
 
@@ -72,5 +73,16 @@ describe('S3 export encryption', () => {
     await store.put({ key: 'file.csv', body, contentType: 'text/csv' });
     expect(sent[0]?.input.ServerSideEncryption).toBe('AES256');
     expect(sent[0]?.input.SSEKMSKeyId).toBeUndefined();
+  });
+
+  it('maps an S3 upload failure to UPSTREAM_UNAVAILABLE', async () => {
+    const client = {
+      send: () => Promise.reject(new Error('s3 down')),
+    } as unknown as S3Client;
+    const store = new S3ExportStore('exports', 'us-east-1', undefined, client);
+    await expect(store.put({ key: 'file.csv', body, contentType: 'text/csv' })).rejects.toBeInstanceOf(UpstreamError);
+    await expect(store.put({ key: 'file.csv', body, contentType: 'text/csv' })).rejects.toMatchObject({
+      code: 'UPSTREAM_UNAVAILABLE',
+    });
   });
 });

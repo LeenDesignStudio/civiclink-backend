@@ -37,4 +37,23 @@ export class ContactRepo implements ContactStore {
       createdAt: created.createdAt,
     };
   }
+
+  async findForDelivery(id: string): Promise<{
+    name: string;
+    email: string;
+    topic: string;
+    message: string;
+    emailedAt: Date | null;
+  } | null> {
+    return dbCall(() =>
+      this.db.contactMessage.findUnique({
+        where: { id },
+        select: { name: true, email: true, topic: true, message: true, emailedAt: true },
+      }),
+    );
+  }
+
+  async markEmailed(id: string, at: Date): Promise<void> {
+    await dbCall(() => this.db.contactMessage.update({ where: { id }, data: { emailedAt: at } }));
+  }
 }

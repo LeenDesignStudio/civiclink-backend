@@ -23,6 +23,10 @@ const SUBSCRIPTION_EVENTS = new Set([
 
 const INVOICE_EVENTS = new Set(['invoice.paid', 'invoice.payment_failed', 'invoice.finalized']);
 
+const CATALOG_EVENTS = new Set(['product.updated', 'price.updated']);
+
+const PLAN_SYNC_KEY = 'billing.syncPlans';
+
 const STATUS_MAP: Record<string, SubscriptionStatus> = {
   incomplete: 'INCOMPLETE',
   incomplete_expired: 'INCOMPLETE_EXPIRED',
@@ -43,7 +47,11 @@ const INVOICE_STATUS: Record<string, InvoiceDto['status']> = {
 };
 
 export interface BillingJobQueue {
-  enqueue(name: 'billing.applyEvent', data: { event: unknown }, options: { singletonKey: string }): Promise<void>;
+  enqueue(
+    name: 'billing.applyEvent' | 'billing.syncPlans',
+    data: { event?: unknown; reason?: 'catalog' },
+    options: { singletonKey: string },
+  ): Promise<void>;
 }
 
 export interface BillingDeps {
@@ -148,6 +156,13 @@ export class BillingService {
    */
   async acceptStripeEvent(event: unknown): Promise<void> {
     const parsed = parseEvent(event);
+    if (CATALOG_EVENTS.has(parsed.type)) {
+      const inserted = await this.deps.repo.insertEvent(parsed.id, parsed.type);
+      if (inserted === 'duplicate') return;
+      await this.enqueuePlanSync();
+      await this.deps.repo.markEventProcessed(parsed.id);
+      return;
+    }
     if (!this.deps.queue) {
       await this.applyStripeEvent(event);
       return;
@@ -158,6 +173,33 @@ export class BillingService {
       if (isAppError(error)) throw error;
       throw new BillingUnavailableError({ cause: error });
     }
+  }
+
+  /**
+   * Job entry for billing.applyEvent. The worker passes the System principal.
+   */
+  async applyStripeEventAsSystem(ctx: ServiceContext, event: unknown): Promise<ApplyStripeEventResult> {
+    ctx.authz.require('system.billing:sync');
+    return this.applyStripeEvent(event);
+  }
+
+  /**
+   * Mirror active Stripe prices onto plans. Prices absent from the active list are deactivated.
+   */
+  async syncPlans(ctx: ServiceContext): Promise<{ upserted: number; deactivated: number }> {
+    ctx.authz.require('system.billing:sync');
+    let prices;
+    try {
+      prices = await this.deps.provider.listActivePrices();
+    } catch (err) {
+      if (isAppError(err)) throw err;
+      throw new BillingUnavailableError({ cause: err });
+    }
+    for (const price of prices) {
+      await this.deps.repo.upsertPlan(price);
+    }
+    const deactivated = await this.deps.repo.deactivatePlansExcept(prices.map((price) => price.stripePriceId));
+    return { upserted: prices.length, deactivated };
   }
 
   async applyStripeEvent(event: unknown): Promise<ApplyStripeEventResult> {
@@ -186,7 +228,21 @@ export class BillingService {
     }
   }
 
+  private async enqueuePlanSync(): Promise<void> {
+    if (!this.deps.queue) return;
+    try {
+      await this.deps.queue.enqueue('billing.syncPlans', { reason: 'catalog' }, { singletonKey: PLAN_SYNC_KEY });
+    } catch (error) {
+      if (isAppError(error)) throw error;
+      throw new BillingUnavailableError({ cause: error });
+    }
+  }
+
   private async dispatch(event: StripeWebhookEvent): Promise<boolean> {
+    if (CATALOG_EVENTS.has(event.type)) {
+      await this.enqueuePlanSync();
+      return false;
+    }
     if (event.type === 'checkout.session.completed') return this.onCheckout(event);
     if (SUBSCRIPTION_EVENTS.has(event.type)) return this.onSubscription(event);
     if (INVOICE_EVENTS.has(event.type)) return this.onInvoice(event);

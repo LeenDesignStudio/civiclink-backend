@@ -1,3 +1,5 @@
+import type { CatalogPrice, ListedPrice } from './catalog.js';
+
 export interface CreateCustomerInput {
   userId: string;
   email: string;
@@ -24,6 +26,8 @@ export interface BillingProvider {
   createCustomer(input: CreateCustomerInput): Promise<{ stripeCustomerId: string }>;
   createCheckoutSession(input: CreateCheckoutInput): Promise<{ url: string }>;
   createPortalSession(input: CreatePortalInput): Promise<{ url: string }>;
+  /** Active Stripe prices expanded with their products. Each call is bounded by a 10s timeout. */
+  listActivePrices(): Promise<CatalogPrice[]>;
 }
 
 export interface StripeCallOptions {
@@ -53,4 +57,8 @@ export interface StripeGateway {
     params: { customer: string; return_url: string },
     options: StripeCallOptions,
   ): Promise<{ url: string }>;
+  listPrices(
+    params: { active: true; limit: number; starting_after?: string },
+    options: StripeCallOptions,
+  ): Promise<{ data: ListedPrice[]; has_more: boolean }>;
 }

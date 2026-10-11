@@ -1,3 +1,4 @@
+import type { CatalogPrice } from '../../src/modules/billing/catalog.js';
 import type {
   BillingProvider,
   CreateCheckoutInput,
@@ -8,6 +9,7 @@ import type {
 export class FakeStripe implements BillingProvider {
   failWith: string | null = null;
   readonly calls: { op: string; idempotencyKey: string }[] = [];
+  prices: CatalogPrice[] = [];
   private readonly customers = new Map<string, string>();
 
   createCustomer(input: CreateCustomerInput): Promise<{ stripeCustomerId: string }> {
@@ -30,6 +32,12 @@ export class FakeStripe implements BillingProvider {
     this.assertUp();
     this.calls.push({ op: 'portal', idempotencyKey: input.idempotencyKey });
     return Promise.resolve({ url: 'https://billing.test/portal' });
+  }
+
+  listActivePrices(): Promise<CatalogPrice[]> {
+    this.assertUp();
+    this.calls.push({ op: 'prices', idempotencyKey: 'list' });
+    return Promise.resolve(this.prices);
   }
 
   private assertUp(): void {

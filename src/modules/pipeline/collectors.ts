@@ -1,3 +1,4 @@
+import { isAppError, UpstreamError } from '../../lib/errors.js';
 import { extractElements, extractField, textContent } from './html.js';
 import { robotsDisallows } from './robots.js';
 import {
@@ -16,11 +17,19 @@ const pageConfigs = new WeakMap<RawSnapshot, SourceConfig>();
 const decoder = new TextDecoder();
 
 async function load(ctx: CollectorContext, url: string): Promise<{ status: number; body: Uint8Array; contentType: string }> {
-  return ctx.fetch.get(url, {
-    maxBytes: ctx.maxBytes,
-    timeoutMs: 60_000,
-    headers: { 'user-agent': USER_AGENT, accept: 'application/json,text/csv,text/html' },
-  });
+  let response: { status: number; body: Uint8Array; contentType: string };
+  try {
+    response = await ctx.fetch.get(url, {
+      maxBytes: ctx.maxBytes,
+      timeoutMs: 60_000,
+      headers: { 'user-agent': USER_AGENT, accept: 'application/json,text/csv,text/html' },
+    });
+  } catch (err) {
+    if (isAppError(err)) throw err;
+    throw new UpstreamError(undefined, { cause: err });
+  }
+  if (response.status >= 500) throw new UpstreamError();
+  return response;
 }
 
 export const tigerCollector: Collector = {

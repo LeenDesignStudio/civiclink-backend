@@ -153,7 +153,13 @@ export class PipelineService {
     const rows = await this.deps.store.servicesWithUrls();
     let broken = 0;
     for (const row of rows) {
-      const response = await this.deps.fetch.get(row.url, { maxBytes: 4096, timeoutMs: 8_000, headers: { 'user-agent': 'CivicLinkBot/1.0' } });
+      let response: Awaited<ReturnType<HttpFetcher['get']>>;
+      try {
+        response = await this.deps.fetch.get(row.url, { maxBytes: 4096, timeoutMs: 8_000, headers: { 'user-agent': 'CivicLinkBot/1.0' } });
+      } catch (err) {
+        if (isAppError(err)) throw err;
+        throw new UpstreamError(undefined, { cause: err });
+      }
       const isBroken = response.status >= 400;
       await this.deps.store.setLinkBroken(row.id, isBroken, this.clock.now());
       if (isBroken) broken += 1;

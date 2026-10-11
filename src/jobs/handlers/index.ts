@@ -1,6 +1,7 @@
 import { isAppError } from '../../lib/errors.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { Authz, systemPrincipal } from '../../authz/authz.js';
+import type { Permission } from '../../authz/permissions.js';
 import type { Boss, BossJob } from '../boss.js';
 import { QUEUE_OPTIONS, QUEUES, type QueueName } from '../queues.js';
 import type { RetentionService } from '../retention.js';
@@ -21,46 +22,92 @@ export function isPermanent(err: unknown): boolean {
   return isAppError(err) && !err.retryable;
 }
 
+const JOB_PERMISSION: Record<QueueName, Permission> = {
+  [QUEUES.notifyFanout]: 'system.notifications:deliver',
+  [QUEUES.notifyEmail]: 'system.notifications:deliver',
+  [QUEUES.notifyPush]: 'system.notifications:deliver',
+  [QUEUES.alertFinalize]: 'system.notifications:deliver',
+  [QUEUES.billingApply]: 'system.billing:sync',
+  [QUEUES.billingSync]: 'system.billing:sync',
+  [QUEUES.sourceRun]: 'system.pipeline:run',
+  [QUEUES.locationsReresolve]: 'system.locations:reresolve',
+  [QUEUES.linkCheck]: 'system.locations:reresolve',
+  [QUEUES.retentionLookups]: 'system.retention:run',
+  [QUEUES.retentionSessions]: 'system.retention:run',
+  [QUEUES.retentionStripeEvents]: 'system.retention:run',
+  [QUEUES.accountsPurge]: 'system.retention:run',
+  [QUEUES.emailContact]: 'system.notifications:deliver',
+  [QUEUES.emailAccountDeletion]: 'system.notifications:deliver',
+};
+
+/** Every job handler calls this with the System principal before doing work. */
+export function authorizeJob(ctx: ServiceContext, name: QueueName): void {
+  ctx.authz.require(JOB_PERMISSION[name]);
+}
+
 export async function registerHandlers(boss: Boss, services: WorkerServices): Promise<void> {
   const names = Object.values(QUEUES);
   for (const name of names) {
     await boss.createQueue(name, QUEUE_OPTIONS[name]);
   }
   await work(boss, QUEUES.notifyFanout, async (data) => {
+    const ctx = jobContext('notify.fanout', QUEUES.notifyFanout);
     const record = objectOf(data);
     const { alertId, recipientCount, ...fanout } = record;
-    const result = await services.notifications.fanout(system('notify.fanout'), fanout);
+    const result = await services.notifications.fanout(ctx, fanout);
     if (typeof alertId === 'string') {
       const count = typeof recipientCount === 'number' ? recipientCount : result.notifications.length;
       await boss.send(QUEUES.alertFinalize, { alertId, recipientCount: count }, { singletonKey: alertId });
     }
   });
-  await work(boss, QUEUES.notifyEmail, (data) => services.notifications.deliverEmail(system('notify.deliver.email'), data));
-  await work(boss, QUEUES.notifyPush, (data) => services.notifications.deliverPush(system('notify.deliver.push'), data));
-  await work(boss, QUEUES.alertFinalize, (data) => services.notifications.finalizeAlert(system('alert.finalize'), data));
-  await work(boss, QUEUES.sourceRun, (data) => services.pipeline.runSource(system('source.run'), data));
-  await work(boss, QUEUES.locationsReresolve, () => services.pipeline.locationsReresolve(system('locations.reresolve')));
-  await work(boss, QUEUES.linkCheck, () => services.pipeline.linkCheck(system('services.linkcheck')));
-  await work(boss, QUEUES.accountsPurge, () => services.retention.purge(system('accounts.purge')));
-  await work(boss, QUEUES.retentionLookups, () => services.retention.lookups(system('retention.lookups')));
-  await work(boss, QUEUES.retentionSessions, () => services.retention.sessions(system('retention.sessions')));
-  await work(boss, QUEUES.retentionStripeEvents, () => services.retention.stripeEvents(system('retention.stripeEvents')));
+  await work(boss, QUEUES.notifyEmail, (data) =>
+    services.notifications.deliverEmail(jobContext('notify.deliver.email', QUEUES.notifyEmail), data),
+  );
+  await work(boss, QUEUES.notifyPush, (data) =>
+    services.notifications.deliverPush(jobContext('notify.deliver.push', QUEUES.notifyPush), data),
+  );
+  await work(boss, QUEUES.alertFinalize, (data) =>
+    services.notifications.finalizeAlert(jobContext('alert.finalize', QUEUES.alertFinalize), data),
+  );
+  await work(boss, QUEUES.sourceRun, (data) =>
+    services.pipeline.runSource(jobContext('source.run', QUEUES.sourceRun), data),
+  );
+  await work(boss, QUEUES.locationsReresolve, () =>
+    services.pipeline.locationsReresolve(jobContext('locations.reresolve', QUEUES.locationsReresolve)),
+  );
+  await work(boss, QUEUES.linkCheck, () =>
+    services.pipeline.linkCheck(jobContext('services.linkcheck', QUEUES.linkCheck)),
+  );
+  await work(boss, QUEUES.accountsPurge, () =>
+    services.retention.purge(jobContext('accounts.purge', QUEUES.accountsPurge)),
+  );
+  await work(boss, QUEUES.retentionLookups, () =>
+    services.retention.lookups(jobContext('retention.lookups', QUEUES.retentionLookups)),
+  );
+  await work(boss, QUEUES.retentionSessions, () =>
+    services.retention.sessions(jobContext('retention.sessions', QUEUES.retentionSessions)),
+  );
+  await work(boss, QUEUES.retentionStripeEvents, () =>
+    services.retention.stripeEvents(jobContext('retention.stripeEvents', QUEUES.retentionStripeEvents)),
+  );
   await work(boss, QUEUES.billingSync, async () => {
-    if (services.billingSync) await services.billingSync(system('billing.syncPlans'));
+    const ctx = jobContext('billing.syncPlans', QUEUES.billingSync);
+    if (services.billingSync) await services.billingSync(ctx);
   });
   await work(boss, QUEUES.billingApply, async (data) => {
+    const ctx = jobContext('billing.applyEvent', QUEUES.billingApply);
     const event = objectOf(data).event;
-    if (services.applyBillingEvent) await services.applyBillingEvent(system('billing.applyEvent'), event);
+    if (services.applyBillingEvent) await services.applyBillingEvent(ctx, event);
   });
   await work(boss, QUEUES.emailContact, async (data) => {
-    const id = objectOf(data).id;
-    if (services.sendContact && typeof id === 'string') await services.sendContact(system('email.contact'), id);
+    const ctx = jobContext('email.contact', QUEUES.emailContact);
+    const id = stringField(data, 'contactMessageId') ?? stringField(data, 'id');
+    if (services.sendContact && id) await services.sendContact(ctx, id);
   });
   await work(boss, QUEUES.emailAccountDeletion, async (data) => {
-    const id = objectOf(data).id;
-    if (services.sendAccountDeletion && typeof id === 'string') {
-      await services.sendAccountDeletion(system('email.accountDeletion'), id);
-    }
+    const ctx = jobContext('email.accountDeletion', QUEUES.emailAccountDeletion);
+    const id = stringField(data, 'id');
+    if (services.sendAccountDeletion && id) await services.sendAccountDeletion(ctx, id);
   });
 }
 
@@ -80,12 +127,19 @@ async function work(boss: Boss, name: QueueName, handler: (data: unknown) => Pro
   });
 }
 
-function system(job: string): ServiceContext {
+function jobContext(job: string, queue: QueueName): ServiceContext {
   const principal = systemPrincipal(job);
-  return { requestId: job, principal, authz: new Authz(principal), ipHash: 'system' };
+  const ctx: ServiceContext = { requestId: job, principal, authz: new Authz(principal), ipHash: 'system' };
+  authorizeJob(ctx, queue);
+  return ctx;
 }
 
 function objectOf(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+  const field = objectOf(value)[key];
+  return typeof field === 'string' && field.length > 0 ? field : undefined;
 }

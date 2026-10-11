@@ -30,7 +30,7 @@ Legend — **Scope**: `public` (anyone), `resident` (signed-in resident, any sub
 | `serviceCategories` | Query | public | — | — | Active categories ordered | — |
 | `plans` | Query | public · `public.plans:read` | — | — | Active plans: name, amountCents, currency, interval, features | — |
 | `legalVersions` | Query | public · `public.legal:read` | — | — | Current TERMS and PRIVACY versions | — |
-| `submitContactMessage` | Mutation | public · `public.contact:create` | contact | `{ name 2–80, email valid ≤254, topic enum, message 10–2000, consent: true, turnstileToken }` | Verify Turnstile server-side; store with ip_hash; enqueue email to `CONTACT_INBOX` | `VALIDATION`, `BOT_CHECK_FAILED` |
+| `submitContactMessage` | Mutation | public · `public.contact:create` | contact | `{ name 2–80, email valid ≤254, topic enum, message 10–2000, consent: true, turnstileToken }` | Verify Turnstile server-side; store with ip_hash; enqueue `email.contact`, which sends name, email, topic, and message to `CONTACT_INBOX` with Reply-To set to the sender and sets `emailed_at` on success | `VALIDATION`, `BOT_CHECK_FAILED` |
 
 ## B. Resident account & session
 
@@ -48,7 +48,7 @@ REST routes (Fastify, not GraphQL):
 | `acceptTerms` | Mutation | resident · `self.profile:update` | mutation | `{ termsVersion, privacyVersion, displayName 1–60, marketingOptIn: bool }` | Versions must equal current; stores accepted_at; creates default notification preferences if none (D-09) | `VALIDATION`, `TERMS_VERSION_MISMATCH` |
 | `updateProfile` | Mutation | residentActive · `self.profile:update` | mutation | `{ displayName? 1–60, marketingOptIn? }` | — | `VALIDATION` |
 | `signOut` | Mutation | resident · `self.session:manage` | mutation | `{ everywhere?: bool }` | Revoke current (or all) sessions; clear cookies | — |
-| `requestAccountDeletion` | Mutation | residentActive · `self.account:delete` | mutation | `{ reason?: enum, reasonText? ≤500, confirm: "DELETE" }` | status → PENDING_DELETION; purge_after = now+30d; revoke all sessions; Stripe `cancel_at_period_end=true`; enqueue confirmation email | `VALIDATION` |
+| `requestAccountDeletion` | Mutation | residentActive · `self.account:delete` | mutation | `{ reason?: enum, reasonText? ≤500, confirm: "DELETE" }` | status → PENDING_DELETION; purge_after = now+30d; revoke all sessions; Stripe `cancel_at_period_end=true`; enqueue `email.accountDeletion` (plain text + HTML: scheduled, purge date, restore within `ACCOUNT_PURGE_DAYS`; no tokens or ids in the body) | `VALIDATION` |
 | `restoreAccount` | Mutation | resident (PENDING_DELETION only) · `self.account:delete` | mutation | — | status → ACTIVE; restored_at set; Stripe cancel flag left as-is (resident can resubscribe in portal) | `NOT_PENDING_DELETION` |
 
 ## C. Saved locations & follows
@@ -95,7 +95,7 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 | `invoices` | Query | residentActive | — | `first ≤24, after` | Own via stripe customer | — |
 | `createCheckoutSession` | Mutation | residentActive | mutation | `{ planId }` | Plan active; reject if already ACTIVE/TRIALING/PAST_DUE (use portal); create/reuse Stripe customer (idempotency key `cust:<userId>`); return URL | `NOT_FOUND`, `ALREADY_SUBSCRIBED`, `BILLING_UNAVAILABLE` |
 | `createPortalSession` | Mutation | residentActive | mutation | — | Requires Stripe customer | `NO_BILLING_ACCOUNT`, `BILLING_UNAVAILABLE` |
-| `POST /webhooks/stripe` | REST | system · `system.billing:sync` | — | raw body + `Stripe-Signature` | Verify; dedupe by event id; handle `checkout.session.completed`, `customer.subscription.created/updated/deleted`, `invoice.paid/payment_failed/finalized`, `product.updated`, `price.updated`; ignore older out-of-order events; 2xx fast, heavy work in job | 400 bad signature; 200 duplicate |
+| `POST /webhooks/stripe` | REST | system · `system.billing:sync` | — | raw body + `Stripe-Signature` | Verify; dedupe by event id; handle `checkout.session.completed`, `customer.subscription.created/updated/deleted`, `invoice.paid/payment_failed/finalized`; `product.updated` and `price.updated` enqueue `billing.syncPlans` with singletonKey `billing.syncPlans` (a burst runs one sync); ignore older out-of-order events; 2xx fast, heavy work in job | 400 bad signature; 200 duplicate |
 
 ## G. Admin — auth & users
 
@@ -170,13 +170,13 @@ State machine: `SUBMITTED → IN_REVIEW → APPLIED | DISMISSED`; `SUBMITTED →
 | `notify.deliver.email` / `notify.deliver.push` | `system.notifications:deliver` | per delivery row | `notification_deliveries.dedupe_key` unique; skip if status ≠ QUEUED | 3, backoff; 410/404 push token → revoke subscription |
 | `alert.finalize` | `system.notifications:deliver` | after fan-out | sets status SENT, recipient_count, sent_at | 3 |
 | `billing.applyEvent` | `system.billing:sync` | webhook | `stripe_events.processed_at` | 8, backoff |
-| `billing.syncPlans` | `system.billing:sync` | daily + `product/price.updated` | upsert by price id | 3 |
+| `billing.syncPlans` | `system.billing:sync` | daily + `product/price.updated` | list active Prices with Products (10s timeout); upsert by `stripe_price_id` (name, amount, currency, interval, features and entitlements from product metadata); `active=false` when the price is no longer active | 3 |
 | `source.run` | `system.pipeline:run` | schedule / triggerSourceRefresh | one active run per source | per source config |
 | `locations.reresolve` | `system.locations:reresolve` | nightly 03:00 UTC | overwrite | 2 |
 | `services.linkcheck` | `system.locations:reresolve` | nightly | overwrite flag | 2 |
 | `retention.lookups` / `retention.sessions` / `retention.stripeEvents` | `system.retention:run` | daily | delete-where | 2 |
 | `accounts.purge` | `system.retention:run` | daily | `purged_at` set | 3; partial failure resumes |
-| `email.contact` / `email.accountDeletion` | `system.notifications:deliver` | on demand | job key = entity id | 3 |
+| `email.contact` / `email.accountDeletion` | `system.notifications:deliver` | on demand | job key = entity id. Contact mail goes to `CONTACT_INBOX` (Reply-To = sender, `emailed_at` on success). Deletion mail is plain text + HTML to the resident (purge date, restore within `ACCOUNT_PURGE_DAYS`, no tokens or ids). Provider failure is `UPSTREAM_UNAVAILABLE` and retries | 3 |
 
 Purge (`accounts.purge`) for each due deletion request: delete saved_locations, follows, notifications
 (+ deliveries), preferences, push subscriptions, sessions, identities, lookups; null `corrections.user_id`;

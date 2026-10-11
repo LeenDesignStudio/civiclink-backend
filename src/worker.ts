@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { prisma } from './db/prisma.js';
 import { logger } from './lib/logger.js';
 import { systemClock } from './lib/clock.js';
+import { isAppError, UpstreamError } from './lib/errors.js';
 import { startBoss } from './jobs/boss.js';
 import { registerHandlers, type WorkerServices } from './jobs/handlers/index.js';
 import { registerSchedules } from './jobs/schedules.js';
@@ -20,6 +21,9 @@ import { PipelineService } from './modules/pipeline/pipeline.service.js';
 import { BillingRepo } from './modules/billing/billing.repo.js';
 import { BillingService } from './modules/billing/billing.service.js';
 import { StripeBillingProvider } from './modules/billing/stripe.provider.js';
+import { ContactRepo } from './modules/contact/contact.repo.js';
+import { ResidentsRepo } from './modules/residents/residents.repo.js';
+import { OutboundMail } from './jobs/outbound-mail.js';
 
 export function isWorkerMain(metaUrl: string, argv1: string | undefined): boolean {
   if (!argv1) return false;
@@ -65,16 +69,21 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     store,
     fetch: {
       get: async (url, init) => {
-        const response = await fetch(url, {
-          ...(init.headers ? { headers: init.headers } : {}),
-          signal: AbortSignal.timeout(init.timeoutMs),
-        });
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        return {
-          status: response.status,
-          body: bytes,
-          contentType: response.headers.get('content-type') ?? '',
-        };
+        try {
+          const response = await fetch(url, {
+            ...(init.headers ? { headers: init.headers } : {}),
+            signal: AbortSignal.timeout(init.timeoutMs),
+          });
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          return {
+            status: response.status,
+            body: bytes,
+            contentType: response.headers.get('content-type') ?? '',
+          };
+        } catch (err) {
+          if (isAppError(err)) throw err;
+          throw new UpstreamError(undefined, { cause: err });
+        }
       },
     },
     audit,
@@ -85,12 +94,28 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     repo: new BillingRepo(prisma),
     provider: StripeBillingProvider.fromApiKey(env.STRIPE_SECRET_KEY),
     publicWebUrl: env.PUBLIC_WEB_URL,
+    queue: {
+      enqueue: async (name, data, options) => {
+        await boss.send(name, data, { singletonKey: options.singletonKey });
+      },
+    },
+  });
+  const mail = new OutboundMail({
+    email,
+    contactInbox: env.CONTACT_INBOX,
+    purgeDays: env.ACCOUNT_PURGE_DAYS,
+    clock: systemClock,
+    contacts: new ContactRepo(prisma),
+    residents: new ResidentsRepo(prisma),
   });
   const services: WorkerServices = {
     notifications,
     pipeline,
     retention,
-    applyBillingEvent: (_ctx, event) => billing.applyStripeEvent(event).then(() => undefined),
+    billingSync: (ctx) => billing.syncPlans(ctx).then(() => undefined),
+    applyBillingEvent: (ctx, event) => billing.applyStripeEventAsSystem(ctx, event).then(() => undefined),
+    sendContact: (ctx, id) => mail.sendContact(ctx, id),
+    sendAccountDeletion: (ctx, id) => mail.sendAccountDeletion(ctx, id),
   };
   await registerHandlers(boss, services);
   await registerSchedules(boss);
