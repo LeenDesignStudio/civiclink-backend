@@ -9,6 +9,7 @@ import {
   tigerLayerPlan,
   tigerManifest,
   tigerRecordsFromFeatures,
+  tigerShapefileName,
   type TigerFeature,
 } from './tiger.js';
 import {
@@ -66,14 +67,22 @@ export const tigerCollector: Collector = {
     const features: TigerFeature[] = [];
     let stateClip: Uint8Array | undefined;
     for (const layer of tigerLayerPlan(year, postal)) {
-      const response = await load(ctx, layer.url, TIGER_FETCH_TIMEOUT_MS);
-      if (response.status !== 200) throw new UpstreamError();
+      let response: { status: number; body: Uint8Array; contentType: string };
+      try {
+        response = await load(ctx, layer.url, TIGER_FETCH_TIMEOUT_MS);
+      } catch (err) {
+        if (isAppError(err) && !(err instanceof UpstreamError)) throw err;
+        const timedOut = err instanceof UpstreamError && err.message === 'Download timed out.';
+        throw new UpstreamError(timedOut ? `Boundary download timed out for ${layer.id}.` : `Boundary download failed for ${layer.id}.`);
+      }
+      if (response.status !== 200) throw new UpstreamError(`Boundary download failed for ${layer.id} (HTTP ${response.status}).`);
       if (response.body.byteLength > ctx.maxBytes) throw new ValidationError('Download exceeded the size cap.');
       assertZip(response.contentType);
       if (layer.clip && !stateClip) throw new ValidationError('State boundary is required before ZCTA.');
       const geojson = await ctx.convertZip({
         zip: response.body,
         layer: layer.id,
+        shapefile: tigerShapefileName(layer.url),
         ...(layer.where ? { where: layer.where } : {}),
         ...(layer.clip && stateClip ? { clipGeoJson: stateClip } : {}),
       });

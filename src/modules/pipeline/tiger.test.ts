@@ -4,7 +4,7 @@ import { ValidationError } from '../../lib/errors.js';
 import { tigerCollector } from './collectors.js';
 import { ogrArguments } from './ogr.js';
 import type { SourceRow } from './records.js';
-import { congressNumber, stateFips, tigerLayerPlan, tigerRecordsFromFeatures, TIGER_FETCH_TIMEOUT_MS } from './tiger.js';
+import { congressNumber, stateFips, tigerLayerPlan, tigerRecordsFromFeatures, tigerShapefileName, TIGER_FETCH_TIMEOUT_MS } from './tiger.js';
 import { BULK_CAP, type HttpFetcher } from './types.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/tiger-md.geojson', import.meta.url), 'utf8')) as {
@@ -48,11 +48,15 @@ describe('tiger layer plan', () => {
       'ZCTA520',
     ]);
     expect(plan[0]?.url).toBe('https://www2.census.gov/geo/tiger/TIGER2025/STATE/tl_2025_us_state.zip');
+    expect(tigerShapefileName(plan[0]?.url ?? '')).toBe('tl_2025_us_state.shp');
     expect(plan.find((layer) => layer.id === 'CD')?.url).toContain('tl_2025_us_cd119.zip');
     expect(plan.find((layer) => layer.id === 'PLACE')?.url).toContain('tl_2025_24_place.zip');
     expect(plan.find((layer) => layer.id === 'ZCTA520')?.clip).toBe(true);
     expect(ogrArguments({ zipPath: 'layer.zip', outPath: 'out.geojson', where: "STUSPS='MD'" })).toContain('-where');
     expect(ogrArguments({ zipPath: 'layer.zip', outPath: 'out.geojson', clipPath: 'clip.geojson' })).toContain('-clipsrc');
+    expect(
+      ogrArguments({ zipPath: '/tmp/layer.zip', outPath: 'out.geojson', shapefile: 'tl_2025_us_state.shp' }).at(-1),
+    ).toBe('/vsizip//tmp/layer.zip/tl_2025_us_state.shp');
   });
 
   it('maps a saved GeoJSON extract to parented jurisdictions', () => {

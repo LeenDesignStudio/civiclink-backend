@@ -64,6 +64,12 @@ export function stateFips(postal: string): string {
   return fips;
 }
 
+export function tigerShapefileName(url: string): string {
+  const name = url.split('/').pop() ?? '';
+  if (name.toLowerCase().endsWith('.zip')) return `${name.slice(0, -4)}.shp`;
+  return name.length > 0 ? name : 'layer.shp';
+}
+
 export function tigerLayerPlan(year: number, postal: string): TigerLayerPlan[] {
   const state = postal.toUpperCase();
   const fips = stateFips(state);

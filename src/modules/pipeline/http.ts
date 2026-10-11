@@ -13,7 +13,8 @@ export async function httpGet(
     });
   } catch (err) {
     if (isAppError(err)) throw err;
-    throw new UpstreamError(undefined, { cause: err });
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    throw new UpstreamError(timedOut ? 'Download timed out.' : undefined, { cause: err });
   }
   const body = await readAtMost(response, init.maxBytes);
   return { status: response.status, body, contentType: response.headers.get('content-type') ?? '' };

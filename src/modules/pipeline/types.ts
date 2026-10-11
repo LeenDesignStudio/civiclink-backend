@@ -60,6 +60,7 @@ export interface RunCounts {
 export interface ZipConvertRequest {
   zip: Uint8Array;
   layer: string;
+  shapefile?: string;
   where?: string;
   clipGeoJson?: Uint8Array;
 }
