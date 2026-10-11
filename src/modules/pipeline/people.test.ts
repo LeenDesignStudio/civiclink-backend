@@ -66,4 +66,27 @@ describe('congress and open states fixtures', () => {
     expect(records.map((row) => row.fields.fullName)).toEqual(['Jane Smith']);
     expect(records[0]?.matchKey).toBe('openstates:ocd-person/md-1');
   });
+
+  it('keeps a state CSV that has current_party and no state column', async () => {
+    const body = 'id,name,current_party\nocd-person/md-2,Ada Lovelace,Democratic\n';
+    const snap = await openStatesCollector.fetch({
+      source: source({
+        collectorKey: 'openstates.people',
+        url: 'https://data.openstates.org/people/current/',
+        config: { state: 'MD' },
+      }),
+      maxBytes: 100_000,
+      fetch: {
+        get: () => Promise.resolve({ status: 200, body: new TextEncoder().encode(body), contentType: 'text/csv' }),
+      },
+    });
+    const records = openStatesCollector.normalise(snap);
+    expect(records).toEqual([
+      {
+        matchKey: 'openstates:ocd-person/md-2',
+        entityType: 'OFFICIAL',
+        fields: { fullName: 'Ada Lovelace', party: 'Democratic', state: 'MD' },
+      },
+    ]);
+  });
 });

@@ -1,7 +1,16 @@
 - id:
     bioguide: S000001
+    thomas: '00172'
+    fec:
+    - S8MD00100
+    - H2MD01054
+    wikipedia: Jane Smith
   name:
+    first: Jane
+    last: Smith
     official_full: Jane Smith
+  bio:
+    birthday: '1958-10-13'
   terms:
     - type: sen
       state: MD
@@ -11,6 +20,6 @@
   name:
     official_full: Victor Example
   terms:
-    - type: rep
-      state: VA
-      party: Republican
+  - type: rep
+    state: VA
+    party: Republican

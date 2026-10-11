@@ -162,7 +162,7 @@ export const congressCollector: Collector = {
       const id = objectOf(item.id);
       const bioguide = stringOf(id.bioguide);
       const name = objectOf(item.name);
-      const fullName = stringOf(name.official_full) ?? stringOf(item.fullName);
+      const fullName = stringOf(name.official_full) ?? stringOf(item.fullName) ?? joinName(name);
       if (!bioguide || !fullName) continue;
       const terms = Array.isArray(item.terms) ? item.terms : [];
       const latest = objectOf(terms[terms.length - 1]);
@@ -197,14 +197,15 @@ export const openStatesCollector: Collector = {
       const id = row.id ?? row.openstates_id;
       const fullName = row.name ?? row.full_name;
       if (!id || !fullName) continue;
-      const state = row.state ?? null;
-      if (want && (state ?? '').toUpperCase() !== want) continue;
+      const stateColumn = row.state;
+      if (want && stateColumn && stateColumn.toUpperCase() !== want) continue;
+      const state = stateColumn ?? want ?? null;
       records.push({
         matchKey: `openstates:${id}`,
         entityType: 'OFFICIAL',
         fields: {
           fullName,
-          party: row.party ?? null,
+          party: row.party ?? row.current_party ?? null,
           state,
         },
       });
@@ -422,50 +423,80 @@ function splitCsv(text: string): string[][] {
   return rows;
 }
 
-/** Minimal YAML for a top-level list of maps, including one nested map and one list of maps. */
+/**
+ * Minimal YAML for legislators-current.yaml: a top-level list of maps, nested maps,
+ * a list of scalars (id.fec), and a list of maps (terms) at indent 2 or 4.
+ */
 export function parseSimpleYaml(text: string): unknown[] {
   const rows: Record<string, unknown>[] = [];
   let current: Record<string, unknown> | undefined;
-  let mapTarget: Record<string, unknown> | undefined;
-  let listKey: string | undefined;
-  let listItem: Record<string, unknown> | undefined;
+  const frames: { indent: number; record: Record<string, unknown> }[] = [];
+  let pending: { indent: number; owner: Record<string, unknown>; key: string } | undefined;
+  let seq: { indent: number; record: Record<string, unknown> } | undefined;
+
+  const parentAt = (indent: number): Record<string, unknown> | undefined => {
+    if (seq && indent > seq.indent) return seq.record;
+    if (seq && indent <= seq.indent) seq = undefined;
+    while (frames.length > 1 && (frames[frames.length - 1]?.indent ?? 0) >= indent) frames.pop();
+    return frames[frames.length - 1]?.record;
+  };
+
+  const openMap = (owner: Record<string, unknown>, opened: { key: string; child: Record<string, unknown> }, keyIndent: number) => {
+    frames.push({ indent: keyIndent, record: opened.child });
+    pending = { indent: keyIndent, owner, key: opened.key };
+  };
 
   for (const raw of text.split(/\r?\n/)) {
     if (!raw.trim() || raw.trimStart().startsWith('#')) continue;
     const indent = raw.length - raw.trimStart().length;
     const line = raw.trim();
+    if (line === '---' || line === '...') continue;
+
     if (indent === 0 && line.startsWith('- ')) {
       current = {};
       rows.push(current);
-      mapTarget = current;
-      listKey = undefined;
-      listItem = undefined;
+      frames.length = 0;
+      frames.push({ indent: 0, record: current });
+      pending = undefined;
+      seq = undefined;
       const opened = assignKey(current, line.slice(2));
-      if (opened) {
-        mapTarget = opened.child;
-        listKey = opened.key;
-      }
+      if (opened) openMap(current, opened, 2);
       continue;
     }
     if (!current) continue;
-    if (line.startsWith('- ') && listKey) {
-      const items = Array.isArray(current[listKey]) ? (current[listKey] as Record<string, unknown>[]) : [];
-      current[listKey] = items;
-      listItem = {};
-      items.push(listItem);
-      mapTarget = listItem;
-      assignKey(listItem, line.slice(2));
+    if (pending && !line.startsWith('- ') && indent <= pending.indent) pending = undefined;
+
+    if (line.startsWith('- ')) {
+      if (!pending || indent < pending.indent) continue;
+      const items = Array.isArray(pending.owner[pending.key]) ? (pending.owner[pending.key] as unknown[]) : [];
+      pending.owner[pending.key] = items;
+      const body = line.slice(2).trim();
+      if (body.includes(':')) {
+        const item: Record<string, unknown> = {};
+        items.push(item);
+        seq = { indent, record: item };
+        const opened = assignKey(item, body);
+        if (opened) openMap(item, opened, indent + 2);
+      } else {
+        items.push(scalar(body));
+        seq = undefined;
+      }
       continue;
     }
-    const target = listItem && indent >= 4 ? listItem : mapTarget && indent >= 4 ? mapTarget : current;
-    const opened = assignKey(target, line);
-    if (opened && target === current) {
-      mapTarget = opened.child;
-      listKey = opened.key;
-      listItem = undefined;
-    }
+
+    const owner = parentAt(indent);
+    if (!owner) continue;
+    const opened = assignKey(owner, line);
+    if (opened) openMap(owner, opened, indent);
   }
   return rows;
+}
+
+function joinName(name: Record<string, unknown>): string | null {
+  const first = stringOf(name.first);
+  const last = stringOf(name.last);
+  const full = [first, last].filter((part) => part !== null).join(' ');
+  return full.length > 0 ? full : null;
 }
 
 function assignKey(target: Record<string, unknown>, body: string): { key: string; child: Record<string, unknown> } | undefined {
