@@ -4,7 +4,8 @@ import { dbCall, prisma, type Db } from '../../db/prisma.js';
 import { ValidationError } from '../../lib/errors.js';
 import type { PendingQuery, PipelineStore, SourceListQuery, SourceWrite } from './pipeline.ports.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
-import type { NormalisedRecord } from './types.js';
+import { sourceConfigFromJson } from './source-config.js';
+import { sameAttributes, type NormalisedRecord } from './types.js';
 
 const LEVELS = new Set<string>(Object.values(GovLevel));
 const TYPES = new Set<string>(Object.values(JurisdictionType));
@@ -23,8 +24,9 @@ function toSource(row: {
   active: boolean;
   lastRunAt: Date | null;
   createdAt: Date;
+  config: Prisma.JsonValue;
 }): SourceRow {
-  return { ...row, config: {} };
+  return { ...row, config: sourceConfigFromJson(row.config) };
 }
 
 function toRun(row: {
@@ -91,6 +93,7 @@ export class PipelineRepo implements PipelineStore {
       levels: input.levels.filter((level): level is GovLevel => LEVELS.has(level)),
       collectorKey: input.collectorKey,
       active: input.active,
+      config: input.config as Prisma.InputJsonValue,
     };
     const id = input.id;
     const row = id
@@ -132,7 +135,15 @@ export class PipelineRepo implements PipelineStore {
 
   async finishRun(
     runId: string,
-    patch: { status: 'SUCCEEDED' | 'FAILED'; sha?: string; added: number; changed: number; pending: number; error: string | null },
+    patch: {
+      status: 'SUCCEEDED' | 'FAILED';
+      sha?: string;
+      added: number;
+      changed: number;
+      pending: number;
+      retired?: number;
+      error: string | null;
+    },
     now: Date,
   ): Promise<void> {
     await dbCall(() =>
@@ -146,8 +157,50 @@ export class PipelineRepo implements PipelineStore {
           pending: patch.pending,
           error: patch.error,
           ...(patch.sha ? { snapshotSha: patch.sha } : {}),
+          ...(patch.retired !== undefined ? { retired: patch.retired } : {}),
         },
       }),
+    );
+  }
+
+  async listActiveSources(): Promise<SourceRow[]> {
+    const rows = await dbCall(() => this.db.source.findMany({ where: { active: true }, orderBy: { name: 'asc' } }));
+    return rows.map(toSource);
+  }
+
+  async listActiveJurisdictions(sourceId: string, state: string): Promise<{ type: string; geoid: string }[]> {
+    const rows = await dbCall(() =>
+      this.db.jurisdiction.findMany({
+        where: { sourceId, state, status: 'ACTIVE', geoid: { not: null } },
+        select: { type: true, geoid: true },
+      }),
+    );
+    return rows.flatMap((row) => (row.geoid ? [{ type: row.type, geoid: row.geoid }] : []));
+  }
+
+  async retireJurisdictionsExcept(input: {
+    sourceId: string;
+    state: string;
+    geoids: string[];
+    types: string[];
+    now: Date;
+  }): Promise<number> {
+    const types = input.types.filter((type) => TYPES.has(type));
+    const geoids = [...new Set(input.geoids.filter((geoid) => geoid.length > 0))];
+    if (types.length === 0 || geoids.length === 0) return 0;
+    const typeList = Prisma.join(types.map((type) => Prisma.sql`${type}::"JurisdictionType"`));
+    const geoidList = Prisma.join(geoids);
+    return dbCall(() =>
+      this.db.$executeRaw`
+        UPDATE jurisdictions
+        SET status = 'RETIRED'::"RecordStatus", updated_at = ${input.now}
+        WHERE source_id = ${input.sourceId}::uuid
+          AND state = ${input.state}
+          AND status = 'ACTIVE'::"RecordStatus"
+          AND type IN (${typeList})
+          AND geoid IS NOT NULL
+          AND geoid NOT IN (${geoidList})
+      `,
     );
   }
 
@@ -177,7 +230,7 @@ export class PipelineRepo implements PipelineStore {
     const official = await dbCall(() =>
       this.db.official.findFirst({
         where: { sourceRecordUrl: matchKey },
-        select: { id: true, fullName: true, party: true, website: true },
+        select: { id: true, fullName: true, party: true, website: true, displayName: true },
       }),
     );
     if (official) {
@@ -185,14 +238,42 @@ export class PipelineRepo implements PipelineStore {
         matchKey,
         entityType: 'OFFICIAL',
         entityId: official.id,
-        fields: { fullName: official.fullName, party: official.party, website: official.website, phone: null, email: null },
+        fields: {
+          fullName: official.fullName,
+          party: official.party,
+          website: official.website,
+          title: official.displayName,
+          phone: null,
+          email: null,
+        },
       };
+    }
+    const officeId = officeIdFromKey(matchKey);
+    if (officeId) {
+      const office = await dbCall(() =>
+        this.db.office.findUnique({
+          where: { id: officeId },
+          select: { id: true, phone: true, email: true, addresses: { take: 1, select: { street: true } } },
+        }),
+      );
+      if (office) {
+        return {
+          matchKey,
+          entityType: 'OFFICE',
+          entityId: office.id,
+          fields: {
+            phone: office.phone,
+            email: office.email,
+            address: office.addresses[0]?.street ?? null,
+          },
+        };
+      }
     }
     const geoid = matchKey.startsWith('tiger:') ? matchKey.slice('tiger:'.length) : matchKey;
     const jurisdiction = await dbCall(() =>
       this.db.jurisdiction.findFirst({
         where: { geoid },
-        select: { id: true, name: true, geoid: true, state: true, type: true, level: true },
+        select: { id: true, name: true, geoid: true, state: true, type: true, level: true, subtype: true, boundaryVintage: true },
       }),
     );
     if (!jurisdiction) return null;
@@ -206,13 +287,17 @@ export class PipelineRepo implements PipelineStore {
         state: jurisdiction.state,
         type: jurisdiction.type,
         level: jurisdiction.level,
+        subtype: jurisdiction.subtype,
+        boundaryVintage: jurisdiction.boundaryVintage,
       },
     };
   }
 
   async upsertCivic(sourceId: string, record: NormalisedRecord, now: Date): Promise<'added' | 'changed' | 'unchanged'> {
     const existing = await this.findCivic(record.matchKey);
-    if (existing && sameFields(existing.fields, record.fields)) return 'unchanged';
+    const attributesSame = Boolean(existing && sameAttributes(existing.fields, record.fields));
+    const refreshBoundary = Boolean(record.fields.geometry || record.fields.boundaryVintage || record.fields.parentGeoid);
+    if (attributesSame && !refreshBoundary) return 'unchanged';
     if (record.entityType === 'JURISDICTION') {
       await this.upsertJurisdiction(sourceId, record, now);
     } else if (record.entityType === 'OFFICIAL') {
@@ -220,7 +305,8 @@ export class PipelineRepo implements PipelineStore {
     } else if (record.entityType === 'OFFICE') {
       await this.upsertOffice(sourceId, record, now);
     }
-    return existing ? 'changed' : 'added';
+    if (!existing) return 'added';
+    return attributesSame ? 'unchanged' : 'changed';
   }
 
   async addPending(input: {
@@ -282,6 +368,12 @@ export class PipelineRepo implements PipelineStore {
       await dbCall(() => this.db.official.update({ where: { id: entityId }, data }));
       return;
     }
+    if (entityType === 'OFFICE' && field === 'address') {
+      const existing = await dbCall(() => this.db.officeAddress.findFirst({ where: { officeId: entityId }, orderBy: { id: 'asc' } }));
+      if (!existing) throw new ValidationError('That field cannot be applied.');
+      await dbCall(() => this.db.officeAddress.update({ where: { id: existing.id }, data: { street: (value ?? '').slice(0, 200) } }));
+      return;
+    }
     if (entityType === 'OFFICE') {
       const data = officePatch(field, value);
       await dbCall(() => this.db.office.update({ where: { id: entityId }, data }));
@@ -339,23 +431,95 @@ export class PipelineRepo implements PipelineStore {
   }
 
   private async upsertJurisdiction(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
+    if (record.fields.geometry) {
+      await this.writeBoundary(sourceId, record, now);
+      return;
+    }
     const geoid = record.fields.geoid ?? record.matchKey.slice(0, 40);
     const type = asType(record.fields.type ?? null);
     const existing = await dbCall(() => this.db.jurisdiction.findFirst({ where: { geoid, type } }));
+    const parentId = await this.parentId(record);
     const data = {
       name: (record.fields.name ?? geoid).slice(0, 150),
       level: asLevel(record.fields.level ?? null),
       type,
       geoid,
       state: record.fields.state?.slice(0, 2) ?? null,
+      subtype: record.fields.subtype?.slice(0, 80) ?? null,
+      boundaryVintage: record.fields.boundaryVintage?.slice(0, 20) ?? null,
       sourceId,
+      sourceRecordUrl: record.matchKey.slice(0, 2048),
       lastUpdatedAt: now,
+      ...(parentId ? { parentId } : {}),
     };
     if (existing) {
       await dbCall(() => this.db.jurisdiction.update({ where: { id: existing.id }, data }));
       return;
     }
     await dbCall(() => this.db.jurisdiction.create({ data }));
+  }
+
+  private async parentId(record: NormalisedRecord): Promise<string | null> {
+    const parentType = record.fields.parentType;
+    const parentGeoid = record.fields.parentGeoid;
+    if (!parentType || !parentGeoid || !TYPES.has(parentType)) return null;
+    const parent = await dbCall(() =>
+      this.db.jurisdiction.findFirst({
+        where: { geoid: parentGeoid, type: parentType as JurisdictionType },
+        select: { id: true },
+      }),
+    );
+    return parent?.id ?? null;
+  }
+
+  private async writeBoundary(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
+    const geoid = (record.fields.geoid ?? '').slice(0, 40);
+    if (!geoid || !record.fields.geometry) return;
+    const type = asType(record.fields.type ?? null);
+    const level = asLevel(record.fields.level ?? null);
+    const parentType = record.fields.parentType && TYPES.has(record.fields.parentType) ? record.fields.parentType : null;
+    const parentGeoid = parentType ? record.fields.parentGeoid ?? null : null;
+    const parentSql =
+      parentType && parentGeoid
+        ? Prisma.sql`(SELECT id FROM jurisdictions WHERE type = ${parentType}::"JurisdictionType" AND geoid = ${parentGeoid} LIMIT 1)`
+        : Prisma.sql`NULL`;
+    await dbCall(() =>
+      this.db.$executeRaw`
+        INSERT INTO jurisdictions (
+          name, level, type, subtype, parent_id, district_code, geoid, state,
+          boundary, boundary_vintage, source_id, source_record_url, last_updated_at, status
+        ) VALUES (
+          ${(record.fields.name ?? geoid).slice(0, 150)},
+          ${level}::"GovLevel",
+          ${type}::"JurisdictionType",
+          ${record.fields.subtype?.slice(0, 80) ?? null},
+          ${parentSql},
+          ${record.fields.districtCode?.slice(0, 40) ?? null},
+          ${geoid},
+          ${record.fields.state?.slice(0, 2) ?? null},
+          ST_Multi(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(${record.fields.geometry}), 4326))),
+          ${record.fields.boundaryVintage?.slice(0, 20) ?? null},
+          ${sourceId}::uuid,
+          ${record.matchKey.slice(0, 2048)},
+          ${now},
+          'ACTIVE'::"RecordStatus"
+        )
+        ON CONFLICT (type, geoid) DO UPDATE SET
+          name = EXCLUDED.name,
+          level = EXCLUDED.level,
+          subtype = EXCLUDED.subtype,
+          parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
+          district_code = EXCLUDED.district_code,
+          state = EXCLUDED.state,
+          boundary = EXCLUDED.boundary,
+          boundary_vintage = EXCLUDED.boundary_vintage,
+          source_id = EXCLUDED.source_id,
+          source_record_url = EXCLUDED.source_record_url,
+          last_updated_at = EXCLUDED.last_updated_at,
+          status = 'ACTIVE'::"RecordStatus",
+          updated_at = ${now}
+      `,
+    );
   }
 
   private async upsertOfficial(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
@@ -439,12 +603,9 @@ function jsonString(value: Prisma.JsonValue | null): string | null {
   return JSON.stringify(value);
 }
 
-function sameFields(left: Record<string, string | null>, right: Record<string, string | null>): boolean {
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-  for (const key of keys) {
-    if ((left[key] ?? null) !== (right[key] ?? null)) return false;
-  }
-  return true;
+function officeIdFromKey(matchKey: string): string | null {
+  const match = /^office:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?::|$)/i.exec(matchKey);
+  return match?.[1] ?? null;
 }
 
 function asLevel(value: string | null): GovLevel {
@@ -466,8 +627,14 @@ function slugFor(matchKey: string): string {
   return slug.length > 0 ? slug : 'record';
 }
 
-function officialPatch(field: string, value: string | null): { fullName?: string; party?: string | null; website?: string | null } {
+function officialPatch(field: string, value: string | null): {
+  fullName?: string;
+  party?: string | null;
+  website?: string | null;
+  displayName?: string | null;
+} {
   if (field === 'fullName' && value) return { fullName: value.slice(0, 120) };
+  if (field === 'title' || field === 'displayName') return { displayName: value?.slice(0, 120) ?? null };
   if (field === 'party') return { party: value?.slice(0, 60) ?? null };
   if (field === 'website') return { website: value };
   throw new ValidationError('That field cannot be applied.');

@@ -127,6 +127,15 @@ class Store implements Pick<
   touchSource(): Promise<void> {
     return Promise.resolve();
   }
+  listActiveSources(): Promise<SourceRow[]> {
+    return Promise.resolve(this.source.active ? [this.source] : []);
+  }
+  listActiveJurisdictions(): Promise<{ type: string; geoid: string }[]> {
+    return Promise.resolve([]);
+  }
+  retireJurisdictionsExcept(): Promise<number> {
+    return Promise.resolve(0);
+  }
 }
 
 const emptyDashboard: DashboardRepo = {

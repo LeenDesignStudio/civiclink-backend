@@ -3,7 +3,6 @@ import { env } from './config/env.js';
 import { prisma } from './db/prisma.js';
 import { logger } from './lib/logger.js';
 import { systemClock } from './lib/clock.js';
-import { isAppError, UpstreamError } from './lib/errors.js';
 import { startBoss } from './jobs/boss.js';
 import { registerHandlers, type WorkerServices } from './jobs/handlers/index.js';
 import { registerSchedules } from './jobs/schedules.js';
@@ -16,8 +15,12 @@ import { ConsolePushSender, FcmPushSender } from './modules/notifications/push.j
 import { AlertsRepo } from './modules/alerts/alerts.repo.js';
 import { AuditRepo } from './modules/audit/audit.repo.js';
 import { AuditService } from './modules/audit/audit.service.js';
+import { httpGet } from './modules/pipeline/http.js';
+import { convertTigerZip } from './modules/pipeline/ogr.js';
+import { createRequestPacer } from './modules/pipeline/pace.js';
 import { PipelineRepo } from './modules/pipeline/pipeline.repo.js';
 import { PipelineService } from './modules/pipeline/pipeline.service.js';
+import { civicLinkUserAgent } from './modules/pipeline/types.js';
 import { BillingRepo } from './modules/billing/billing.repo.js';
 import { BillingService } from './modules/billing/billing.service.js';
 import { StripeBillingProvider } from './modules/billing/stripe.provider.js';
@@ -67,27 +70,12 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
   const store = new PipelineRepo(prisma);
   const pipeline = new PipelineService({
     store,
-    fetch: {
-      get: async (url, init) => {
-        try {
-          const response = await fetch(url, {
-            ...(init.headers ? { headers: init.headers } : {}),
-            signal: AbortSignal.timeout(init.timeoutMs),
-          });
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          return {
-            status: response.status,
-            body: bytes,
-            contentType: response.headers.get('content-type') ?? '',
-          };
-        } catch (err) {
-          if (isAppError(err)) throw err;
-          throw new UpstreamError(undefined, { cause: err });
-        }
-      },
-    },
+    fetch: { get: httpGet },
     audit,
     clock: systemClock,
+    userAgent: civicLinkUserAgent(env.CONTACT_INBOX),
+    pace: createRequestPacer(1000),
+    convertZip: convertTigerZip,
   });
   const retention = new RetentionService(new RetentionRepo(prisma), systemClock);
   const billing = new BillingService({

@@ -6,8 +6,9 @@ import { ValidationError } from '../../lib/errors.js';
 import { FakeClock } from '../../lib/clock.js';
 import type { PipelineStore, PendingQuery, SourceListQuery, SourceWrite } from './pipeline.ports.js';
 import { PipelineService } from './pipeline.service.js';
+import { tigerLayerPlan } from './tiger.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
-import type { HttpFetcher, HttpResult, NormalisedRecord } from './types.js';
+import { sameAttributes, type HttpFetcher, type HttpResult, type NormalisedRecord } from './types.js';
 
 class MemoryStore implements PipelineStore {
   sources: SourceRow[] = [];
@@ -90,7 +91,15 @@ class MemoryStore implements PipelineStore {
 
   finishRun(
     runId: string,
-    patch: { status: 'SUCCEEDED' | 'FAILED'; sha?: string; added: number; changed: number; pending: number; error: string | null },
+    patch: {
+      status: 'SUCCEEDED' | 'FAILED';
+      sha?: string;
+      added: number;
+      changed: number;
+      pending: number;
+      retired?: number;
+      error: string | null;
+    },
   ): Promise<void> {
     const run = this.runs.find((row) => row.id === runId);
     if (run) {
@@ -100,6 +109,7 @@ class MemoryStore implements PipelineStore {
       run.pending = patch.pending;
       run.error = patch.error;
       if (patch.sha) run.snapshotSha = patch.sha;
+      if (patch.retired !== undefined) run.retired = patch.retired;
     }
     return Promise.resolve();
   }
@@ -130,8 +140,7 @@ class MemoryStore implements PipelineStore {
       });
       return Promise.resolve('added');
     }
-    const same = Object.entries(record.fields).every(([key, value]) => existing.fields[key] === value);
-    if (same) return Promise.resolve('unchanged');
+    if (sameAttributes(existing.fields, record.fields)) return Promise.resolve('unchanged');
     existing.fields = { ...existing.fields, ...record.fields };
     return Promise.resolve('changed');
   }
@@ -198,6 +207,35 @@ class MemoryStore implements PipelineStore {
     const source = this.sources.find((row) => row.id === sourceId);
     if (source) source.lastRunAt = now;
     return Promise.resolve();
+  }
+
+  listActiveSources(): Promise<SourceRow[]> {
+    return Promise.resolve(this.sources.filter((row) => row.active));
+  }
+
+  listActiveJurisdictions(_sourceId: string, state: string): Promise<{ type: string; geoid: string }[]> {
+    return Promise.resolve(
+      this.civic.flatMap((row) => {
+        if (row.entityType !== 'JURISDICTION' || row.fields.state !== state || !row.fields.geoid || !row.fields.type) return [];
+        return [{ type: row.fields.type, geoid: row.fields.geoid }];
+      }),
+    );
+  }
+
+  retireJurisdictionsExcept(input: { state: string; geoids: string[]; types: string[] }): Promise<number> {
+    const geoids = new Set(input.geoids);
+    const types = new Set(input.types);
+    const retiring = this.civic.filter(
+      (row) =>
+        row.entityType === 'JURISDICTION' &&
+        row.fields.state === input.state &&
+        Boolean(row.fields.geoid) &&
+        Boolean(row.fields.type) &&
+        types.has(row.fields.type ?? '') &&
+        !geoids.has(row.fields.geoid ?? ''),
+    );
+    this.civic = this.civic.filter((row) => !retiring.includes(row));
+    return Promise.resolve(retiring.length);
   }
 }
 
@@ -375,5 +413,90 @@ describe('PipelineService', () => {
     expect(http.calls).not.toContain('https://example.com/directory');
     expect(store.pending).toHaveLength(0);
     expect(store.civic).toHaveLength(0);
+  });
+
+  it('previews a directory page without writing a source run', async () => {
+    const store = new MemoryStore();
+    const html = '<article class="official"><h2 class="name"><b>Jane Smith</b></h2><a class="email" href="mailto:jane@example.gov">jane</a></article>';
+    store.sources.push(
+      source({
+        method: 'PAGE_COLLECTION',
+        collectorKey: 'page.directory',
+        url: 'https://example.com/council',
+        config: {
+          pageUrl: 'https://example.com/council',
+          officeId: '22222222-2222-4222-8222-222222222222',
+          item: { tag: 'article', className: 'official' },
+          selectors: {
+            name: { tag: 'h2', className: 'name' },
+            email: { tag: 'a', className: 'email', attr: 'href' },
+          },
+        },
+      }),
+    );
+    const http = fetcher({
+      'https://example.com/robots.txt': { status: 200, body: new TextEncoder().encode('User-agent: *\nAllow: /'), contentType: 'text/plain' },
+      'https://example.com/council': { status: 200, body: new TextEncoder().encode(html), contentType: 'text/html' },
+    });
+    const service = new PipelineService({
+      store,
+      fetch: http,
+      audit: { record: () => Promise.resolve() },
+      withTx: directTx,
+      clock: new FakeClock(new Date('2026-01-01T00:00:00Z')),
+    });
+    const preview = await service.previewSource(system(), { sourceId: store.sources[0]?.id });
+    expect(preview.pending).toBeGreaterThan(0);
+    expect(preview.added).toBe(0);
+    expect(store.runs).toHaveLength(0);
+    expect(store.upserts).toBe(0);
+    expect(store.pending).toHaveLength(0);
+    const written = await service.runSource(system(), { sourceId: store.sources[0]?.id });
+    expect(written.pending).toBe(preview.pending);
+    expect(store.upserts).toBe(0);
+    expect(store.pending.some((row) => row.field === 'fullName' && row.newValue === 'Jane Smith')).toBe(true);
+    expect(store.pending.some((row) => row.entityType === 'OFFICE' && row.field === 'email' && row.newValue === 'jane@example.gov')).toBe(true);
+    expect(store.civic).toHaveLength(0);
+  });
+
+  it('retires a jurisdiction missing from the state extract and can preview that count', async () => {
+    const store = new MemoryStore();
+    store.civic.push({
+      matchKey: 'tiger:24999',
+      entityType: 'JURISDICTION',
+      entityId: '22222222-2222-4222-8222-222222222222',
+      fields: { name: 'Old', geoid: '24999', state: 'MD', type: 'COUNTY', level: 'COUNTY' },
+    });
+    store.sources.push(source({ method: 'BULK', collectorKey: 'tiger.boundaries', url: 'https://www2.census.gov/geo/tiger/TIGER2025/' }));
+    const urls = tigerLayerPlan(2025, 'MD').map((layer) => layer.url);
+    const http = fetcher(Object.fromEntries(urls.map((url) => [url, { status: 200, body: new Uint8Array([1, 2]), contentType: 'application/zip' }])));
+    const county = new TextEncoder().encode(
+      JSON.stringify({
+        type: 'FeatureCollection',
+        features: [{ properties: { GEOID: '24031', NAME: 'Montgomery', STATEFP: '24' }, geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } }],
+      }),
+    );
+    const empty = new TextEncoder().encode('{"type":"FeatureCollection","features":[]}');
+    const service = new PipelineService({
+      store,
+      fetch: http,
+      audit: { record: () => Promise.resolve() },
+      withTx: directTx,
+      clock: new FakeClock(new Date('2026-01-01T00:00:00Z')),
+      convertZip: (request) => Promise.resolve(request.layer === 'COUNTY' ? county : empty),
+    });
+    const sourceId = store.sources[0]?.id;
+    const preview = await service.previewSource(system(), { sourceId, state: 'MD', tigerYear: 2025 });
+    expect(preview.retired).toBe(1);
+    expect(preview.added).toBe(1);
+    expect(store.runs).toHaveLength(0);
+    expect(store.civic.map((row) => row.fields.geoid)).toEqual(['24999']);
+    const written = await service.runSource(system(), { sourceId, state: 'MD', tigerYear: 2025 });
+    expect(written.added).toBe(1);
+    expect(written.retired).toBe(1);
+    expect(written.sha).toMatch(/^[a-f0-9]{64}$/);
+    expect(store.runs[0]?.retired).toBe(1);
+    expect(store.runs[0]?.snapshotSha).toBe(written.sha);
+    expect(store.civic.map((row) => row.fields.geoid)).toEqual(['24031']);
   });
 });

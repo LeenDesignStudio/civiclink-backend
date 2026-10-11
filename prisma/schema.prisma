@@ -438,6 +438,8 @@ model Source {
   levels        GovLevel[]
   /// Collector key that maps this source to code in src/modules/pipeline/collectors
   collectorKey  String?        @map("collector_key") @db.VarChar(80)
+  /// Collector settings (TIGER year, page URL, CSS selectors). Not civic data.
+  config        Json           @default("{}")
   active        Boolean        @default(true)
   lastRunAt     DateTime?      @map("last_run_at") @db.Timestamptz(3)
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)

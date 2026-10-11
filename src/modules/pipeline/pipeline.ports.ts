@@ -39,9 +39,26 @@ export interface PipelineStore {
   markRunning(runId: string, now: Date): Promise<RunRow | null>;
   finishRun(
     runId: string,
-    patch: { status: 'SUCCEEDED' | 'FAILED'; sha?: string; added: number; changed: number; pending: number; error: string | null },
+    patch: {
+      status: 'SUCCEEDED' | 'FAILED';
+      sha?: string;
+      added: number;
+      changed: number;
+      pending: number;
+      retired?: number;
+      error: string | null;
+    },
     now: Date,
   ): Promise<void>;
+  listActiveSources(): Promise<SourceRow[]>;
+  listActiveJurisdictions(sourceId: string, state: string): Promise<{ type: string; geoid: string }[]>;
+  retireJurisdictionsExcept(input: {
+    sourceId: string;
+    state: string;
+    geoids: string[];
+    types: string[];
+    now: Date;
+  }): Promise<number>;
   lastSucceededSha(sourceId: string): Promise<string | null>;
   listRuns(sourceId: string, limit: number): Promise<RunRow[]>;
   findCivic(matchKey: string): Promise<CivicRow | null>;

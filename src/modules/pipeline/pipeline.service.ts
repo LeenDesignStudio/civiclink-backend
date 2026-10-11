@@ -16,10 +16,32 @@ import {
 import { z } from 'zod';
 import { collectorFor } from './collectors.js';
 import type { PipelineStore } from './pipeline.ports.js';
-import { BULK_CAP, PAGE_CAP, type HttpFetcher, type NormalisedRecord } from './types.js';
+import {
+  BULK_CAP,
+  isPendingField,
+  PAGE_CAP,
+  sameAttributes,
+  type Collector,
+  type HttpFetcher,
+  type NormalisedRecord,
+  type RunCounts,
+  type ZipConvertRequest,
+} from './types.js';
 import type { SourceRow } from './records.js';
 
-const runSchema = z.object({ sourceId: z.uuid(), runId: z.uuid().optional() }).strict();
+const runSchema = z
+  .object({
+    sourceId: z.uuid(),
+    runId: z.uuid().optional(),
+    state: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/)
+      .optional(),
+    county: z.string().trim().min(1).max(80).optional(),
+    tigerYear: z.number().int().min(2000).max(2100).optional(),
+  })
+  .strict();
 
 export interface AuditWriter {
   record(
@@ -44,6 +66,9 @@ export interface PipelineDeps {
   clock?: Clock;
   withTx?: RunTx;
   caps?: { bulk: number; page: number };
+  userAgent?: string;
+  pace?: { wait(): Promise<void> };
+  convertZip?: (request: ZipConvertRequest) => Promise<Uint8Array>;
 }
 
 export class PipelineService {
@@ -57,11 +82,12 @@ export class PipelineService {
     this.caps = deps.caps ?? { bulk: BULK_CAP, page: PAGE_CAP };
   }
 
-  async runSource(ctx: ServiceContext, input: unknown): Promise<{ skipped: boolean; added: number; changed: number; pending: number }> {
+  async runSource(ctx: ServiceContext, input: unknown): Promise<RunCounts> {
     ctx.authz.require('system.pipeline:run');
     const parsed = parse(runSchema, input);
-    const source = await this.deps.store.findSource(parsed.sourceId);
-    if (!source) throw new NotFoundError();
+    const loaded = await this.deps.store.findSource(parsed.sourceId);
+    if (!loaded) throw new NotFoundError();
+    const source = applyScope(loaded, parsed);
     if (!source.active) throw new SourceInactiveError();
     if (!source.collectorKey) throw new UnknownCollectorError();
     const collector = collectorFor(source.collectorKey);
@@ -74,32 +100,17 @@ export class PipelineService {
       : await this.deps.store.createRun(source.id, null, now);
     if (!queued) throw new NotFoundError();
     const run = (await this.deps.store.markRunning(queued.id, now)) ?? queued;
-    const cap = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory' ? this.caps.page : this.caps.bulk;
     try {
-      const snapshot = await collector.fetch({ source, fetch: this.deps.fetch, maxBytes: cap });
-      const bodyLength = snapshot.body.byteLength;
-      if (bodyLength > cap) {
-        await this.fail(run.id, 'Download exceeded the size cap.');
-        throw new ValidationError('Download exceeded the size cap.');
-      }
+      const { snapshot, records } = await this.fetchRecords(source, collector);
       const previous = await this.deps.store.lastSucceededSha(source.id);
       if (previous && previous === snapshot.sha256 && snapshot.skipped !== 'robots') {
-        await this.deps.store.finishRun(
-          run.id,
-          { status: 'SUCCEEDED', sha: snapshot.sha256, added: 0, changed: 0, pending: 0, error: null },
-          this.clock.now(),
-        );
-        return { skipped: true, added: 0, changed: 0, pending: 0 };
+        await this.finish(run.id, { sha: snapshot.sha256, added: 0, changed: 0, retired: 0, pending: 0 });
+        return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
       }
       if (snapshot.skipped === 'robots') {
-        await this.deps.store.finishRun(
-          run.id,
-          { status: 'SUCCEEDED', sha: snapshot.sha256, added: 0, changed: 0, pending: 0, error: null },
-          this.clock.now(),
-        );
-        return { skipped: true, added: 0, changed: 0, pending: 0 };
+        await this.finish(run.id, { sha: snapshot.sha256, added: 0, changed: 0, retired: 0, pending: 0 });
+        return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
       }
-      const records = collector.normalise(snapshot);
       const page = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory';
       let added = 0;
       let changed = 0;
@@ -122,24 +133,57 @@ export class PipelineService {
             entityType: record.entityType.toLowerCase(),
             entityId: after?.entityId ?? source.id,
             action: outcome === 'added' ? 'source.add' : 'source.change',
-            before: before ? { ...before.fields } : null,
-            after: after ? { ...after.fields } : { ...record.fields },
+            before: before ? { ...withoutGeometry(before.fields) } : null,
+            after: after ? { ...withoutGeometry(after.fields) } : { ...withoutGeometry(record.fields) },
             requestId: ctx.requestId,
           });
         });
       }
-      await this.deps.store.finishRun(
-        run.id,
-        { status: 'SUCCEEDED', sha: snapshot.sha256, added, changed, pending, error: null },
-        this.clock.now(),
-      );
+      const retired = await this.retireMissing(source, records, true);
+      await this.finish(run.id, { sha: snapshot.sha256, added, changed, retired, pending });
       await this.deps.store.touchSource(source.id, this.clock.now());
-      return { skipped: false, added, changed, pending };
+      return { skipped: false, added, changed, retired, pending, sha: snapshot.sha256 };
     } catch (err) {
-      if (!(err instanceof ValidationError)) await this.fail(run.id, 'Source run failed.');
+      const message = err instanceof ValidationError ? err.message.slice(0, 500) : 'Source run failed.';
+      await this.fail(run.id, message);
       if (isAppError(err)) throw err;
       throw new UpstreamError(undefined, { cause: err });
     }
+  }
+
+  async previewSource(ctx: ServiceContext, input: unknown): Promise<RunCounts> {
+    ctx.authz.require('system.pipeline:run');
+    const parsed = parse(runSchema, input);
+    const loaded = await this.deps.store.findSource(parsed.sourceId);
+    if (!loaded) throw new NotFoundError();
+    const source = applyScope(loaded, parsed);
+    if (!source.active) throw new SourceInactiveError();
+    if (!source.collectorKey) throw new UnknownCollectorError();
+    const collector = collectorFor(source.collectorKey);
+    if (!collector) throw new UnknownCollectorError();
+    const { snapshot, records } = await this.fetchRecords(source, collector);
+    if (snapshot.skipped === 'robots') {
+      return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
+    }
+    const previous = await this.deps.store.lastSucceededSha(source.id);
+    if (previous && previous === snapshot.sha256) {
+      return { skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 };
+    }
+    const page = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory';
+    let added = 0;
+    let changed = 0;
+    let pending = 0;
+    for (const record of records) {
+      const existing = await this.deps.store.findCivic(record.matchKey);
+      if (page) {
+        pending += countPending(existing?.fields, record);
+        continue;
+      }
+      if (!existing) added += 1;
+      else if (!sameAttributes(existing.fields, record.fields)) changed += 1;
+    }
+    const retired = await this.retireMissing(source, records, false);
+    return { skipped: false, added, changed, retired, pending, sha: snapshot.sha256 };
   }
 
   async locationsReresolve(ctx: ServiceContext): Promise<{ updated: number }> {
@@ -167,16 +211,52 @@ export class PipelineService {
     return { checked: rows.length, broken };
   }
 
+  private async fetchRecords(source: SourceRow, collector: Collector): Promise<{ snapshot: Awaited<ReturnType<Collector['fetch']>>; records: NormalisedRecord[] }> {
+    const cap = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory' ? this.caps.page : this.caps.bulk;
+    const snapshot = await collector.fetch({
+      source,
+      fetch: this.deps.fetch,
+      maxBytes: cap,
+      ...(this.deps.userAgent ? { userAgent: this.deps.userAgent } : {}),
+      ...(this.deps.pace ? { pace: this.deps.pace } : {}),
+      ...(this.deps.convertZip ? { convertZip: this.deps.convertZip } : {}),
+    });
+    if (snapshot.body.byteLength > cap) throw new ValidationError('Download exceeded the size cap.');
+    if (snapshot.skipped === 'robots') return { snapshot, records: [] };
+    return { snapshot, records: collector.normalise(snapshot) };
+  }
+
+  private async retireMissing(source: SourceRow, records: NormalisedRecord[], write: boolean): Promise<number> {
+    if (source.collectorKey !== 'tiger.boundaries' || !source.config.state) return 0;
+    const geoids = records.flatMap((record) => (record.fields.geoid ? [record.fields.geoid] : []));
+    const types = [...new Set(records.flatMap((record) => (record.fields.type ? [record.fields.type] : [])))];
+    if (geoids.length === 0 || types.length === 0) return 0;
+    if (!write) {
+      const live = await this.deps.store.listActiveJurisdictions(source.id, source.config.state);
+      const typeSet = new Set(types);
+      const geoidSet = new Set(geoids);
+      return live.filter((row) => typeSet.has(row.type) && !geoidSet.has(row.geoid)).length;
+    }
+    return this.deps.store.retireJurisdictionsExcept({
+      sourceId: source.id,
+      state: source.config.state,
+      geoids,
+      types,
+      now: this.clock.now(),
+    });
+  }
+
   private async queuePageChange(runId: string, record: NormalisedRecord): Promise<number> {
     const existing = await this.deps.store.findCivic(record.matchKey);
     let count = 0;
     for (const [field, value] of Object.entries(record.fields)) {
+      if (!isPendingField(field)) continue;
       const previous = existing?.fields[field] ?? null;
       if (previous === value) continue;
       await this.deps.store.addPending({
         sourceRunId: runId,
         entityType: record.entityType,
-        entityId: existing?.entityId ?? null,
+        entityId: existing?.entityId ?? record.entityId ?? null,
         field,
         oldValue: previous,
         newValue: value ?? '',
@@ -187,17 +267,51 @@ export class PipelineService {
     return count;
   }
 
-  private async fail(runId: string, error: string): Promise<void> {
+  private async finish(
+    runId: string,
+    patch: { sha: string; added: number; changed: number; retired: number; pending: number },
+  ): Promise<void> {
     await this.deps.store.finishRun(
       runId,
-      { status: 'FAILED', added: 0, changed: 0, pending: 0, error },
+      { status: 'SUCCEEDED', sha: patch.sha, added: patch.added, changed: patch.changed, retired: patch.retired, pending: patch.pending, error: null },
       this.clock.now(),
     );
+  }
+
+  private async fail(runId: string, error: string): Promise<void> {
+    await this.deps.store.finishRun(runId, { status: 'FAILED', added: 0, changed: 0, pending: 0, error }, this.clock.now());
   }
 }
 
 export function newRunId(): string {
   return randomUUID();
+}
+
+function applyScope(
+  source: SourceRow,
+  scope: { state?: string | undefined; county?: string | undefined; tigerYear?: number | undefined },
+): SourceRow {
+  const config = { ...source.config };
+  if (scope.state) config.state = scope.state.toUpperCase();
+  if (scope.county) config.county = scope.county;
+  if (scope.tigerYear) config.tigerYear = scope.tigerYear;
+  return { ...source, config };
+}
+
+function countPending(existing: Record<string, string | null> | undefined, record: NormalisedRecord): number {
+  let count = 0;
+  for (const [field, value] of Object.entries(record.fields)) {
+    if (!isPendingField(field)) continue;
+    if ((existing?.[field] ?? null) !== value) count += 1;
+  }
+  return count;
+}
+
+function withoutGeometry(fields: Record<string, string | null>): Record<string, string | null> {
+  if (!('geometry' in fields)) return fields;
+  const copy = { ...fields };
+  delete copy.geometry;
+  return copy;
 }
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {

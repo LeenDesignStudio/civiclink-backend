@@ -1,0 +1,16 @@
+- id:
+    bioguide: S000001
+  name:
+    official_full: Jane Smith
+  terms:
+    - type: sen
+      state: MD
+      party: Democratic
+- id:
+    bioguide: V000001
+  name:
+    official_full: Victor Example
+  terms:
+    - type: rep
+      state: VA
+      party: Republican

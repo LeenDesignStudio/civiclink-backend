@@ -119,6 +119,7 @@ All validated by `src/config/env.ts` (Zod) at boot. `S` = secret (Secrets Manage
 | `S3_EXPORTS_KMS_KEY_ID` | | optional. Staging/production export uploads use `aws:kms` with this key id; when unset they use `AES256` |
 | `LIMIT_DEFAULT_MAX_SAVED_LOCATIONS` / `LIMIT_DEFAULT_MAX_FOLLOWS` | | `5` / `50` (D-08) |
 | `ACCOUNT_PURGE_DAYS` / `ANON_LOOKUP_TTL_DAYS` / `FRESHNESS_DEFAULT_DAYS` | | `30` / `30` / `90` |
+| `TIGER_YEAR` | | `2025`. Census TIGER/Line vintage for `pnpm db:seed:sources` and `pnpm pipeline:pilot` |
 | `GRAPHQL_INTROSPECTION` | | `true` in dev only; forced `false` when `APP_ENV=production` |
 
 ## 7. Environments

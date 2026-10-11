@@ -1,0 +1,26 @@
+{
+  "name": "Montgomery County Council",
+  "publisher": "Montgomery County",
+  "url": "https://www.montgomerycountymd.gov/council/",
+  "termsUrl": "https://www.montgomerycountymd.gov/",
+  "method": "PAGE_COLLECTION",
+  "schedule": "WEEKLY",
+  "freshnessDays": 14,
+  "levels": ["COUNTY"],
+  "collectorKey": "page.directory",
+  "config": {
+    "state": "md",
+    "county": "Montgomery",
+    "pageUrl": "https://www.montgomerycountymd.gov/council/",
+    "jurisdictionGeoid": "24031",
+    "officeId": "22222222-2222-4222-8222-222222222222",
+    "item": { "tag": "article", "className": "official" },
+    "selectors": {
+      "name": { "tag": "h2", "className": "name" },
+      "title": { "tag": "p", "className": "title" },
+      "phone": { "tag": "a", "className": "phone", "attr": "href" },
+      "email": { "tag": "a", "className": "email", "attr": "href" },
+      "address": { "tag": "address", "className": "office" }
+    }
+  }
+}

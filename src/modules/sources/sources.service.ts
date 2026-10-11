@@ -19,7 +19,7 @@ import type { JobQueue } from '../notifications/notifications.service.js';
 import { isKnownCollector } from '../pipeline/collectors.js';
 import type { PipelineStore } from '../pipeline/pipeline.ports.js';
 import type { PendingRow, RunRow, SourceRow } from '../pipeline/records.js';
-import type { Selector } from '../pipeline/types.js';
+import { sourceConfigFromJson } from '../pipeline/source-config.js';
 import type { DashboardCounts, DashboardService } from './dashboard.js';
 
 const https = z.url().refine((value) => value.startsWith('https://'), 'Use an https URL.');
@@ -236,35 +236,7 @@ export class SourcesService {
 }
 
 function configOf(value: Record<string, unknown> | undefined): SourceRow['config'] {
-  if (!value) return {};
-  const config: SourceRow['config'] = {};
-  if (Array.isArray(value.urls)) config.urls = value.urls.filter((item): item is string => typeof item === 'string');
-  if (Array.isArray(value.states)) config.states = value.states.filter((item): item is string => typeof item === 'string');
-  if (Array.isArray(value.layers)) config.layers = value.layers.filter((item): item is string => typeof item === 'string');
-  if (Array.isArray(value.allowedHosts)) {
-    config.allowedHosts = value.allowedHosts.filter((item): item is string => typeof item === 'string');
-  }
-  const item = selectorOf(value.item);
-  if (item) config.item = item;
-  if (value.fields && typeof value.fields === 'object' && !Array.isArray(value.fields)) {
-    const fields: Record<string, Selector> = {};
-    for (const [key, field] of Object.entries(value.fields)) {
-      const selector = selectorOf(field);
-      if (selector) fields[key] = selector;
-    }
-    if (Object.keys(fields).length > 0) config.fields = fields;
-  }
-  return config;
-}
-
-function selectorOf(value: unknown): Selector | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  if (typeof record.tag !== 'string' || record.tag.length === 0) return undefined;
-  const selector: Selector = { tag: record.tag };
-  if (typeof record.className === 'string') selector.className = record.className;
-  if (typeof record.attr === 'string') selector.attr = record.attr;
-  return selector;
+  return sourceConfigFromJson(value);
 }
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {

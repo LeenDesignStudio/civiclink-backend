@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "tigerLayer": "PLACE", "GEOID": "2454000", "NAME": "Rockville", "STATEFP": "24", "COUNTYFP": "031" },
+      "geometry": { "type": "Polygon", "coordinates": [[[-77.2, 39.1], [-77.1, 39.1], [-77.1, 39.0], [-77.2, 39.1]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "tigerLayer": "COUNTY", "GEOID": "24031", "NAME": "Montgomery", "STATEFP": "24", "COUNTYFP": "031" },
+      "geometry": { "type": "Polygon", "coordinates": [[[-77.5, 39.3], [-76.9, 39.3], [-76.9, 38.9], [-77.5, 39.3]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "tigerLayer": "STATE", "GEOID": "24", "NAME": "Maryland", "STUSPS": "MD", "STATEFP": "24" },
+      "geometry": { "type": "Polygon", "coordinates": [[[-79.5, 39.7], [-75.0, 39.7], [-75.0, 37.9], [-79.5, 39.7]]] }
+    }
+  ]
+}

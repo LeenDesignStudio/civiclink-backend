@@ -23,6 +23,7 @@ only. The Next.js frontend is not part of this kit.
 | `prisma/sql/20_db_roles.sql` | Staging/production DB roles (owner / app / readonly), run by DBA | DevOps |
 | `server/install-dev-db.sh`, `server/dev-db-init.sql` | No-Docker option: installs Postgres 16 + PostGIS on an Ubuntu server (Hetzner) with dev/shadow/test databases | You |
 | `docs/07-DEV-SETUP-NO-DOCKER.md` | Step-by-step for the Hetzner dev database + SSH tunnel on Windows | You |
+| `docs/08-DATA-LOADING.md` | Pilot boundary and directory loads: seed sources, run collectors, review pending changes | You |
 | `docker-compose.yml`, `docker/postgres-init/` | Alternative for machines with Docker | You |
 | `.env.example` | Every env var with local defaults | You |
 

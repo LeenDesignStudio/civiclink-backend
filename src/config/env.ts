@@ -58,6 +58,7 @@ const envSchema = z
     ACCOUNT_PURGE_DAYS: z.coerce.number().int().positive().default(30),
     ANON_LOOKUP_TTL_DAYS: z.coerce.number().int().positive().default(30),
     FRESHNESS_DEFAULT_DAYS: z.coerce.number().int().positive().default(90),
+    TIGER_YEAR: z.coerce.number().int().min(2000).max(2100).default(2025),
     GRAPHQL_INTROSPECTION: z
       .enum(['true', 'false'])
       .default('true')

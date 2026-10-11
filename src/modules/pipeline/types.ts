@@ -11,6 +11,21 @@ export interface SourceConfig {
   item?: Selector;
   fields?: Record<string, Selector>;
   allowedHosts?: string[];
+  state?: string;
+  county?: string;
+  tigerYear?: number;
+  pageUrl?: string;
+  officeId?: string;
+  jurisdictionGeoid?: string;
+  selectors?: PageSelectors;
+}
+
+export interface PageSelectors {
+  name?: Selector;
+  title?: Selector;
+  phone?: Selector;
+  email?: Selector;
+  address?: Selector;
 }
 
 export interface Selector {
@@ -29,7 +44,24 @@ export interface RawSnapshot {
 export interface NormalisedRecord {
   matchKey: string;
   entityType: CivicEntityType;
+  entityId?: string;
   fields: Record<string, string | null>;
+}
+
+export interface RunCounts {
+  skipped: boolean;
+  added: number;
+  changed: number;
+  retired: number;
+  pending: number;
+  sha: string | null;
+}
+
+export interface ZipConvertRequest {
+  zip: Uint8Array;
+  layer: string;
+  where?: string;
+  clipGeoJson?: Uint8Array;
 }
 
 export interface HttpResult {
@@ -49,6 +81,9 @@ export interface CollectorContext {
   source: SourceRow;
   fetch: HttpFetcher;
   maxBytes: number;
+  userAgent?: string;
+  pace?: { wait(): Promise<void> };
+  convertZip?: (request: ZipConvertRequest) => Promise<Uint8Array>;
 }
 
 export interface Collector {
@@ -70,3 +105,46 @@ export function snapshotFrom(body: Uint8Array, contentType: string, skipped?: 'r
 export const USER_AGENT = 'CivicLinkBot/1.0 (+https://civiclink.example/bot)';
 export const BULK_CAP = 50 * 1024 * 1024;
 export const PAGE_CAP = 5 * 1024 * 1024;
+
+export function civicLinkUserAgent(contactEmail: string): string {
+  return `CivicLinkBot/1.0 (+${contactEmail})`;
+}
+
+const NOT_PENDING = new Set([
+  'geometry',
+  'parentGeoid',
+  'parentType',
+  'boundaryVintage',
+  'subtype',
+  'districtCode',
+  'officeId',
+  'jurisdictionGeoid',
+]);
+
+const ATTRIBUTES = [
+  'name',
+  'geoid',
+  'state',
+  'type',
+  'level',
+  'subtype',
+  'boundaryVintage',
+  'fullName',
+  'party',
+  'website',
+  'phone',
+  'email',
+  'title',
+  'address',
+] as const;
+
+export function isPendingField(field: string): boolean {
+  return !NOT_PENDING.has(field);
+}
+
+export function sameAttributes(left: Record<string, string | null>, right: Record<string, string | null>): boolean {
+  for (const key of ATTRIBUTES) {
+    if ((left[key] ?? null) !== (right[key] ?? null)) return false;
+  }
+  return true;
+}
