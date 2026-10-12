@@ -487,7 +487,7 @@ export class PipelineRepo implements PipelineStore {
       this.db.$executeRaw`
         INSERT INTO jurisdictions (
           name, level, type, subtype, parent_id, district_code, geoid, state,
-          boundary, boundary_vintage, source_id, source_record_url, last_updated_at, status
+          boundary, boundary_vintage, source_id, source_record_url, last_updated_at, status, updated_at
         ) VALUES (
           ${(record.fields.name ?? geoid).slice(0, 150)},
           ${level}::"GovLevel",
@@ -502,7 +502,8 @@ export class PipelineRepo implements PipelineStore {
           ${sourceId}::uuid,
           ${record.matchKey.slice(0, 2048)},
           ${now},
-          'ACTIVE'::"RecordStatus"
+          'ACTIVE'::"RecordStatus",
+          ${now}
         )
         ON CONFLICT (type, geoid) DO UPDATE SET
           name = EXCLUDED.name,
