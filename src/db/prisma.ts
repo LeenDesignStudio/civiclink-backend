@@ -18,8 +18,12 @@ import {
 } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 
-export function createPrisma(connectionString = env.DATABASE_URL): PrismaClient {
-  const adapter = new PrismaPg({ connectionString, max: env.DB_POOL_MAX });
+export function createPrisma(connectionString = env.DATABASE_URL, statementTimeoutMs?: number): PrismaClient {
+  const adapter = new PrismaPg({
+    connectionString,
+    max: env.DB_POOL_MAX,
+    ...(statementTimeoutMs ? { options: `-c statement_timeout=${statementTimeoutMs}` } : {}),
+  });
   const client = new PrismaClient({
     adapter,
     log: [
@@ -119,10 +123,13 @@ export function postgresMessage(err: unknown): string | undefined {
   };
   visit(err, 0);
   const blob = parts.join('\n');
-  const matched = /Message:\s*`([^`]*)`/.exec(blob)?.[1] ?? /ERROR:\s*([^\n]+)/.exec(blob)?.[1];
-  if (!matched) return undefined;
-  const clean = matched.replace(/\s+/g, ' ').trim().slice(0, 240);
-  if (clean.length === 0 || /postgres:\/\/|password|secret|token/i.test(clean)) return undefined;
+  const quoted = /Message:\s*`([^`]*)`/.exec(blob)?.[1] ?? /ERROR:\s*([^\n]+)/.exec(blob)?.[1];
+  const fallback = parts
+    .flatMap((part) => part.split('\n'))
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && line !== 'Something went wrong.' && !line.startsWith('Invalid `prisma.') && !line.startsWith('Raw query failed'));
+  const clean = (quoted ?? fallback ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  if (clean.length === 0 || /postgres:\/\/|password=/i.test(clean)) return undefined;
   return clean;
 }
 

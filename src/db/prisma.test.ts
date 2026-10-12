@@ -35,6 +35,9 @@ describe('mapDbError', () => {
       message: 'Invalid `prisma.$executeRaw()` invocation:\n\nRaw query failed. Code: `22023`. Message: `Geometry type (GeometryCollection) does not match column type (MultiPolygon)`',
     };
     expect(postgresMessage(err)).toBe('Geometry type (GeometryCollection) does not match column type (MultiPolygon)');
+    const wrapped = new Error('Something went wrong.');
+    wrapped.cause = { message: 'canceling statement due to statement timeout' };
+    expect(postgresMessage(wrapped)).toBe('canceling statement due to statement timeout');
   });
 
   it('reads a constraint name quoted in the driver message', () => {

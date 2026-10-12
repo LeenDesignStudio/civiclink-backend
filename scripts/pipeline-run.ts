@@ -1,6 +1,5 @@
 import 'dotenv/config';
-import { prisma } from '../src/db/prisma.js';
-import { reportCliError, runCollectorCli } from './pipeline-app.js';
+import { closePipelineCli, reportCliError, runCollectorCli } from './pipeline-app.js';
 
 runCollectorCli(process.argv.slice(2))
   .catch((err: unknown) => {
@@ -8,5 +7,5 @@ runCollectorCli(process.argv.slice(2))
     process.exitCode = 1;
   })
   .finally(() => {
-    void prisma.$disconnect();
+    void closePipelineCli();
   });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ServiceContext } from '../../graphql/context.js';
 import type { ActorType } from '../../generated/prisma/enums.js';
 import { directTx, type RunTx } from '../../auth/tx.js';
+import { postgresMessage } from '../../db/prisma.js';
 import { systemClock, type Clock } from '../../lib/clock.js';
 import {
   fromZod,
@@ -145,8 +146,12 @@ export class PipelineService {
       await this.deps.store.touchSource(source.id, this.clock.now());
       return withNotice({ skipped: false, added, changed, retired, pending, sha: snapshot.sha256 }, snapshot);
     } catch (err) {
-      const message = err instanceof ValidationError ? err.message.slice(0, 500) : 'Source run failed.';
-      await this.fail(run.id, message);
+      const message = (err instanceof ValidationError ? err.message : (postgresMessage(err) ?? 'Source run failed.')).slice(0, 500);
+      try {
+        await this.fail(run.id, message);
+      } catch {
+        // Report the original failure. A second database error would hide it.
+      }
       if (isAppError(err)) throw err;
       throw new UpstreamError(undefined, { cause: err });
     }
