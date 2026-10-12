@@ -1,6 +1,6 @@
 import { Prisma } from '../../generated/prisma/client.js';
 import { GovLevel, JurisdictionType, type CivicEntityType } from '../../generated/prisma/enums.js';
-import { dbCall, prisma, type Db } from '../../db/prisma.js';
+import { dbCall, postgresMessage, prisma, type Db } from '../../db/prisma.js';
 import { ValidationError } from '../../lib/errors.js';
 import type { PendingQuery, PipelineStore, SourceListQuery, SourceWrite } from './pipeline.ports.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
@@ -483,8 +483,9 @@ export class PipelineRepo implements PipelineStore {
       parentType && parentGeoid
         ? Prisma.sql`(SELECT id FROM jurisdictions WHERE type = ${parentType}::"JurisdictionType" AND geoid = ${parentGeoid} LIMIT 1)`
         : Prisma.sql`NULL`;
-    await dbCall(() =>
-      this.db.$executeRaw`
+    try {
+      await dbCall(() =>
+        this.db.$executeRaw`
         INSERT INTO jurisdictions (
           name, level, type, subtype, parent_id, district_code, geoid, state,
           boundary, boundary_vintage, source_id, source_record_url, last_updated_at, status, updated_at
@@ -497,7 +498,15 @@ export class PipelineRepo implements PipelineStore {
           ${record.fields.districtCode?.slice(0, 40) ?? null},
           ${geoid},
           ${record.fields.state?.slice(0, 2) ?? null},
-          ST_Multi(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(${record.fields.geometry}), 4326))),
+          (
+            SELECT CASE WHEN g IS NULL OR ST_IsEmpty(g) THEN NULL ELSE ST_Multi(g) END
+            FROM (
+              SELECT ST_Force2D(ST_CollectionExtract(
+                ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(${record.fields.geometry}), 4326)),
+                3
+              )) AS g
+            ) extracted
+          ),
           ${record.fields.boundaryVintage?.slice(0, 20) ?? null},
           ${sourceId}::uuid,
           ${record.matchKey.slice(0, 2048)},
@@ -520,7 +529,11 @@ export class PipelineRepo implements PipelineStore {
           status = 'ACTIVE'::"RecordStatus",
           updated_at = ${now}
       `,
-    );
+      );
+    } catch (err) {
+      const detail = postgresMessage(err) ?? 'database rejected the row';
+      throw new ValidationError(`Boundary rejected for ${geoid}: ${detail}`);
+    }
   }
 
   private async upsertOfficial(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {

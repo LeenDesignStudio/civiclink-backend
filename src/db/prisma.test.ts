@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { mapDbError, prisma } from './prisma.js';
+import { mapDbError, postgresMessage, prisma } from './prisma.js';
 
 function uniqueViolation(index: string) {
   return {
@@ -28,6 +28,13 @@ describe('mapDbError', () => {
     expect(mapDbError(uniqueViolation('saved_locations_home_work_once')).code).toBe('LOCATION_LABEL_TAKEN');
     expect(mapDbError(uniqueViolation('corrections_one_open_per_user_field')).code).toBe('DUPLICATE_CORRECTION');
     expect(mapDbError(uniqueViolation('saved_locations_one_default_per_user')).code).toBe('CONFLICT');
+  });
+
+  it('keeps the postgres message and drops the query text', () => {
+    const err = {
+      message: 'Invalid `prisma.$executeRaw()` invocation:\n\nRaw query failed. Code: `22023`. Message: `Geometry type (GeometryCollection) does not match column type (MultiPolygon)`',
+    };
+    expect(postgresMessage(err)).toBe('Geometry type (GeometryCollection) does not match column type (MultiPolygon)');
   });
 
   it('reads a constraint name quoted in the driver message', () => {

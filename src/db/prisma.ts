@@ -101,6 +101,31 @@ export function readDbError(err: unknown): DbErrorInfo {
   };
 }
 
+/** The Postgres message only. The Prisma wrapper repeats the full query. */
+export function postgresMessage(err: unknown): string | undefined {
+  const parts: string[] = [];
+  const visit = (value: unknown, depth: number) => {
+    if (!value || typeof value !== 'object' || depth > 6) return;
+    const record = value as {
+      message?: unknown;
+      cause?: unknown;
+      meta?: { driverAdapterError?: { cause?: { message?: unknown; originalMessage?: unknown } } };
+    };
+    const cause = record.meta?.driverAdapterError?.cause;
+    for (const item of [cause?.originalMessage, cause?.message, record.message]) {
+      if (typeof item === 'string' && item.length > 0) parts.push(item);
+    }
+    visit(record.cause, depth + 1);
+  };
+  visit(err, 0);
+  const blob = parts.join('\n');
+  const matched = /Message:\s*`([^`]*)`/.exec(blob)?.[1] ?? /ERROR:\s*([^\n]+)/.exec(blob)?.[1];
+  if (!matched) return undefined;
+  const clean = matched.replace(/\s+/g, ' ').trim().slice(0, 240);
+  if (clean.length === 0 || /postgres:\/\/|password|secret|token/i.test(clean)) return undefined;
+  return clean;
+}
+
 export function mapDbError(err: unknown): AppError {
   if (isAppError(err)) return err;
   const info = readDbError(err);

@@ -1,5 +1,6 @@
 import { prisma } from '../src/db/prisma.js';
 import { env } from '../src/config/env.js';
+import { postgresMessage } from '../src/db/prisma.js';
 import { isAppError } from '../src/lib/errors.js';
 import { AuditRepo } from '../src/modules/audit/audit.repo.js';
 import { AuditService } from '../src/modules/audit/audit.service.js';
@@ -63,7 +64,8 @@ async function printPlan(plan: SourceRow[], scope: PilotScope, dryRun: boolean):
 
 export function reportCliError(err: unknown): void {
   if (isAppError(err)) {
-    process.stderr.write(`${err.message}\n`);
+    const detail = err.code === 'INTERNAL' ? postgresMessage(err) : undefined;
+    process.stderr.write(detail ? `${err.message} ${detail}\n` : `${err.message}\n`);
     return;
   }
   if (err instanceof Error && !/postgres|password|secret|token/i.test(err.message)) {
