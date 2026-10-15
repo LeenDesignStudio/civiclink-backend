@@ -23,7 +23,7 @@ export interface OAuthCookiePayload {
   intent: AuthIntent;
   returnTo: string;
   /** Development only. Local browser origin so Google returns to localhost, not PUBLIC_WEB_URL. */
-  webOrigin?: string;
+  webOrigin?: string | undefined;
 }
 
 const oauthSchema = z
