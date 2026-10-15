@@ -56,7 +56,6 @@ export async function start(): Promise<void> {
   registerAdminAuthRoutes(app, {
     google: new GoogleOAuth(adminGoogle, {
       audience: env.ADMIN_GOOGLE_CLIENT_ID,
-      hostedDomain: env.ADMIN_GOOGLE_HD,
     }),
     adminAuth: container.adminAuth,
     webUrl: env.PUBLIC_WEB_URL,

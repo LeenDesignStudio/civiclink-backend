@@ -113,6 +113,18 @@ describe('AdminAuthService', () => {
     expect(store.admin?.failedAttempts).toBe(0);
   });
 
+  it('accepts an allowlisted Gmail account with no workspace domain', async () => {
+    const { store, service } = setup(admin({ email: 'ada@gmail.com', status: 'INVITED', googleSubject: null }));
+    const session = await service.completeLogin({
+      email: 'ada@gmail.com',
+      emailVerified: true,
+      subject: 'gmail-subject',
+    });
+    expect(session.principal.email).toBe('ada@gmail.com');
+    expect(store.admin?.status).toBe('ACTIVE');
+    expect(store.admin?.googleSubject).toBe('gmail-subject');
+  });
+
   it('rejects the wrong workspace domain', async () => {
     const { service } = setup();
     await expect(service.completeLogin({ ...good, hd: 'gmail.com' })).rejects.toBeInstanceOf(AdminNotAllowedError);

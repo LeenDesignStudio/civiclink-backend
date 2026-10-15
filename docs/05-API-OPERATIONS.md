@@ -101,7 +101,7 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 
 | Operation | Kind | Permission | Rate | Input | Rules | Errors |
 |---|---|---|---|---|---|---|
-| `GET /admin-auth/google/start`, `GET /admin-auth/google/callback` | REST | — | auth | — | Workspace `hd` + allowlist + ACTIVE/INVITED (first login activates INVITED); lockout; session cookie | 302 `/admin/login?error=` `ADMIN_NOT_ALLOWED`, `ADMIN_LOCKED` |
+| `GET /admin-auth/google/start`, `GET /admin-auth/google/callback` | REST | — | auth | — | Allowlisted verified email + ACTIVE/INVITED (first login activates INVITED). A Workspace account must present `hd` = `ADMIN_GOOGLE_HD`. A verified allowlisted address with no `hd` (personal Gmail) is accepted. Lockout; session cookie | 302 `/admin/login?error=` `ADMIN_NOT_ALLOWED`, `ADMIN_LOCKED` |
 | `adminMe` | Query | any admin | admin | — | id, email, name, role, permissions[] | `UNAUTHENTICATED` |
 | `adminSignOut` | Mutation | any admin | admin | — | Revoke session | — |
 | `adminUsers` | Query | `admin.users:read` | admin | `filter { role?, status? }, first, after` | — | `FORBIDDEN` |

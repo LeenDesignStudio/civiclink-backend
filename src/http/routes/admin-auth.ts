@@ -1,7 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import '@fastify/cookie';
 import { z } from 'zod';
 import { AdminAuthService } from '../../auth/admin-auth.js';
+import { env } from '../../config/env.js';
+import { developmentWebOrigin } from '../../auth/web-origin.js';
 import {
   COOKIE_OAUTH,
   clearAdminCookie,
@@ -31,13 +33,28 @@ export interface AdminAuthRouteDeps {
   clock?: Clock;
 }
 
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/** Local dev sign-in returns to the browser origin. Everything else uses PUBLIC_WEB_URL. */
+function webUrlFor(request: FastifyRequest, configured: string, saved?: string): string {
+  return (
+    developmentWebOrigin(env.APP_ENV, saved) ??
+    developmentWebOrigin(env.APP_ENV, headerValue(request.headers.origin)) ??
+    developmentWebOrigin(env.APP_ENV, headerValue(request.headers.referer)) ??
+    configured
+  );
+}
+
 export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRouteDeps): void {
   const clock = deps.clock ?? systemClock;
 
   app.get('/admin-auth/google/start', async (request, reply) => {
     reply.header('cache-control', 'no-store');
     try {
-      const redirectUri = new URL('/admin-auth/google/callback', deps.webUrl).toString();
+      const webUrl = webUrlFor(request, deps.webUrl);
+      const redirectUri = new URL('/admin-auth/google/callback', webUrl).toString();
       const start = await deps.google.begin(redirectUri);
       setOAuthCookie(
         reply,
@@ -48,6 +65,7 @@ export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRou
           codeVerifier: start.codeVerifier,
           intent: 'SIGN_IN',
           returnTo: '/admin',
+          ...(webUrl === deps.webUrl ? {} : { webOrigin: webUrl }),
         },
         clock.now(),
       );
@@ -68,14 +86,15 @@ export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRou
       if (!payload || payload.provider !== 'admin-google' || payload.state !== query.state) {
         throw new OauthFailedError({ details: { reason: 'state' } });
       }
-      const redirectUri = new URL('/admin-auth/google/callback', deps.webUrl).toString();
+      const webUrl = webUrlFor(request, deps.webUrl, payload.webOrigin);
+      const redirectUri = new URL('/admin-auth/google/callback', webUrl).toString();
       const identity = await deps.google.complete({
         code: query.code,
         redirectUri,
         codeVerifier: payload.codeVerifier,
         expectedState: payload.state,
         expectedNonce: payload.nonce,
-        currentUrl: new URL(request.url, deps.webUrl),
+        currentUrl: new URL(request.url, webUrl),
         method: 'GET',
         queryState: query.state,
       });
@@ -95,11 +114,12 @@ export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRou
       );
       clearOAuthCookie(reply, 'lax');
       setAdminCookie(reply, session.token);
-      return await reply.redirect(new URL('/admin', deps.webUrl).toString(), 302);
+      return await reply.redirect(new URL('/admin', webUrl).toString(), 302);
     } catch (err) {
       clearOAuthCookie(reply, 'lax');
       clearAdminCookie(reply);
       const code = authFailureCode(err);
+      const webUrl = webUrlFor(request, deps.webUrl);
       const reason =
         isAppError(err) && typeof err.details?.reason === 'string' ? err.details.reason : undefined;
       logger.warn({ requestId: request.id, code, ...(reason ? { reason } : {}) }, 'admin sign-in failed');
@@ -107,7 +127,7 @@ export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRou
         code === 'ADMIN_LOCKED' || code === 'ADMIN_NOT_ALLOWED' || code === 'OAUTH_FAILED'
           ? code
           : 'ADMIN_NOT_ALLOWED';
-      return redirectAuthError(reply, deps.webUrl, '/admin/login', redirectCode);
+      return redirectAuthError(reply, webUrl, '/admin/login', redirectCode);
     }
   });
 }

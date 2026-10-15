@@ -40,7 +40,7 @@ export class AdminAuthService {
       throw new AdminLockedError();
     }
     const hd = identity.hd?.trim().toLowerCase();
-    const domainOk = hd === this.deps.hostedDomain.trim().toLowerCase();
+    const domainOk = !hd || hd === this.deps.hostedDomain.trim().toLowerCase();
     if (!identity.emailVerified || !domainOk) {
       if (admin) return this.fail(admin, now);
       throw new AdminNotAllowedError();

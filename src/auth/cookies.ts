@@ -22,6 +22,8 @@ export interface OAuthCookiePayload {
   codeVerifier: string;
   intent: AuthIntent;
   returnTo: string;
+  /** Development only. Local browser origin so Google returns to localhost, not PUBLIC_WEB_URL. */
+  webOrigin?: string;
 }
 
 const oauthSchema = z
@@ -32,6 +34,7 @@ const oauthSchema = z
     codeVerifier: z.string().min(8).max(200),
     intent: z.enum(AUTH_INTENTS),
     returnTo: z.string().min(1).max(2048),
+    webOrigin: z.string().url().optional(),
   })
   .strict();
 
