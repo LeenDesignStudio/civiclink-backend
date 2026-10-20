@@ -132,7 +132,10 @@ if (isWorkerMain(import.meta.url, process.argv[1])) {
       process.on('SIGINT', shutdown);
     })
     .catch((err: unknown) => {
-      logger.fatal({ err: err instanceof Error ? err.name : 'error' }, 'worker failed to start');
+      const name = err instanceof Error ? err.name : 'unknown';
+      const message = err instanceof Error ? err.message : String(err);
+      const code = err && typeof err === 'object' && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
+      logger.fatal({ err: name, ...(code ? { code } : {}), message: message.slice(0, 300) }, 'worker failed to start');
       process.exit(1);
     });
 }
