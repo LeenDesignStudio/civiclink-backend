@@ -6,6 +6,7 @@ import { createAppleOidc, AppleOAuth } from './auth/oauth/apple.js';
 import { createGoogleOidc, GoogleOAuth } from './auth/oauth/google.js';
 import { env } from './config/env.js';
 import { prisma } from './db/prisma.js';
+import { createRequestPrincipal } from './auth/request-principal.js';
 import { registerAdminAuthRoutes } from './http/routes/admin-auth.js';
 import { registerAuthRoutes } from './http/routes/auth.js';
 import { registerUnsubscribeRoutes } from './http/routes/unsubscribe.js';
@@ -28,6 +29,7 @@ export async function start(): Promise<void> {
   const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 2 });
   const app = await buildServer({
     services: container.services,
+    resolvePrincipal: createRequestPrincipal({ adminAuth: container.adminAuth }),
     rateGate: createPostgresRateGate(pool),
     ...(container.devExports ? { devExports: container.devExports } : {}),
     readiness: {
