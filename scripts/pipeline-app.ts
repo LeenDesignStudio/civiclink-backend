@@ -1,4 +1,4 @@
-import { createPrisma, postgresMessage, prisma } from '../src/db/prisma.js';
+import { createPrisma, postgresMessage, prisma, withTx } from '../src/db/prisma.js';
 import { env } from '../src/config/env.js';
 import { isAppError } from '../src/lib/errors.js';
 import { AuditRepo } from '../src/modules/audit/audit.repo.js';
@@ -51,6 +51,7 @@ async function printPlan(plan: SourceRow[], scope: PilotScope, dryRun: boolean):
     userAgent: civicLinkUserAgent(env.CONTACT_INBOX),
     pace: createRequestPacer(1000),
     convertZip: convertTigerZip,
+    withTx: (fn) => withTx((tx) => fn(tx), { client: db }),
   });
   const ctx = pipelineContext();
   const lines = await executePlan({

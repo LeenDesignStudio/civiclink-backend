@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { env } from './config/env.js';
-import { prisma } from './db/prisma.js';
+import { prisma, withTx } from './db/prisma.js';
 import { logger } from './lib/logger.js';
 import { systemClock } from './lib/clock.js';
 import { startBoss } from './jobs/boss.js';
@@ -76,6 +76,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     userAgent: civicLinkUserAgent(env.CONTACT_INBOX),
     pace: createRequestPacer(1000),
     convertZip: convertTigerZip,
+    withTx: (fn) => withTx((tx) => fn(tx)),
   });
   const retention = new RetentionService(new RetentionRepo(prisma), systemClock);
   const billing = new BillingService({

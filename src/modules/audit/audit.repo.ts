@@ -14,11 +14,17 @@ function readJson(value: Prisma.JsonValue | null): AuditJson | null {
   return value;
 }
 
+/** `directTx` passes no client. Callers that open a transaction pass one. */
+function bind(db: Db, tx: unknown): Db {
+  if (typeof tx === 'object' && tx !== null && 'changeLog' in tx) return tx as Db;
+  return db;
+}
+
 export class AuditRepo implements AuditStore {
   constructor(private readonly db: Db) {}
 
   async insert(tx: Tx, entry: ChangeLogEntry): Promise<void> {
-    const db = tx as Db;
+    const db = bind(this.db, tx);
     await dbCall(() =>
       db.changeLog.create({
         data: {
