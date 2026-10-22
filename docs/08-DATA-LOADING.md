@@ -86,7 +86,7 @@ place, county subdivision, and school districts). County boundaries come from th
 cartographic file `cb_{YEAR}_us_county_500k.zip` because the TIGER/Line national county file
 is over 50 MB. A 404 on elementary or secondary school districts is skipped when Census does
 not publish that layer for the state. The national ZCTA file is over 50 MB, so that layer is
-skipped and the run says so. Jurisdictions upsert on `(type, geoid)`
+skipped and the run says so. County subdivisions, congressional districts, and state legislative districts store the Census long name (`NAMELSAD`), so a Maryland election district is `District 1` or `District 10, Deer Park` rather than the short code `1`. Cities and counties keep the short name (`Rockville`, `Montgomery`). Jurisdictions upsert on `(type, geoid)`
 with `ST_Multi(ST_MakeValid(...))`. Parents are state, then county, then place.
 `boundary_vintage` is `TIGER{YEAR}`.
 

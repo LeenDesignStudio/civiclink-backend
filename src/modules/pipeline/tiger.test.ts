@@ -78,6 +78,24 @@ describe('tiger layer plan', () => {
     expect(place?.fields.parentGeoid).toBe('24031');
     expect(place?.fields.name).toBe('Rockville');
   });
+
+  it('uses the Census long name for district layers and keeps place names short', () => {
+    const records = tigerRecordsFromFeatures(
+      [
+        { properties: { tigerLayer: 'COUSUB', GEOID: '2402390100', NAME: '1', NAMELSAD: 'District 1', STATEFP: '24', COUNTYFP: '023' } },
+        { properties: { tigerLayer: 'COUSUB', GEOID: '2402391000', NAME: '10, Deer Park', NAMELSAD: 'District 10, Deer Park', STATEFP: '24', COUNTYFP: '023' } },
+        { properties: { tigerLayer: 'CD', GEOID: '2401', NAME: '1', NAMELSAD: 'Congressional District 1', STATEFP: '24' } },
+        { properties: { tigerLayer: 'PLACE', GEOID: '2454000', NAME: 'Rockville', NAMELSAD: 'Rockville city', STATEFP: '24', COUNTYFP: '031' } },
+      ],
+      2025,
+      'MD',
+    );
+    const nameOf = (geoid: string) => records.find((row) => row.fields.geoid === geoid)?.fields.name;
+    expect(nameOf('2402390100')).toBe('District 1');
+    expect(nameOf('2402391000')).toBe('District 10, Deer Park');
+    expect(nameOf('2401')).toBe('Congressional District 1');
+    expect(nameOf('2454000')).toBe('Rockville');
+  });
 });
 
 describe('tiger collector', () => {

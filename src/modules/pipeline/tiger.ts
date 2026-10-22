@@ -139,7 +139,7 @@ export function tigerRecordsFromFeatures(features: TigerFeature[], year: number,
     if (!geoid) continue;
     const meta = LAYER_TYPE[layerId];
     const fields: Record<string, string | null> = {
-      name: stringOf(props.NAME) ?? stringOf(props.NAMELSAD) ?? geoid,
+      name: jurisdictionName(layerId, props, geoid),
       geoid,
       state: postal.toUpperCase(),
       type: meta.type,
@@ -176,6 +176,16 @@ function parentOf(layer: TigerLayerId, props: Record<string, unknown>, fips: str
 
 function rank(type: string | null | undefined): number {
   return TYPE_RANK[type ?? ''] ?? 2;
+}
+
+const LONG_NAME_LAYERS = new Set<TigerLayerId>(['CD', 'SLDU', 'SLDL', 'COUSUB']);
+
+/** District layers publish a short code in NAME and the label residents expect in NAMELSAD. */
+function jurisdictionName(layerId: TigerLayerId, props: Record<string, unknown>, geoid: string): string {
+  const name = stringOf(props.NAME) ?? stringOf(props.name);
+  const longName = stringOf(props.NAMELSAD);
+  if (LONG_NAME_LAYERS.has(layerId)) return longName ?? name ?? geoid;
+  return name ?? longName ?? geoid;
 }
 
 function geoidOf(props: Record<string, unknown>): string | null {
