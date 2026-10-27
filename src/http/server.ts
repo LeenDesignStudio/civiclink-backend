@@ -157,20 +157,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.setErrorHandler((error, request, reply) => {
     const requestId = request.id;
     if (isAppError(error)) {
-      const body = {
+      const retryAfterSeconds =
+        'retryAfterSeconds' in error && typeof error.retryAfterSeconds === 'number'
+          ? error.retryAfterSeconds
+          : undefined;
+      if (retryAfterSeconds !== undefined) void reply.header('retry-after', String(retryAfterSeconds));
+      return reply.code(error.httpStatus).send({
         error: {
           code: error.code,
           message: error.clientMessage(),
           requestId,
-          ...(error.code === 'RATE_LIMITED' && 'retryAfterSeconds' in error
-            ? { retryAfterSeconds: error.retryAfterSeconds }
-            : {}),
+          ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
         },
-      };
-      if (error.code === 'RATE_LIMITED' && 'retryAfterSeconds' in error) {
-        void reply.header('retry-after', String(error.retryAfterSeconds));
-      }
-      return reply.code(error.httpStatus).send(body);
+      });
     }
     const statusCode =
       typeof error === 'object' &&

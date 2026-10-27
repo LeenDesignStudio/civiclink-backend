@@ -1,133 +1,100 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import '@fastify/cookie';
 import { z } from 'zod';
+import type { AdminPasswordMail } from '../../auth/admin-auth.js';
 import { AdminAuthService } from '../../auth/admin-auth.js';
-import { env } from '../../config/env.js';
-import { developmentWebOrigin } from '../../auth/web-origin.js';
-import {
-  COOKIE_OAUTH,
-  clearAdminCookie,
-  clearOAuthCookie,
-  readOAuthCookie,
-  setAdminCookie,
-  setOAuthCookie,
-} from '../../auth/cookies.js';
-import { authFailureCode, redirectAuthError, sendAuthError } from '../../auth/http-error.js';
-import type { GoogleOAuth } from '../../auth/oauth/google.js';
+import { setAdminCookie } from '../../auth/cookies.js';
+import { sendAuthError } from '../../auth/http-error.js';
 import { hashIp } from '../../lib/crypto.js';
-import { isAppError, OauthFailedError } from '../../lib/errors.js';
+import { fromZod, isAppError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
-import type { Clock } from '../../lib/clock.js';
-import { systemClock } from '../../lib/clock.js';
 
-const callbackQuery = z.object({
-  code: z.string().min(1).max(2048).optional(),
-  state: z.string().min(1).max(200).optional(),
-  error: z.string().max(100).optional(),
-});
+const loginBody = z
+  .object({
+    email: z.string().trim().toLowerCase().pipe(z.email()),
+    password: z.string().min(1).max(10_000),
+  })
+  .strict();
+
+const forgotBody = z
+  .object({
+    email: z.string().trim().toLowerCase().pipe(z.email()),
+  })
+  .strict();
+
+const resetBody = z
+  .object({
+    token: z.string().min(20).max(200),
+    password: z.string().min(1).max(10_000),
+  })
+  .strict();
 
 export interface AdminAuthRouteDeps {
-  google: GoogleOAuth;
   adminAuth: AdminAuthService;
-  webUrl: string;
-  clock?: Clock;
+  enqueuePasswordMail: (job: AdminPasswordMail) => Promise<void>;
 }
 
-function headerValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-/** Local dev sign-in returns to the browser origin. Everything else uses PUBLIC_WEB_URL. */
-function webUrlFor(request: FastifyRequest, configured: string, saved?: string): string {
-  return (
-    developmentWebOrigin(env.APP_ENV, saved) ??
-    developmentWebOrigin(env.APP_ENV, headerValue(request.headers.origin)) ??
-    developmentWebOrigin(env.APP_ENV, headerValue(request.headers.referer)) ??
-    configured
-  );
+function requireCsrf(request: FastifyRequest, reply: FastifyReply): boolean {
+  if (request.headers['x-civiclink-csrf'] === '1') return true;
+  void reply.status(403).send({
+    error: { code: 'FORBIDDEN', message: 'Missing CSRF header.', requestId: request.id },
+  });
+  return false;
 }
 
 export function registerAdminAuthRoutes(app: FastifyInstance, deps: AdminAuthRouteDeps): void {
-  const clock = deps.clock ?? systemClock;
-
-  app.get('/admin-auth/google/start', async (request, reply) => {
+  app.post('/admin-auth/login', async (request, reply) => {
     reply.header('cache-control', 'no-store');
+    if (!requireCsrf(request, reply)) return;
     try {
-      const webUrl = webUrlFor(request, deps.webUrl);
-      const redirectUri = new URL('/admin-auth/google/callback', webUrl).toString();
-      const start = await deps.google.begin(redirectUri);
-      setOAuthCookie(
-        reply,
-        {
-          provider: 'admin-google',
-          state: start.state,
-          nonce: start.nonce,
-          codeVerifier: start.codeVerifier,
-          intent: 'SIGN_IN',
-          returnTo: '/admin',
-          ...(webUrl === deps.webUrl ? {} : { webOrigin: webUrl }),
-        },
-        clock.now(),
-      );
-      return await reply.redirect(start.url.toString(), 302);
+      const parsed = loginBody.safeParse(request.body ?? {});
+      if (!parsed.success) throw fromZod(parsed.error);
+      const ua = request.headers['user-agent'];
+      const session = await deps.adminAuth.login(parsed.data, {
+        requestId: request.id,
+        ipHash: hashIp(request.ip || 'unknown'),
+        ...(typeof ua === 'string' ? { userAgent: ua.slice(0, 400) } : {}),
+      });
+      setAdminCookie(reply, session.token);
+      return await reply.send({ ok: true });
     } catch (err) {
       return sendAuthError(reply, err, request.id);
     }
   });
 
-  app.get('/admin-auth/google/callback', async (request, reply) => {
+  app.post('/admin-auth/forgot-password', async (request, reply) => {
     reply.header('cache-control', 'no-store');
+    if (!requireCsrf(request, reply)) return;
     try {
-      const query = callbackQuery.parse(request.query);
-      if (query.error || !query.code || !query.state) {
-        throw new OauthFailedError({ details: { reason: 'callback' } });
+      const parsed = forgotBody.safeParse(request.body ?? {});
+      if (!parsed.success) throw fromZod(parsed.error);
+      const mail = await deps.adminAuth.requestPasswordReset(parsed.data.email);
+      if (mail) {
+        try {
+          await deps.enqueuePasswordMail(mail);
+        } catch (err) {
+          logger.error(
+            { requestId: request.id, principalId: mail.adminUserId, err: isAppError(err) ? err.code : 'queue' },
+            'admin password email was not queued',
+          );
+        }
       }
-      const payload = readOAuthCookie(request.cookies[COOKIE_OAUTH], clock.now());
-      if (!payload || payload.provider !== 'admin-google' || payload.state !== query.state) {
-        throw new OauthFailedError({ details: { reason: 'state' } });
-      }
-      const webUrl = webUrlFor(request, deps.webUrl, payload.webOrigin);
-      const redirectUri = new URL('/admin-auth/google/callback', webUrl).toString();
-      const identity = await deps.google.complete({
-        code: query.code,
-        redirectUri,
-        codeVerifier: payload.codeVerifier,
-        expectedState: payload.state,
-        expectedNonce: payload.nonce,
-        currentUrl: new URL(request.url, webUrl),
-        method: 'GET',
-        queryState: query.state,
-      });
-      const ua = request.headers['user-agent'];
-      const session = await deps.adminAuth.completeLogin(
-        {
-          email: identity.email,
-          emailVerified: identity.emailVerified,
-          subject: identity.subject,
-          ...(identity.hd ? { hd: identity.hd } : {}),
-        },
-        {
-          requestId: request.id,
-          ipHash: hashIp(request.ip || 'unknown'),
-          ...(typeof ua === 'string' ? { userAgent: ua.slice(0, 400) } : {}),
-        },
-      );
-      clearOAuthCookie(reply, 'lax');
-      setAdminCookie(reply, session.token);
-      return await reply.redirect(new URL('/admin', webUrl).toString(), 302);
+      return await reply.status(202).send({ ok: true });
     } catch (err) {
-      clearOAuthCookie(reply, 'lax');
-      clearAdminCookie(reply);
-      const code = authFailureCode(err);
-      const webUrl = webUrlFor(request, deps.webUrl);
-      const reason =
-        isAppError(err) && typeof err.details?.reason === 'string' ? err.details.reason : undefined;
-      logger.warn({ requestId: request.id, code, ...(reason ? { reason } : {}) }, 'admin sign-in failed');
-      const redirectCode =
-        code === 'ADMIN_LOCKED' || code === 'ADMIN_NOT_ALLOWED' || code === 'OAUTH_FAILED'
-          ? code
-          : 'ADMIN_NOT_ALLOWED';
-      return redirectAuthError(reply, webUrl, '/admin/login', redirectCode);
+      return sendAuthError(reply, err, request.id);
+    }
+  });
+
+  app.post('/admin-auth/reset-password', async (request, reply) => {
+    reply.header('cache-control', 'no-store');
+    if (!requireCsrf(request, reply)) return;
+    try {
+      const parsed = resetBody.safeParse(request.body ?? {});
+      if (!parsed.success) throw fromZod(parsed.error);
+      await deps.adminAuth.resetPassword(parsed.data.token, parsed.data.password);
+      return await reply.send({ ok: true });
+    } catch (err) {
+      return sendAuthError(reply, err, request.id);
     }
   });
 }

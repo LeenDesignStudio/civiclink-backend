@@ -118,8 +118,12 @@ export const OPERATION_RATES: Record<string, RateClass> = {
   'GET /auth/google/callback': 'auth',
   'POST /auth/apple/callback': 'auth',
   'POST /auth/refresh': 'auth',
-  'GET /admin-auth/google/start': 'auth',
-  'GET /admin-auth/google/callback': 'auth',
+  'POST /admin-auth/login': 'auth',
+  'POST /admin-auth/forgot-password': 'auth',
+  'POST /admin-auth/reset-password': 'auth',
+  myAdminProfile: 'admin',
+  updateMyProfile: 'admin',
+  changeMyPassword: 'admin',
 };
 
 export class MemoryRateGate implements RateGate {

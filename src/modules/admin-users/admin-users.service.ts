@@ -19,9 +19,11 @@ import type { AuditService } from '../audit/audit.service.js';
 import type { AdminMeDto, AdminUserDto } from './admin-users.dto.js';
 import {
   adminUserListSchema,
+  changeMyPasswordSchema,
   inviteAdminSchema,
   setAdminStatusSchema,
   updateAdminRoleSchema,
+  updateMyProfileSchema,
 } from './admin-users.inputs.js';
 import type { AdminUserRecord, AdminUsersStore } from './admin-users.store.js';
 
@@ -30,14 +32,25 @@ export interface AdminSessionControl {
   revokeAll(adminId: string): Promise<void>;
 }
 
+export interface AdminAccountAuth {
+  sessionDeadline(sessionId: string): Promise<Date | null>;
+  changePassword(
+    tx: Tx,
+    adminId: string,
+    sessionId: string,
+    currentPassword: string,
+    nextPassword: string,
+  ): Promise<void>;
+}
+
 export interface AdminUsersServiceDeps {
   store: AdminUsersStore;
   audit: AuditService;
   sessions: AdminSessionControl;
+  auth: AdminAccountAuth;
   clock: Clock;
   random: RandomSource;
   runTx: RunTx;
-  hostedDomain: string;
   cache?: AdminPrincipalCache;
 }
 
@@ -59,9 +72,69 @@ export class AdminUsersService {
   async adminMe(ctx: ServiceContext): Promise<AdminMeDto> {
     ctx.authz.require('admin.dashboard:read');
     const { adminId } = ctx.authz.requireAdmin();
+    if (ctx.principal.kind !== 'admin') throw new UnauthenticatedError();
     const row = await this.deps.store.findById(undefined, adminId);
     if (!row || row.status !== 'ACTIVE') throw new UnauthenticatedError();
-    return { ...toDto(row), permissions: [...ROLE_PERMISSIONS[row.role]] };
+    const sessionExpiresAt = await this.deps.auth.sessionDeadline(ctx.principal.sessionId);
+    if (!sessionExpiresAt) throw new UnauthenticatedError();
+    return { ...toDto(row), permissions: [...ROLE_PERMISSIONS[row.role]], sessionExpiresAt };
+  }
+
+  async myAdminProfile(ctx: ServiceContext): Promise<AdminMeDto> {
+    return this.adminMe(ctx);
+  }
+
+  async updateMyProfile(ctx: ServiceContext, input: unknown): Promise<AdminUserDto> {
+    ctx.authz.require('admin.dashboard:read');
+    const actor = ctx.authz.requireAdmin();
+    const parsed = updateMyProfileSchema.safeParse(input);
+    if (!parsed.success) throw fromZod(parsed.error);
+    const updated = await this.deps.runTx(async (tx) => {
+      const row = await this.deps.store.findById(tx, actor.adminId);
+      if (!row || row.status !== 'ACTIVE') throw new UnauthenticatedError();
+      const previousName = row.name;
+      const next = await this.deps.store.updateName(tx, row.id, parsed.data.name);
+      await this.deps.audit.record(tx, {
+        actorType: 'ADMIN',
+        actorId: actor.adminId,
+        entityType: 'admin_user',
+        entityId: row.id,
+        action: 'admin.profile_updated',
+        before: { name: previousName },
+        after: { name: next.name },
+        requestId: ctx.requestId,
+      });
+      return next;
+    });
+    return toDto(updated);
+  }
+
+  async changeMyPassword(ctx: ServiceContext, input: unknown): Promise<void> {
+    ctx.authz.require('admin.dashboard:read');
+    const actor = ctx.authz.requireAdmin();
+    if (ctx.principal.kind !== 'admin') throw new UnauthenticatedError();
+    const parsed = changeMyPasswordSchema.safeParse(input);
+    if (!parsed.success) throw fromZod(parsed.error);
+    const sessionId = ctx.principal.sessionId;
+    await this.deps.runTx(async (tx) => {
+      await this.deps.auth.changePassword(
+        tx,
+        actor.adminId,
+        sessionId,
+        parsed.data.currentPassword,
+        parsed.data.newPassword,
+      );
+      await this.deps.audit.record(tx, {
+        actorType: 'ADMIN',
+        actorId: actor.adminId,
+        entityType: 'admin_user',
+        entityId: actor.adminId,
+        action: 'admin.password_changed',
+        before: null,
+        after: { changed: true },
+        requestId: ctx.requestId,
+      });
+    });
   }
 
   async adminSignOut(ctx: ServiceContext): Promise<void> {
@@ -100,7 +173,7 @@ export class AdminUsersService {
     const actor = ctx.authz.requireAdmin();
     const parsed = inviteAdminSchema.safeParse(input);
     if (!parsed.success) throw fromZod(parsed.error);
-    const email = workspaceEmail(parsed.data.email, this.deps.hostedDomain);
+    const email = parsed.data.email.trim().toLowerCase();
     const existing = await this.deps.store.findByEmail(email);
     if (existing) throw new ConflictError('That admin already exists.');
     const name = parsed.data.name && parsed.data.name.length > 0 ? parsed.data.name : null;
@@ -112,6 +185,7 @@ export class AdminUsersService {
         name,
         role: parsed.data.role,
         invitedBy: actor.adminId,
+        invitedAt: now,
         createdAt: now,
       });
       await this.deps.audit.record(tx, {
@@ -204,15 +278,4 @@ export class AdminUsersService {
     const count = await this.deps.store.countActiveSuperAdmins(tx);
     if (count <= 1) throw new LastSuperAdminError();
   }
-}
-
-function workspaceEmail(email: string, hostedDomain: string): string {
-  const normalized = email.trim().toLowerCase();
-  const suffix = `@${hostedDomain.trim().toLowerCase()}`;
-  if (!normalized.endsWith(suffix) || normalized.length <= suffix.length) {
-    throw new ValidationError('Use your workspace email.', [
-      { path: 'input.email', code: 'invalid_domain', message: 'Use your workspace email.' },
-    ]);
-  }
-  return normalized;
 }

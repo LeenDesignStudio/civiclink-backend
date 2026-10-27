@@ -13,4 +13,5 @@ export interface AdminUserDto {
 
 export interface AdminMeDto extends AdminUserDto {
   permissions: Permission[];
+  sessionExpiresAt: Date;
 }

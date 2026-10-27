@@ -14,6 +14,7 @@ export const QUEUES = {
   accountsPurge: 'accounts.purge',
   emailContact: 'email.contact',
   emailAccountDeletion: 'email.accountDeletion',
+  emailAdminPasswordReset: 'email.adminPasswordReset',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -34,4 +35,5 @@ export const QUEUE_OPTIONS: Record<QueueName, { retryLimit: number; retryBackoff
   [QUEUES.accountsPurge]: { retryLimit: 3, retryBackoff: true, expireInSeconds: 1800 },
   [QUEUES.emailContact]: { retryLimit: 3, retryBackoff: true, expireInSeconds: 120 },
   [QUEUES.emailAccountDeletion]: { retryLimit: 3, retryBackoff: true, expireInSeconds: 120 },
+  [QUEUES.emailAdminPasswordReset]: { retryLimit: 3, retryBackoff: true, expireInSeconds: 120 },
 };

@@ -103,9 +103,7 @@ All validated by `src/config/env.ts` (Zod) at boot. `S` = secret (Secrets Manage
 | `IP_HASH_SECRET` | S | ≥32 bytes |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | S | resident OIDC |
 | `APPLE_CLIENT_ID` / `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | S | Sign in with Apple (client secret JWT generated at runtime) |
-| `ADMIN_GOOGLE_CLIENT_ID` / `ADMIN_GOOGLE_CLIENT_SECRET` | S | separate OAuth client for admin |
-| `ADMIN_GOOGLE_HD` | | `qubalink.com` |
-| `BOOTSTRAP_SUPER_ADMIN_EMAIL` | | seeded once as SUPER_ADMIN (INVITED) |
+| `BOOTSTRAP_SUPER_ADMIN_EMAIL` | | seeded once as SUPER_ADMIN (INVITED, no password). `pnpm admin:create` prints a one-time invite link |
 | `GOOGLE_MAPS_API_KEY` | S | Geocoding (+ Places if D-11) |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | S | test keys outside production |
 | `EMAIL_PROVIDER` | | `ses` \| `console` (dev/test) |

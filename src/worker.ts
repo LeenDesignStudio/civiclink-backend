@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { AdminAuthRepo } from './auth/admin-auth.repo.js';
 import { env } from './config/env.js';
 import { prisma, withTx } from './db/prisma.js';
 import { logger } from './lib/logger.js';
@@ -96,6 +97,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     clock: systemClock,
     contacts: new ContactRepo(prisma),
     residents: new ResidentsRepo(prisma),
+    admins: new AdminAuthRepo(prisma),
   });
   const services: WorkerServices = {
     notifications,
@@ -105,6 +107,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     applyBillingEvent: (ctx, event) => billing.applyStripeEventAsSystem(ctx, event).then(() => undefined),
     sendContact: (ctx, id) => mail.sendContact(ctx, id),
     sendAccountDeletion: (ctx, id) => mail.sendAccountDeletion(ctx, id),
+    sendAdminPasswordLink: (ctx, input) => mail.sendAdminPasswordLink(ctx, input),
   };
   await registerHandlers(boss, services);
   await registerSchedules(boss);

@@ -9,8 +9,8 @@ export interface AdminSessionLookup {
 }
 
 /**
- * GraphQL otherwise runs as anonymous, so a successful Google redirect to /admin
- * is bounced back to login. The admin cookie is the session.
+ * The admin session cookie is the admin principal. A missing cookie stays anonymous.
+ * An idle, absolute-expired, or revoked session throws so GraphQL does not look anonymous.
  */
 export function createRequestPrincipal(deps: { adminAuth: AdminSessionLookup; clock?: Clock }) {
   const clock = deps.clock ?? systemClock;

@@ -45,7 +45,9 @@ REST routes return `{ "error": { "code", "message", "requestId" } }` with the HT
 | `NOT_PENDING_DELETION` | ConflictError | 409 | "Your account isn't scheduled for deletion." | restoreAccount when ACTIVE |
 | `OAUTH_FAILED` | UnauthenticatedError | 400 | "Sign-in didn't complete. Please try again." | state/nonce/PKCE/token verification failure or provider error (cause logged) |
 | `ADMIN_NOT_ALLOWED` | ForbiddenError | 403 | "This account doesn't have admin access." | Not in allowlist / wrong domain / deactivated |
-| `ADMIN_LOCKED` | ForbiddenError | 423 | "Too many attempts. Try again in 15 minutes." | Admin lockout |
+| `ADMIN_LOCKED` | ForbiddenError | 423 | "Too many attempts. Try again in 15 minutes." | Admin lockout. `retryAfterSeconds` is the time left on the lock |
+| `ADMIN_INVALID_CREDENTIALS` | UnauthenticatedError | 401 | "Email or password is incorrect." | Unknown email, wrong password, deactivated admin, or no password. Same code for each |
+| `ADMIN_TOKEN_EXPIRED` | AppError | 400 | "This link has expired." | Invite or reset token unknown, used, or expired |
 | `SELF_ROLE_CHANGE` | ConflictError | 409 | "You can't change your own role or status." | |
 | `LAST_SUPER_ADMIN` | ConflictError | 409 | "At least one Super Admin must remain active." | |
 | `BOT_CHECK_FAILED` | ValidationError | 400 | "Please complete the verification and try again." | Turnstile failed |

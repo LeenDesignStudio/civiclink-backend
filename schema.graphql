@@ -124,6 +124,7 @@ type AdminMe {
   name: String
   permissions: [String!]
   role: AdminRole
+  sessionExpiresAt: DateTime
 }
 
 type AdminOffice {
@@ -444,6 +445,15 @@ type ChangeLogEntry {
   entityType: String
   id: ID
   requestId: String
+}
+
+input ChangeMyPasswordInput {
+  currentPassword: String!
+  newPassword: String!
+}
+
+type ChangeMyPasswordPayload {
+  changed: Boolean
 }
 
 type CheckoutSessionPayload {
@@ -809,6 +819,7 @@ type Mutation {
   adminSignOut: AdminSignOutPayload
   applyCorrection(input: ApplyCorrectionInput!): AdminCorrectionPayload
   assignCorrection(input: AssignCorrectionInput!): AdminCorrectionPayload
+  changeMyPassword(input: ChangeMyPasswordInput!): ChangeMyPasswordPayload
   createCheckoutSession(input: CreateCheckoutSessionInput!): CheckoutSessionPayload
   createPortalSession: PortalSessionPayload
   decideSourceChange(input: DecideSourceChangeInput!): DecideSourceChangePayload
@@ -848,6 +859,7 @@ type Mutation {
   triggerSourceRefresh(input: TriggerSourceRefreshInput!): TriggerSourceRefreshPayload
   unfollow(input: UnfollowInput!): UnfollowPayload
   updateAdminRole(input: UpdateAdminRoleInput!): AdminUserPayload
+  updateMyProfile(input: UpdateMyProfileInput!): AdminUserPayload
   updateNotificationPreference(input: UpdateNotificationPreferenceInput!): UpdateNotificationPreferencePayload
   updateProfile(input: UpdateProfileInput!): MePayload
   updateSavedLocation(input: UpdateSavedLocationInput!): SaveLocationPayload
@@ -1055,6 +1067,7 @@ type Query {
   invoices(after: String, first: Int): InvoiceConnection
   legalVersions: [LegalVersion!]
   me: Me
+  myAdminProfile: AdminMe
   myCorrections(after: String, first: Int): MyCorrectionConnection
   notificationPreferences: [NotificationPreference!]
   notifications(after: String, filter: NotificationFilter, first: Int): NotificationConnection
@@ -1402,6 +1415,10 @@ type UnfollowPayload {
 input UpdateAdminRoleInput {
   adminId: UUID!
   role: AdminRole!
+}
+
+input UpdateMyProfileInput {
+  name: String!
 }
 
 input UpdateNotificationPreferenceInput {

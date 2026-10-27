@@ -45,8 +45,10 @@ import { SessionRepo } from '../auth/sessions.repo.js';
 import { SessionService } from '../auth/sessions.js';
 import { AdminAuthRepo } from '../auth/admin-auth.repo.js';
 import { AdminAuthService } from '../auth/admin-auth.js';
+import { Argon2Hasher } from '../auth/passwords.js';
 import { AdminPrincipalCache } from '../auth/admin-principal-cache.js';
 import { startBoss, type Boss } from '../jobs/boss.js';
+import { QUEUES } from '../jobs/queues.js';
 import type { AppServices } from './services.js';
 import type { TxRunner } from '../modules/locations/locations.ports.js';
 
@@ -62,6 +64,7 @@ export interface AppContainer {
   services: AppServices;
   sessions: SessionService;
   adminAuth: AdminAuthService;
+  sendAdminPasswordMail: (job: { adminUserId: string; purpose: 'INVITE' | 'RESET'; url: string }) => Promise<void>;
   devExports?: MemoryExportStore;
   stopJobs: () => Promise<void>;
 }
@@ -274,11 +277,14 @@ export function buildContainer(): AppContainer {
     enqueue: { enqueue: (name, data, options) => jobs.send(name, data, options?.singletonKey) },
     dashboard: new DashboardService(new DashboardRepo(prisma), systemClock),
   });
+  const adminCache = new AdminPrincipalCache();
   const adminAuth = new AdminAuthService({
     store: new AdminAuthRepo(prisma),
     clock: systemClock,
     random: systemRandom,
-    hostedDomain: env.ADMIN_GOOGLE_HD,
+    passwords: new Argon2Hasher(),
+    webUrl: env.PUBLIC_WEB_URL,
+    cache: adminCache,
   });
   const adminUsers = new AdminUsersService({
     store: new AdminUsersRepo(prisma),
@@ -287,11 +293,11 @@ export function buildContainer(): AppContainer {
       revokeSession: (sessionId) => adminAuth.revokeSession(sessionId),
       revokeAll: (adminId) => adminAuth.revokeAll(adminId),
     },
+    auth: adminAuth,
     clock: systemClock,
     random: systemRandom,
     runTx,
-    hostedDomain: env.ADMIN_GOOGLE_HD,
-    cache: new AdminPrincipalCache(),
+    cache: adminCache,
   });
   const devExports =
     env.APP_ENV === 'development' || env.APP_ENV === 'test' ? new MemoryExportStore() : undefined;
@@ -304,6 +310,7 @@ export function buildContainer(): AppContainer {
   return {
     sessions,
     adminAuth,
+    sendAdminPasswordMail: (job) => jobs.send(QUEUES.emailAdminPasswordReset, job),
     ...(devExports ? { devExports } : {}),
     services: {
       civic,

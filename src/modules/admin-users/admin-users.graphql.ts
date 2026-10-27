@@ -34,6 +34,7 @@ const AdminMeRef = builder.objectRef<AdminMeDto>('AdminMe').implement({
     name: t.exposeString('name', { nullable: true }),
     role: t.field({ type: AdminRoleEnum, resolve: (row) => row.role }),
     permissions: t.field({ type: ['String'], resolve: (row) => [...row.permissions] }),
+    sessionExpiresAt: t.field({ type: 'DateTime', resolve: (row) => row.sessionExpiresAt }),
   }),
 });
 
@@ -111,6 +112,64 @@ builder.queryField('adminMe', (t) =>
   }),
 );
 rememberScope('Query', 'adminMe', anyAdmin);
+
+builder.queryField('myAdminProfile', (t) =>
+  t.field({
+    type: AdminMeRef,
+    authScopes: anyAdmin,
+    resolve: (_root, _args, ctx) => ctx.services.adminUsers.myAdminProfile(ctx),
+  }),
+);
+rememberScope('Query', 'myAdminProfile', anyAdmin);
+
+const UpdateMyProfileInput = builder.inputType('UpdateMyProfileInput', {
+  fields: (t) => ({
+    name: t.string({ required: true }),
+  }),
+});
+
+const ChangeMyPasswordInput = builder.inputType('ChangeMyPasswordInput', {
+  fields: (t) => ({
+    currentPassword: t.string({ required: true }),
+    newPassword: t.string({ required: true }),
+  }),
+});
+
+const ChangeMyPasswordPayload = builder
+  .objectRef<{ changed: boolean }>('ChangeMyPasswordPayload')
+  .implement({
+    fields: (t) => ({
+      changed: t.exposeBoolean('changed'),
+    }),
+  });
+
+builder.mutationField('updateMyProfile', (t) =>
+  t.field({
+    type: AdminUserPayload,
+    authScopes: anyAdmin,
+    args: { input: t.arg({ type: UpdateMyProfileInput, required: true }) },
+    resolve: async (_root, args, ctx) => ({
+      adminUser: await ctx.services.adminUsers.updateMyProfile(ctx, { name: args.input.name }),
+    }),
+  }),
+);
+rememberScope('Mutation', 'updateMyProfile', anyAdmin);
+
+builder.mutationField('changeMyPassword', (t) =>
+  t.field({
+    type: ChangeMyPasswordPayload,
+    authScopes: anyAdmin,
+    args: { input: t.arg({ type: ChangeMyPasswordInput, required: true }) },
+    resolve: async (_root, args, ctx) => {
+      await ctx.services.adminUsers.changeMyPassword(ctx, {
+        currentPassword: args.input.currentPassword,
+        newPassword: args.input.newPassword,
+      });
+      return { changed: true };
+    },
+  }),
+);
+rememberScope('Mutation', 'changeMyPassword', anyAdmin);
 
 builder.mutationField('adminSignOut', (t) =>
   t.field({

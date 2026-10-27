@@ -16,6 +16,10 @@ export interface WorkerServices {
   applyBillingEvent?: (ctx: ServiceContext, event: unknown) => Promise<void>;
   sendContact?: (ctx: ServiceContext, id: string) => Promise<void>;
   sendAccountDeletion?: (ctx: ServiceContext, id: string) => Promise<void>;
+  sendAdminPasswordLink?: (
+    ctx: ServiceContext,
+    input: { adminUserId: string; purpose: 'INVITE' | 'RESET'; url: string },
+  ) => Promise<void>;
 }
 
 export function isPermanent(err: unknown): boolean {
@@ -38,6 +42,7 @@ const JOB_PERMISSION: Record<QueueName, Permission> = {
   [QUEUES.accountsPurge]: 'system.retention:run',
   [QUEUES.emailContact]: 'system.notifications:deliver',
   [QUEUES.emailAccountDeletion]: 'system.notifications:deliver',
+  [QUEUES.emailAdminPasswordReset]: 'system.notifications:deliver',
 };
 
 /** Every job handler calls this with the System principal before doing work. */
@@ -108,6 +113,16 @@ export async function registerHandlers(boss: Boss, services: WorkerServices): Pr
     const ctx = jobContext('email.accountDeletion', QUEUES.emailAccountDeletion);
     const id = stringField(data, 'id');
     if (services.sendAccountDeletion && id) await services.sendAccountDeletion(ctx, id);
+  });
+  await work(boss, QUEUES.emailAdminPasswordReset, async (data) => {
+    const ctx = jobContext('email.adminPasswordReset', QUEUES.emailAdminPasswordReset);
+    const record = objectOf(data);
+    const adminUserId = stringField(record, 'adminUserId');
+    const purpose = record.purpose === 'INVITE' || record.purpose === 'RESET' ? record.purpose : undefined;
+    const url = stringField(record, 'url');
+    if (services.sendAdminPasswordLink && adminUserId && purpose && url) {
+      await services.sendAdminPasswordLink(ctx, { adminUserId, purpose, url });
+    }
   });
 }
 

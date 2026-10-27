@@ -4,13 +4,13 @@ import { AdminPrincipalCache } from '../../auth/admin-principal-cache.js';
 import { Authz } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { FakeClock } from '../../lib/clock.js';
-import { LastSuperAdminError, SelfRoleChangeError, ValidationError } from '../../lib/errors.js';
+import { LastSuperAdminError, SelfRoleChangeError } from '../../lib/errors.js';
 import { FakeRandom } from '../../lib/random.js';
 import type { AdminRole, AdminStatus } from '../../generated/prisma/enums.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { ChangeLogEntry } from '../audit/audit.dto.js';
 import type { AuditStore } from '../audit/audit.store.js';
-import { AdminUsersService, type AdminSessionControl } from './admin-users.service.js';
+import { AdminUsersService, type AdminAccountAuth, type AdminSessionControl } from './admin-users.service.js';
 import type { AdminUserRecord, AdminUserWrite, AdminUsersStore } from './admin-users.store.js';
 
 class MemoryAudit implements AuditStore {
@@ -48,6 +48,12 @@ class MemoryAdmins implements AdminUsersStore {
       updatedAt: input.createdAt,
     };
     this.rows.push(row);
+    return Promise.resolve(row);
+  }
+  updateName(_tx: Tx, id: string, name: string) {
+    const row = this.rows.find((item) => item.id === id);
+    if (!row) throw new Error('missing');
+    row.name = name;
     return Promise.resolve(row);
   }
   updateRole(_tx: Tx, id: string, role: AdminRole) {
@@ -101,24 +107,28 @@ describe('AdminUsersService', () => {
       },
     };
     const cache = new AdminPrincipalCache();
+    const auth: AdminAccountAuth = {
+      sessionDeadline: () => Promise.resolve(new Date('2026-04-01T00:30:00.000Z')),
+      changePassword: () => Promise.resolve(),
+    };
     const service = new AdminUsersService({
       store,
       audit: new AuditService(auditStore),
       sessions,
+      auth,
       clock: new FakeClock(new Date('2026-04-01T00:00:00.000Z')),
       random: new FakeRandom(),
       runTx: directTx,
-      hostedDomain: 'qubalink.com',
       cache,
     });
     return { store, auditStore, revoked, cache, service };
   }
 
-  it('rejects an invite outside the workspace domain', async () => {
+  it('invites any unique email', async () => {
     const { service } = setup([]);
-    await expect(
-      service.inviteAdmin(adminCtx(), { email: 'ada@gmail.com', role: 'VIEWER' }),
-    ).rejects.toBeInstanceOf(ValidationError);
+    const created = await service.inviteAdmin(adminCtx(), { email: 'ada@gmail.com', role: 'VIEWER' });
+    expect(created.email).toBe('ada@gmail.com');
+    expect(created.status).toBe('INVITED');
   });
 
   it('invites a workspace admin and writes an audit row', async () => {
@@ -156,5 +166,30 @@ describe('AdminUsersService', () => {
     expect(updated.status).toBe('DEACTIVATED');
     expect(revoked).toEqual([OTHER]);
     expect(auditStore.entries[0]?.action).toBe('admin.deactivated');
+  });
+
+  it('returns the session deadline on adminMe and records a profile rename', async () => {
+    const { auditStore, service } = setup([row({ id: ACTOR, role: 'SUPER_ADMIN', status: 'ACTIVE', name: 'Ada' })]);
+    const me = await service.adminMe(adminCtx());
+    expect(me.sessionExpiresAt.toISOString()).toBe('2026-04-01T00:30:00.000Z');
+    const updated = await service.updateMyProfile(adminCtx(), { name: 'Ada Lovelace' });
+    expect(updated.name).toBe('Ada Lovelace');
+    expect(auditStore.entries[0]).toMatchObject({
+      action: 'admin.profile_updated',
+      before: { name: 'Ada' },
+      after: { name: 'Ada Lovelace' },
+    });
+  });
+
+  it('records a password change without the password', async () => {
+    const { auditStore, service } = setup([row({ id: ACTOR, role: 'SUPER_ADMIN', status: 'ACTIVE' })]);
+    await service.changeMyPassword(adminCtx(), {
+      currentPassword: 'current-password-1',
+      newPassword: 'next-password-long',
+    });
+    const entry = auditStore.entries[0];
+    expect(entry?.action).toBe('admin.password_changed');
+    expect(JSON.stringify(entry)).not.toContain('current-password-1');
+    expect(JSON.stringify(entry)).not.toContain('next-password-long');
   });
 });

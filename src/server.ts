@@ -40,14 +40,7 @@ export async function start(): Promise<void> {
       },
     },
   });
-  const [residentGoogle, appleClient, adminGoogle] = await Promise.all([
-    createGoogleOidc(),
-    createAppleOidc(),
-    createGoogleOidc({
-      clientId: env.ADMIN_GOOGLE_CLIENT_ID,
-      clientSecret: env.ADMIN_GOOGLE_CLIENT_SECRET,
-    }),
-  ]);
+  const [residentGoogle, appleClient] = await Promise.all([createGoogleOidc(), createAppleOidc()]);
   registerAuthRoutes(app, {
     google: new GoogleOAuth(residentGoogle),
     apple: new AppleOAuth(appleClient),
@@ -56,11 +49,8 @@ export async function start(): Promise<void> {
     webUrl: env.PUBLIC_WEB_URL,
   });
   registerAdminAuthRoutes(app, {
-    google: new GoogleOAuth(adminGoogle, {
-      audience: env.ADMIN_GOOGLE_CLIENT_ID,
-    }),
     adminAuth: container.adminAuth,
-    webUrl: env.PUBLIC_WEB_URL,
+    enqueuePasswordMail: (job) => container.sendAdminPasswordMail(job),
   });
   registerUnsubscribeRoutes(app, {
     notifications: container.services.notifications,

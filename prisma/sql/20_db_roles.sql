@@ -59,4 +59,4 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO civiclink_readonly;
 REVOKE UPDATE, DELETE, TRUNCATE ON change_log FROM civiclink_app;
 
 -- Readonly role must not see session secrets.
-REVOKE SELECT ON user_sessions, admin_sessions FROM civiclink_readonly;
+REVOKE SELECT ON user_sessions, admin_sessions, admin_auth_tokens FROM civiclink_readonly;

@@ -35,6 +35,19 @@ export const adminUserFilterSchema = z
   })
   .strict();
 
+export const updateMyProfileSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).refine(noControls, 'Remove unsupported characters.'),
+  })
+  .strict();
+
+export const changeMyPasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(10_000),
+    newPassword: z.string().min(1).max(10_000),
+  })
+  .strict();
+
 export const adminUserListSchema = z
   .object({
     filter: adminUserFilterSchema.nullish(),

@@ -12,6 +12,7 @@ export interface AdminUserWrite {
   name: string | null;
   role: AdminRole;
   invitedBy: string;
+  invitedAt: Date;
   createdAt: Date;
 }
 
@@ -20,6 +21,7 @@ export interface AdminUsersStore {
   findByEmail(email: string): Promise<AdminUserRecord | null>;
   countActiveSuperAdmins(tx: Tx): Promise<number>;
   insert(tx: Tx, input: AdminUserWrite): Promise<AdminUserRecord>;
+  updateName(tx: Tx, id: string, name: string): Promise<AdminUserRecord>;
   updateRole(tx: Tx, id: string, role: AdminRole): Promise<AdminUserRecord>;
   updateStatus(tx: Tx, id: string, status: AdminStatus): Promise<AdminUserRecord>;
   list(query: {

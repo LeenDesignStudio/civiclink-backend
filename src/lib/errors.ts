@@ -25,6 +25,8 @@ export const ERROR_CODES = [
   'OAUTH_FAILED',
   'ADMIN_NOT_ALLOWED',
   'ADMIN_LOCKED',
+  'ADMIN_INVALID_CREDENTIALS',
+  'ADMIN_TOKEN_EXPIRED',
   'SELF_ROLE_CHANGE',
   'LAST_SUPER_ADMIN',
   'BOT_CHECK_FAILED',
@@ -237,6 +239,20 @@ export const CODE_META: Record<ErrorCode, CodeMeta> = {
     expose: true,
     retryable: false,
     logLevel: 'warn',
+  },
+  ADMIN_INVALID_CREDENTIALS: {
+    httpStatus: 401,
+    defaultMessage: 'Email or password is incorrect.',
+    expose: true,
+    retryable: false,
+    logLevel: 'warn',
+  },
+  ADMIN_TOKEN_EXPIRED: {
+    httpStatus: 400,
+    defaultMessage: 'This link has expired.',
+    expose: true,
+    retryable: false,
+    logLevel: 'info',
   },
   SELF_ROLE_CHANGE: {
     httpStatus: 409,
@@ -553,8 +569,25 @@ export class AdminNotAllowedError extends ForbiddenError {
 
 export class AdminLockedError extends ForbiddenError {
   override readonly code = 'ADMIN_LOCKED' as const;
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds = 900) {
+    super(CODE_META.ADMIN_LOCKED.defaultMessage, { details: { retryAfterSeconds } });
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export class AdminInvalidCredentialsError extends UnauthenticatedError {
+  override readonly code = 'ADMIN_INVALID_CREDENTIALS' as const;
   constructor() {
-    super(CODE_META.ADMIN_LOCKED.defaultMessage);
+    super(CODE_META.ADMIN_INVALID_CREDENTIALS.defaultMessage);
+  }
+}
+
+export class AdminTokenExpiredError extends AppError {
+  override readonly code = 'ADMIN_TOKEN_EXPIRED' as const;
+  constructor() {
+    super(CODE_META.ADMIN_TOKEN_EXPIRED.defaultMessage);
   }
 }
 

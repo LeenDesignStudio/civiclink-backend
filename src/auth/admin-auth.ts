@@ -1,94 +1,136 @@
 import type { Clock } from '../lib/clock.js';
 import { sha256Hex } from '../lib/crypto.js';
-import { AdminLockedError, AdminNotAllowedError, OauthFailedError } from '../lib/errors.js';
+import {
+  AdminInvalidCredentialsError,
+  AdminLockedError,
+  AdminTokenExpiredError,
+  NotFoundError,
+  SessionExpiredError,
+  SessionRevokedError,
+  ValidationError,
+} from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import type { RandomSource } from '../lib/random.js';
 import type { AdminPrincipalCache } from './admin-principal-cache.js';
-import type { AdminAuthStore, AdminLoginRecord, AdminPrincipal } from './admin-auth.types.js';
+import type { AdminAuthStore, AdminLoginRecord, AdminPrincipal, AdminTokenView } from './admin-auth.types.js';
+import type { PasswordHasher } from './passwords.js';
+import { passwordRejection } from './passwords.js';
+import type { Tx } from './tx.js';
 
 export const ADMIN_IDLE_MS = 30 * 60 * 1000;
 export const ADMIN_ABSOLUTE_MS = 12 * 60 * 60 * 1000;
 export const ADMIN_LOCK_MS = 15 * 60 * 1000;
 export const ADMIN_MAX_FAILURES = 5;
-
-export interface AdminLoginIdentity {
-  email: string;
-  emailVerified: boolean;
-  subject: string;
-  hd?: string;
-}
+export const ADMIN_RESET_TTL_MS = 60 * 60 * 1000;
+export const ADMIN_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGIN_PASSWORD_MAX = 200;
 
 export interface AdminAuthServiceDeps {
   store: AdminAuthStore;
   clock: Clock;
   random: RandomSource;
-  hostedDomain: string;
+  passwords: PasswordHasher;
+  webUrl: string;
   cache?: AdminPrincipalCache;
+}
+
+export interface AdminPasswordMail {
+  adminUserId: string;
+  purpose: 'INVITE' | 'RESET';
+  url: string;
 }
 
 export class AdminAuthService {
   constructor(private readonly deps: AdminAuthServiceDeps) {}
 
-  async completeLogin(
-    identity: AdminLoginIdentity,
+  async login(
+    input: { email: string; password: string },
     meta?: { userAgent?: string; ipHash?: string; requestId?: string },
   ): Promise<{ token: string; principal: AdminPrincipal }> {
     const now = this.deps.clock.now();
-    const email = identity.email.trim().toLowerCase();
+    const email = input.email.trim().toLowerCase();
+    if (input.password.length > LOGIN_PASSWORD_MAX) {
+      await this.deps.passwords.dummyVerify(input.password.slice(0, LOGIN_PASSWORD_MAX));
+      throw new AdminInvalidCredentialsError();
+    }
     const admin = await this.deps.store.findByEmail(email);
-    if (admin?.lockedUntil && admin.lockedUntil.getTime() > now.getTime()) {
-      throw new AdminLockedError();
+    if (!admin) {
+      await this.deps.passwords.dummyVerify(input.password);
+      throw new AdminInvalidCredentialsError();
     }
-    const hd = identity.hd?.trim().toLowerCase();
-    const domainOk = !hd || hd === this.deps.hostedDomain.trim().toLowerCase();
-    if (!identity.emailVerified || !domainOk) {
-      if (admin) return this.fail(admin, now);
-      throw new AdminNotAllowedError();
+    if (admin.status === 'DEACTIVATED' || !admin.passwordHash) {
+      await this.deps.passwords.dummyVerify(input.password);
+      throw new AdminInvalidCredentialsError();
     }
-    if (!admin) throw new AdminNotAllowedError();
-    if (admin.status === 'DEACTIVATED') return this.fail(admin, now);
-    if (admin.googleSubject && admin.googleSubject !== identity.subject) return this.fail(admin, now);
-    if (!identity.subject) throw new OauthFailedError({ details: { reason: 'sub' } });
+    if (admin.lockedUntil && admin.lockedUntil.getTime() > now.getTime()) {
+      throw new AdminLockedError(secondsUntil(admin.lockedUntil, now));
+    }
+    const matches = await this.deps.passwords.verify(admin.passwordHash, input.password);
+    if (!matches) return this.fail(admin, now);
+    const updated = await this.deps.store.markLogin(admin.id, now);
+    return this.openSession(updated, now, meta);
+  }
 
-    const updated = await this.deps.store.markSuccess(admin.id, identity.subject, now);
-    const token = this.deps.random.token(32);
-    const session = await this.deps.store.insertSession({
-      id: this.deps.random.uuid(),
-      adminId: updated.id,
-      tokenHash: sha256Hex(token),
-      lastActivityAt: now,
-      expiresAt: new Date(now.getTime() + ADMIN_ABSOLUTE_MS),
-      createdAt: now,
-      userAgent: meta?.userAgent ?? null,
-      ipHash: meta?.ipHash ?? null,
-      role: updated.role,
-      status: updated.status,
-      email: updated.email,
-      name: updated.name,
-    });
-    logger.info({ requestId: meta?.requestId, principalId: updated.id }, 'admin sign-in');
-    return {
-      token,
-      principal: {
-        adminId: updated.id,
-        role: updated.role,
-        sessionId: session.id,
-        email: updated.email,
-        name: updated.name,
-      },
-    };
+  async requestPasswordReset(email: string): Promise<AdminPasswordMail | null> {
+    const admin = await this.deps.store.findByEmail(email.trim().toLowerCase());
+    if (!admin || admin.status !== 'ACTIVE' || !admin.passwordHash) return null;
+    return this.issueToken(admin.id, 'RESET', ADMIN_RESET_TTL_MS);
+  }
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    const now = this.deps.clock.now();
+    const view = await this.deps.store.readToken(sha256Hex(token));
+    if (!this.tokenUsable(view, now)) throw new AdminTokenExpiredError();
+    const problem = passwordRejection(password, view.email);
+    if (problem) {
+      throw new ValidationError(problem, [{ path: 'password', code: 'invalid_password', message: problem }]);
+    }
+    const passwordHash = await this.deps.passwords.hash(password);
+    const consumed = await this.deps.store.consumeToken(sha256Hex(token), passwordHash, now);
+    if (!consumed) throw new AdminTokenExpiredError();
+    this.deps.cache?.invalidate(consumed.adminId);
+  }
+
+  async issueInvite(adminId: string): Promise<string> {
+    const admin = await this.deps.store.findById(adminId);
+    if (!admin || admin.status === 'DEACTIVATED') throw new NotFoundError();
+    const issued = await this.issueToken(adminId, 'INVITE', ADMIN_INVITE_TTL_MS);
+    return issued.url;
+  }
+
+  async changePassword(
+    tx: Tx,
+    adminId: string,
+    sessionId: string,
+    currentPassword: string,
+    nextPassword: string,
+  ): Promise<void> {
+    const now = this.deps.clock.now();
+    const admin = await this.deps.store.findById(adminId, tx);
+    if (!admin || admin.status !== 'ACTIVE' || !admin.passwordHash) throw new AdminInvalidCredentialsError();
+    if (currentPassword.length > LOGIN_PASSWORD_MAX) throw new AdminInvalidCredentialsError();
+    const matches = await this.deps.passwords.verify(admin.passwordHash, currentPassword);
+    if (!matches) throw new AdminInvalidCredentialsError();
+    const problem = passwordRejection(nextPassword, admin.email);
+    if (problem) {
+      throw new ValidationError(problem, [{ path: 'newPassword', code: 'invalid_password', message: problem }]);
+    }
+    const passwordHash = await this.deps.passwords.hash(nextPassword);
+    await this.deps.store.setPassword(tx, admin.id, passwordHash, now, false);
+    await this.deps.store.revokeAllForAdmin(admin.id, now, sessionId, tx);
+    this.deps.cache?.invalidate(admin.id);
   }
 
   async resolveAdminPrincipal(token: string | undefined, now: Date): Promise<AdminPrincipal | null> {
     if (!token) return null;
     const session = await this.deps.store.findSessionByHash(sha256Hex(token));
-    if (!session || session.revokedAt) return null;
-    if (session.status !== 'ACTIVE') return null;
+    if (!session) return null;
+    if (session.revokedAt || session.status !== 'ACTIVE') throw new SessionRevokedError();
     const idle = session.lastActivityAt.getTime() + ADMIN_IDLE_MS;
     const absolute = session.createdAt.getTime() + ADMIN_ABSOLUTE_MS;
     if (now.getTime() >= idle || now.getTime() >= absolute || now.getTime() >= session.expiresAt.getTime()) {
       await this.deps.store.revokeSession(session.id, now);
-      return null;
+      throw new SessionExpiredError();
     }
     await this.deps.store.touchSession(session.id, now);
     return {
@@ -100,6 +142,18 @@ export class AdminAuthService {
     };
   }
 
+  async sessionDeadline(sessionId: string): Promise<Date | null> {
+    const session = await this.deps.store.findSessionById(sessionId);
+    if (!session || session.revokedAt || session.status !== 'ACTIVE') return null;
+    return new Date(
+      Math.min(
+        session.lastActivityAt.getTime() + ADMIN_IDLE_MS,
+        session.createdAt.getTime() + ADMIN_ABSOLUTE_MS,
+        session.expiresAt.getTime(),
+      ),
+    );
+  }
+
   async revokeSession(sessionId: string): Promise<void> {
     await this.deps.store.revokeSession(sessionId, this.deps.clock.now());
   }
@@ -107,6 +161,64 @@ export class AdminAuthService {
   async revokeAll(adminId: string): Promise<void> {
     await this.deps.store.revokeAllForAdmin(adminId, this.deps.clock.now());
     this.deps.cache?.invalidate(adminId);
+  }
+
+  private async issueToken(
+    adminId: string,
+    purpose: 'INVITE' | 'RESET',
+    ttlMs: number,
+  ): Promise<AdminPasswordMail> {
+    const now = this.deps.clock.now();
+    const token = this.deps.random.token(32);
+    await this.deps.store.saveToken({
+      id: this.deps.random.uuid(),
+      adminUserId: adminId,
+      purpose,
+      tokenHash: sha256Hex(token),
+      expiresAt: new Date(now.getTime() + ttlMs),
+      now,
+    });
+    return { adminUserId: adminId, purpose, url: passwordLink(this.deps.webUrl, token, purpose) };
+  }
+
+  private tokenUsable(view: AdminTokenView | null, now: Date): view is AdminTokenView {
+    if (!view || view.usedAt || view.expiresAt.getTime() <= now.getTime()) return false;
+    if (view.status === 'DEACTIVATED') return false;
+    if (view.purpose === 'RESET' && view.status !== 'ACTIVE') return false;
+    return true;
+  }
+
+  private async openSession(
+    admin: AdminLoginRecord,
+    now: Date,
+    meta?: { userAgent?: string; ipHash?: string; requestId?: string },
+  ): Promise<{ token: string; principal: AdminPrincipal }> {
+    const token = this.deps.random.token(32);
+    const session = await this.deps.store.insertSession({
+      id: this.deps.random.uuid(),
+      adminId: admin.id,
+      tokenHash: sha256Hex(token),
+      lastActivityAt: now,
+      expiresAt: new Date(now.getTime() + ADMIN_ABSOLUTE_MS),
+      createdAt: now,
+      userAgent: meta?.userAgent ?? null,
+      ipHash: meta?.ipHash ?? null,
+      role: admin.role,
+      status: admin.status,
+      email: admin.email,
+      name: admin.name,
+    });
+    logger.info({ requestId: meta?.requestId, principalId: admin.id }, 'admin sign-in');
+    return {
+      token,
+      principal: {
+        adminId: admin.id,
+        role: admin.role,
+        sessionId: session.id,
+        email: admin.email,
+        name: admin.name,
+      },
+    };
   }
 
   private async fail(admin: AdminLoginRecord, now: Date): Promise<never> {
@@ -118,7 +230,18 @@ export class AdminAuthService {
     const lockedUntil = attempts >= ADMIN_MAX_FAILURES ? new Date(now.getTime() + ADMIN_LOCK_MS) : null;
     await this.deps.store.applyFailure(admin.id, attempts, lockedUntil, now);
     logger.warn({ principalId: admin.id, locked: lockedUntil !== null }, 'admin sign-in rejected');
-    if (lockedUntil) throw new AdminLockedError();
-    throw new AdminNotAllowedError();
+    if (lockedUntil) throw new AdminLockedError(Math.ceil(ADMIN_LOCK_MS / 1000));
+    throw new AdminInvalidCredentialsError();
   }
+}
+
+export function passwordLink(webUrl: string, token: string, purpose: 'INVITE' | 'RESET'): string {
+  const url = new URL('/admin/update-password', webUrl);
+  url.searchParams.set('token', token);
+  if (purpose === 'INVITE') url.searchParams.set('invite', '1');
+  return url.toString();
+}
+
+function secondsUntil(until: Date, now: Date): number {
+  return Math.max(1, Math.ceil((until.getTime() - now.getTime()) / 1000));
 }

@@ -34,6 +34,7 @@ describe('outbound mail', () => {
       contactInbox: 'hello@qubalink.com',
       purgeDays: 30,
       clock: { now: () => NOW },
+      admins: { findForPasswordMail: () => Promise.resolve(null) },
       contacts,
       residents: new MemoryResidents(null),
     });
@@ -59,6 +60,7 @@ describe('outbound mail', () => {
       contactInbox: 'hello@qubalink.com',
       purgeDays: 30,
       clock: { now: () => NOW },
+      admins: { findForPasswordMail: () => Promise.resolve(null) },
       contacts: new MemoryContacts(null),
       residents: new MemoryResidents({ email: 'ada@example.com', purgeAfter: new Date('2026-05-01T00:00:00.000Z') }),
     });
@@ -92,6 +94,7 @@ describe('outbound mail', () => {
       contactInbox: 'hello@qubalink.com',
       purgeDays: 30,
       clock: { now: () => NOW },
+      admins: { findForPasswordMail: () => Promise.resolve(null) },
       contacts,
       residents: new MemoryResidents(null),
     });
@@ -111,6 +114,7 @@ describe('outbound mail', () => {
       contactInbox: 'hello@qubalink.com',
       purgeDays: 30,
       clock: { now: () => NOW },
+      admins: { findForPasswordMail: () => Promise.resolve(null) },
       contacts: new MemoryContacts(null),
       residents: new MemoryResidents(null),
     });
@@ -125,6 +129,7 @@ describe('outbound mail', () => {
       contactInbox: 'hello@qubalink.com',
       purgeDays: 30,
       clock: { now: () => NOW },
+      admins: { findForPasswordMail: () => Promise.resolve(null) },
       contacts: new MemoryContacts({
         name: 'Ada',
         email: 'ada@example.com',
@@ -144,10 +149,30 @@ describe('outbound mail', () => {
       contactInbox: 'hello@qubalink.com',
       purgeDays: 30,
       clock: { now: () => NOW },
+      admins: { findForPasswordMail: () => Promise.resolve(null) },
       contacts: new MemoryContacts(null),
       residents: new MemoryResidents(null),
     });
     await expect(mail.sendAccountDeletion(systemCtx(), USER)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('sends a password link to the admin email and not to the logs', async () => {
+    const email = new FakeEmail();
+    const url = 'https://civic.example/admin/update-password?token=one-time';
+    const mail = new OutboundMail({
+      email,
+      contactInbox: 'hello@qubalink.com',
+      purgeDays: 30,
+      clock: { now: () => NOW },
+      contacts: new MemoryContacts(null),
+      residents: new MemoryResidents(null),
+      admins: { findForPasswordMail: () => Promise.resolve({ email: 'ada@qubalink.com', status: 'ACTIVE' }) },
+    });
+    await mail.sendAdminPasswordLink(systemCtx(), { adminUserId: 'admin-1', purpose: 'RESET', url });
+    expect(email.sent[0]?.to).toBe('ada@qubalink.com');
+    expect(email.sent[0]?.text).toContain(url);
+    expect(email.sent[0]?.text).toContain('60 minutes');
+    expect(email.sent[0]?.text).not.toContain('admin-1');
   });
 });
 

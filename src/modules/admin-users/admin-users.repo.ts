@@ -46,11 +46,16 @@ export class AdminUsersRepo implements AdminUsersStore {
           role: input.role,
           status: 'INVITED',
           invitedBy: input.invitedBy,
+          invitedAt: input.invitedAt,
           createdAt: input.createdAt,
         },
         select,
       }),
     );
+  }
+
+  async updateName(tx: Tx, id: string, name: string): Promise<AdminUserRecord> {
+    return dbCall(() => this.use(tx).adminUser.update({ where: { id }, data: { name }, select }));
   }
 
   async updateRole(tx: Tx, id: string, role: AdminRole): Promise<AdminUserRecord> {

@@ -15,7 +15,7 @@ Default rule: **everything is denied unless this document allows it.**
 |---|---|---|
 | **Anonymous** | none | Any visitor. Can use every public feature; discovery never requires sign-in (SOW A3). |
 | **Resident** | Google or Apple OIDC → access JWT + rotating refresh token | One per person. Sub-states below change what they may do. |
-| **Admin — Viewer** | Google Workspace OIDC + `admin_users` allowlist → admin session | Read-only QubaLink staff. |
+| **Admin — Viewer** | Email + password → admin session cookie | Read-only QubaLink staff. |
 | **Admin — Editor** | same | Maintains civic data, sources, services; resolves corrections. |
 | **Admin — Communications** | same | Writes and sends alerts. |
 | **Admin — Super Admin** | same | Everything admins can do, plus managing admin users. |

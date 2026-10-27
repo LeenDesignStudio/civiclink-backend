@@ -4,8 +4,16 @@ import { logger } from '../lib/logger.js';
 
 export function sendAuthError(reply: FastifyReply, err: unknown, requestId: string): FastifyReply {
   if (isAppError(err)) {
+    const retryAfterSeconds =
+      'retryAfterSeconds' in err && typeof err.retryAfterSeconds === 'number' ? err.retryAfterSeconds : undefined;
+    if (retryAfterSeconds !== undefined) void reply.header('retry-after', String(retryAfterSeconds));
     return reply.status(err.httpStatus).send({
-      error: { code: err.code, message: err.clientMessage(), requestId },
+      error: {
+        code: err.code,
+        message: err.clientMessage(),
+        requestId,
+        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+      },
     });
   }
   logger.error({ requestId }, 'auth request failed');

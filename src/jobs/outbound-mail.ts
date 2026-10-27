@@ -25,6 +25,15 @@ export interface DeletionNoticeStore {
   pendingDeletionNotice(userId: string): Promise<DeletionNotice | null>;
 }
 
+export interface AdminPasswordRecipient {
+  email: string;
+  status: string;
+}
+
+export interface AdminPasswordMailStore {
+  findForPasswordMail(adminUserId: string): Promise<AdminPasswordRecipient | null>;
+}
+
 export class OutboundMail {
   constructor(
     private readonly deps: {
@@ -34,6 +43,7 @@ export class OutboundMail {
       clock: Clock;
       contacts: ContactDeliveryStore;
       residents: DeletionNoticeStore;
+      admins: AdminPasswordMailStore;
     },
   ) {}
 
@@ -67,6 +77,26 @@ export class OutboundMail {
     await this.deliver({
       to: notice.email,
       subject: 'Your CivicLink account is scheduled for deletion',
+      text,
+      html,
+    });
+  }
+
+  async sendAdminPasswordLink(
+    ctx: ServiceContext,
+    input: { adminUserId: string; purpose: 'INVITE' | 'RESET'; url: string },
+  ): Promise<void> {
+    ctx.authz.require('system.notifications:deliver');
+    const admin = await this.deps.admins.findForPasswordMail(input.adminUserId);
+    if (!admin || admin.status === 'DEACTIVATED') throw new NotFoundError();
+    const invite = input.purpose === 'INVITE';
+    const text = invite
+      ? `Set your CivicLink admin password:\n\n${input.url}\n\nThis link expires in 7 days and can be used once.`
+      : `Reset your CivicLink admin password:\n\n${input.url}\n\nThis link expires in 60 minutes and can be used once.`;
+    const html = `<p>${escapeHtml(text).replaceAll('\n', '<br>')}</p>`;
+    await this.deliver({
+      to: admin.email,
+      subject: invite ? 'Set your CivicLink admin password' : 'Reset your CivicLink admin password',
       text,
       html,
     });

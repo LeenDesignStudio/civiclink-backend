@@ -101,11 +101,16 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 
 | Operation | Kind | Permission | Rate | Input | Rules | Errors |
 |---|---|---|---|---|---|---|
-| `GET /admin-auth/google/start`, `GET /admin-auth/google/callback` | REST | — | auth | — | Allowlisted verified email + ACTIVE/INVITED (first login activates INVITED). A Workspace account must present `hd` = `ADMIN_GOOGLE_HD`. A verified allowlisted address with no `hd` (personal Gmail) is accepted. Lockout; session cookie | 302 `/admin/login?error=` `ADMIN_NOT_ALLOWED`, `ADMIN_LOCKED` |
-| `adminMe` | Query | any admin | admin | — | id, email, name, role, permissions[] | `UNAUTHENTICATED` |
+| `POST /admin-auth/login` | REST | — | auth | `{ email, password }` | One error for unknown, wrong, deactivated, or no password. Five failures lock 15 minutes. Success sets lastLoginAt and `__Host-cl_admin`. JSON `{ ok: true }` | `ADMIN_INVALID_CREDENTIALS`, `ADMIN_LOCKED`, `VALIDATION` |
+| `POST /admin-auth/forgot-password` | REST | — | auth | `{ email }` | Always 202 `{ ok: true }`. An active account with a password gets one 60-minute link by email | `VALIDATION` |
+| `POST /admin-auth/reset-password` | REST | — | auth | `{ token, password }` | RESET (60 min) or INVITE (7 days). Sets the password, marks the token used, activates an invite, revokes sessions | `ADMIN_TOKEN_EXPIRED`, `VALIDATION` |
+| `adminMe` | Query | any admin | admin | — | id, email, name, role, permissions[], sessionExpiresAt. Idle or absolute expiry is `SESSION_EXPIRED` | `UNAUTHENTICATED`, `SESSION_EXPIRED`, `SESSION_REVOKED` |
+| `myAdminProfile` | Query | any admin | admin | — | Same fields as `adminMe` | `UNAUTHENTICATED`, `SESSION_EXPIRED` |
+| `updateMyProfile` | Mutation | any admin | admin | `{ name ≤100 }` | Audit `admin.profile_updated` | `VALIDATION` |
+| `changeMyPassword` | Mutation | any admin | admin | `{ currentPassword, newPassword }` | Password rules. Revokes other sessions. Audit `admin.password_changed` without the password | `ADMIN_INVALID_CREDENTIALS`, `VALIDATION` |
 | `adminSignOut` | Mutation | any admin | admin | — | Revoke session | — |
 | `adminUsers` | Query | `admin.users:read` | admin | `filter { role?, status? }, first, after` | — | `FORBIDDEN` |
-| `inviteAdmin` | Mutation | `admin.users:manage` | admin | `{ email (must match ADMIN_GOOGLE_HD), name? ≤100, role }` | status INVITED; audit | `CONFLICT` (exists), `VALIDATION` |
+| `inviteAdmin` | Mutation | `admin.users:manage` | admin | `{ email, name? ≤100, role }` | Any unique email. status INVITED; sets invitedAt; audit | `CONFLICT` (exists), `VALIDATION` |
 | `updateAdminRole` | Mutation | `admin.users:manage` | admin | `{ adminId, role }` | Not self; not last Super Admin; audit; effective next request | `SELF_ROLE_CHANGE`, `LAST_SUPER_ADMIN`, `NOT_FOUND` |
 | `setAdminStatus` | Mutation | `admin.users:manage` | admin | `{ adminId, status: ACTIVE\|DEACTIVATED }` | Not self; not last Super Admin; deactivation revokes sessions; audit | same |
 

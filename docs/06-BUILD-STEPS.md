@@ -300,6 +300,8 @@ Implement exactly section B of docs/05.
 
 ## Step 08 — Admin authentication and admin users
 
+Admin sign-in in this step is historical. BE-1 in docs/10-ALIGNED-BUILD-STEPS.md replaces it with email and password. Resident Google and Apple sign-in are unchanged.
+
 ```
 Read @.cursor/rules/20-security.mdc (admins), @.cursor/rules/60-rbac-authz.mdc (admin rules),
 @docs/02-RBAC-PERMISSIONS.md sections 3–4, @docs/05-API-OPERATIONS.md section G.

@@ -16,7 +16,7 @@ const REFRESH_MAX_AGE_SEC = 30 * 24 * 60 * 60;
 const ADMIN_MAX_AGE_SEC = 12 * 60 * 60;
 
 export interface OAuthCookiePayload {
-  provider: 'google' | 'apple' | 'admin-google';
+  provider: 'google' | 'apple';
   state: string;
   nonce: string;
   codeVerifier: string;
@@ -28,13 +28,13 @@ export interface OAuthCookiePayload {
 
 const oauthSchema = z
   .object({
-    provider: z.enum(['google', 'apple', 'admin-google']),
+    provider: z.enum(['google', 'apple']),
     state: z.string().min(8).max(200),
     nonce: z.string().min(8).max(200),
     codeVerifier: z.string().min(8).max(200),
     intent: z.enum(AUTH_INTENTS),
     returnTo: z.string().min(1).max(2048),
-    webOrigin: z.string().url().optional(),
+    webOrigin: z.url().optional(),
   })
   .strict();
 
