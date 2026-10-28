@@ -15,10 +15,8 @@ Default rule: **everything is denied unless this document allows it.**
 |---|---|---|
 | **Anonymous** | none | Any visitor. Can use every public feature; discovery never requires sign-in (SOW A3). |
 | **Resident** | Google or Apple OIDC → access JWT + rotating refresh token | One per person. Sub-states below change what they may do. |
-| **Admin — Viewer** | Email + password → admin session cookie | Read-only QubaLink staff. |
-| **Admin — Editor** | same | Maintains civic data, sources, services; resolves corrections. |
-| **Admin — Communications** | same | Writes and sends alerts. |
-| **Admin — Super Admin** | same | Everything admins can do, plus managing admin users. |
+| **Admin — Admin / Staff** | Email + password → admin session cookie | Maintains civic data, reviews corrections, and sends alerts. Sources are view only. |
+| **Admin — Super Admin** | same | Everything Admin / Staff can do, plus sources, jurisdiction retire, and Admin Users. |
 | **System** | internal only (worker process, verified Stripe webhook) | Never reachable from GraphQL. |
 
 Resident sub-states (checked on every request):
@@ -66,7 +64,7 @@ QubaLink staff who want resident features use a normal resident account.
 | `admin.dashboard:read` | Work-queue counters on admin home |
 | `admin.civic:read` | Read jurisdictions, offices, officials, terms, services, categories, sources, source runs, pending source changes — including RETIRED records and source record URLs |
 | `admin.civic:write` | Create/update jurisdictions (metadata only), offices, office addresses, officials, office terms, services, service categories; set freshness overrides; tick "notify followers" on a record update |
-| `admin.civic:retire` | Retire (and un-retire) jurisdictions, offices, officials, services |
+| `admin.civic:retire` | Retire (and un-retire) offices, officials, and services. Jurisdiction retire and restore are Super Admin only |
 | `admin.source:write` | Create/update sources (name, URLs, method, schedule, freshness days, active) |
 | `admin.source:run` | Trigger an on-demand source refresh |
 | `admin.source:decide` | Accept/reject pending source changes from page collection |
@@ -95,39 +93,39 @@ QubaLink staff who want resident features use a normal resident account.
 
 `●` = granted, blank = denied. Public permissions are granted to every row and omitted.
 
-| Permission | Resident | Viewer | Editor | Communications | Super Admin | System |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| `self.profile:read` | ● | | | | | |
-| `self.profile:update` | ● | | | | | |
-| `self.session:manage` | ● | | | | | |
-| `self.account:delete` | ● | | | | | |
-| `self.locations:manage` | ● | | | | | |
-| `self.follows:manage` | ● | | | | | |
-| `self.notifications:manage` | ● | | | | | |
-| `self.corrections:create` | ● | | | | | |
-| `self.corrections:read` | ● | | | | | |
-| `self.billing:manage` | ● | | | | | |
-| `admin.dashboard:read` | | ● | ● | ● | ● | |
-| `admin.civic:read` | | ● | ● | ● | ● | |
-| `admin.civic:write` | | | ● | | ● | |
-| `admin.civic:retire` | | | ● | | ● | |
-| `admin.source:write` | | | ● | | ● | |
-| `admin.source:run` | | | ● | | ● | |
-| `admin.source:decide` | | | ● | | ● | |
-| `admin.correction:read` | | ● | ● | ● | ● | |
-| `admin.correction:resolve` | | | ● | | ● | |
-| `admin.alert:read` | | ● | ● | ● | ● | |
-| `admin.alert:write` | | | | ● | ● | |
-| `admin.alert:send` | | | | ● | ● | |
-| `admin.changelog:read` | | ● | ● | ● | ● | |
-| `admin.export:csv` | | ● | ● | ● | ● | |
-| `admin.users:read` | | | | | ● | |
-| `admin.users:manage` | | | | | ● | |
-| `system.pipeline:run` | | | | | | ● |
-| `system.notifications:deliver` | | | | | | ● |
-| `system.billing:sync` | | | | | | ● |
-| `system.retention:run` | | | | | | ● |
-| `system.locations:reresolve` | | | | | | ● |
+| Permission | Resident | Admin / Staff | Super Admin | System |
+|---|:-:|:-:|:-:|:-:|
+| `self.profile:read` | ● | | | |
+| `self.profile:update` | ● | | | |
+| `self.session:manage` | ● | | | |
+| `self.account:delete` | ● | | | |
+| `self.locations:manage` | ● | | | |
+| `self.follows:manage` | ● | | | |
+| `self.notifications:manage` | ● | | | |
+| `self.corrections:create` | ● | | | |
+| `self.corrections:read` | ● | | | |
+| `self.billing:manage` | ● | | | |
+| `admin.dashboard:read` | | ● | ● | |
+| `admin.civic:read` | | ● | ● | |
+| `admin.civic:write` | | ● | ● | |
+| `admin.civic:retire` | | ● | ● | |
+| `admin.source:write` | | | ● | |
+| `admin.source:run` | | | ● | |
+| `admin.source:decide` | | | ● | |
+| `admin.correction:read` | | ● | ● | |
+| `admin.correction:resolve` | | ● | ● | |
+| `admin.alert:read` | | ● | ● | |
+| `admin.alert:write` | | ● | ● | |
+| `admin.alert:send` | | ● | ● | |
+| `admin.changelog:read` | | ● | ● | |
+| `admin.export:csv` | | | ● | |
+| `admin.users:read` | | | ● | |
+| `admin.users:manage` | | | ● | |
+| `system.pipeline:run` | | | | ● |
+| `system.notifications:deliver` | | | | ● |
+| `system.billing:sync` | | | | ● |
+| `system.retention:run` | | | | ● |
+| `system.locations:reresolve` | | | | ● |
 
 ---
 
@@ -164,21 +162,13 @@ QubaLink staff who want resident features use a normal resident account.
 - Bypass plan limits, the correction daily limit, or the duplicate-open-correction rule.
 - Do anything other than `me`, `restoreAccount`, `signOut` while `PENDING_DELETION`; anything other than `me`, `acceptTerms`, `signOut` until Terms are accepted.
 
-### Admin — Viewer
-**Can**: open admin home counters; read every civic record (incl. retired), sources, runs, pending source changes, services, corrections queue and detail, alerts and delivery stats, change history; export list views to CSV.
-**Cannot**: create, edit, retire anything; resolve corrections; trigger source runs; write or send alerts; manage admins.
-
-### Admin — Editor
-**Can**: everything Viewer can, plus create/update/retire jurisdictions (metadata, not geometry), offices, office addresses, officials and terms, services and categories; set freshness overrides with a note; tick "notify followers" when saving a record change (sends a Record Update notification); manage sources and trigger refreshes; accept/reject pending source changes; assign, review, apply and dismiss corrections, add internal notes.
-**Cannot**: write or send alerts; manage admin users; draw or upload boundary geometry (pipeline only); hard-delete anything.
-
-### Admin — Communications
-**Can**: everything Viewer can, plus create, edit and delete draft alerts; preview; send a test to self; send alerts to the followers of one office or official (10 sends / hour).
-**Cannot**: edit civic data, sources or services; resolve corrections; manage admin users; edit or recall an alert after it is sent.
+### Admin — Admin / Staff
+**Can**: open admin home; read every civic record (incl. retired) and sources; create and edit jurisdictions, offices, officials, and services; retire and reactivate offices, officials, and services; review corrections; create and send alerts; read change history; open My Profile and change their own password.
+**Cannot**: retire or restore a jurisdiction (`FORBIDDEN`); add, edit, pause, or retire sources; open Admin Users; export CSV; change their own role or status; hard-delete anything; draw or upload boundary geometry.
 
 ### Admin — Super Admin
-**Can**: everything Editor and Communications can, plus invite admins by email, change roles, deactivate/reactivate admins.
-**Cannot**: demote/deactivate the last active Super Admin (`LAST_SUPER_ADMIN`); change their own role or deactivate themselves (`SELF_ROLE_CHANGE`); read resident PII (see section 5); impersonate residents; edit or delete the change log; hard-delete civic records.
+**Can**: everything Admin / Staff can, plus retire and restore jurisdictions; add, edit, pause, and retire sources; export CSV; invite admins (any unique email, name, and role) and resend the invite; change another admin's name or role; send a password reset; deactivate and reactivate admins. Deactivation revokes that admin's sessions. Admin users are never deleted.
+**Cannot**: demote or deactivate the last active Super Admin (`LAST_SUPER_ADMIN`); change their own role or deactivate themselves (`SELF_ROLE_CHANGE`); read resident PII (see section 5); impersonate residents; edit or delete the change log; hard-delete civic records or admin users.
 
 ### System
 **Can**: run collectors and write civic data/pending changes; deliver notifications; apply verified Stripe events; run retention and purge; re-resolve saved locations; check links.
@@ -213,6 +203,6 @@ transaction: `actor_type` (ADMIN / SYSTEM / SOURCE / RESIDENT), `actor_id` (admi
 Resident-originated entries (e.g. correction submitted) use `actor_type = RESIDENT` and `actor_id = NULL`
 so account purge never needs to modify the log. The table is append-only (DB trigger + revoked grants).
 
-Logged admin actions include: sign-in success/failure, admin invited/role changed/deactivated,
+Logged admin actions include: sign-in success/failure, admin invited/invite resent/user updated/password reset sent/role changed/deactivated,
 every civic create/update/retire, freshness override, source change accept/reject, source run triggered,
 correction assigned/applied/dismissed, alert created/edited/sent, CSV export (list + filter, not contents).

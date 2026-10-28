@@ -1,9 +1,10 @@
 import type { Tx } from '../../auth/tx.js';
 import type { AdminRole, AdminStatus } from '../../generated/prisma/enums.js';
-import type { AdminUserDto } from './admin-users.dto.js';
+import type { AdminUserDto, AdminUserTiles } from './admin-users.dto.js';
 
 export interface AdminUserRecord extends AdminUserDto {
   updatedAt: Date;
+  invitedBy: string | null;
 }
 
 export interface AdminUserWrite {
@@ -20,6 +21,7 @@ export interface AdminUsersStore {
   findById(tx: Tx, id: string): Promise<AdminUserRecord | null>;
   findByEmail(email: string): Promise<AdminUserRecord | null>;
   countActiveSuperAdmins(tx: Tx): Promise<number>;
+  counts(): Promise<AdminUserTiles>;
   insert(tx: Tx, input: AdminUserWrite): Promise<AdminUserRecord>;
   updateName(tx: Tx, id: string, name: string): Promise<AdminUserRecord>;
   updateRole(tx: Tx, id: string, role: AdminRole): Promise<AdminUserRecord>;

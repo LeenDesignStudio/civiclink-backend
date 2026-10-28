@@ -149,7 +149,7 @@ const emptyDashboard: DashboardRepo = {
 };
 
 function editor(): ServiceContext {
-  const principal = { kind: 'admin' as const, adminId: ADMIN, role: 'EDITOR' as const, sessionId: 's' };
+  const principal = { kind: 'admin' as const, adminId: ADMIN, role: 'SUPER_ADMIN' as const, sessionId: 's' };
   return { requestId: 'req', principal, authz: new Authz(principal), ipHash: 'ip' };
 }
 

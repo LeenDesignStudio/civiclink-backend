@@ -25,7 +25,7 @@ function residentContext(): ServiceContext {
 }
 
 function viewerContext(): ServiceContext {
-  const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'VIEWER' as const, sessionId: 'session-1' };
+  const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'ADMIN_STAFF' as const, sessionId: 'session-1' };
   return { requestId: 'req-1', principal, authz: new Authz(principal), ipHash: 'hash' };
 }
 
@@ -492,10 +492,10 @@ describe('CivicService public reads', () => {
       makeCurrent: true,
       notifyFollowers: true,
     };
-    const editor = new Authz({ kind: 'admin', adminId: 'admin-1', role: 'EDITOR', sessionId: 'session-1' });
+    const editor = new Authz({ kind: 'admin', adminId: 'admin-1', role: 'ADMIN_STAFF', sessionId: 'session-1' });
     const editorCtx = {
       requestId: 'req-1',
-      principal: { kind: 'admin' as const, adminId: 'admin-1', role: 'EDITOR' as const, sessionId: 'session-1' },
+      principal: { kind: 'admin' as const, adminId: 'admin-1', role: 'ADMIN_STAFF' as const, sessionId: 'session-1' },
       authz: editor,
       ipHash: 'hash',
     };
@@ -508,7 +508,7 @@ describe('CivicService public reads', () => {
         return Promise.resolve();
       },
     });
-    await expect(service.setOfficeTerm(viewerContext(), input)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setOfficeTerm(residentContext(), input)).rejects.toBeInstanceOf(ForbiddenError);
     const result = await service.setOfficeTerm(editorCtx, input);
     expect(result.term.id).toBe(term.id);
     expect(result.office.name).toBe('Mayor');
@@ -524,5 +524,15 @@ describe('CivicService public reads', () => {
     });
     await expect(failing.setOfficeTerm(editorCtx, input)).rejects.toBeInstanceOf(UpstreamError);
     expect(committed).toBe(false);
+  });
+
+  it('blocks admin staff from retiring or restoring a jurisdiction', async () => {
+    const service = new CivicService({
+      repo: { transaction: () => Promise.reject(new Error('should not run')) } as unknown as CivicStore,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    await expect(service.retireJurisdiction(viewerContext(), { id: JURISDICTION_ID })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.restoreJurisdiction(viewerContext(), { id: JURISDICTION_ID })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

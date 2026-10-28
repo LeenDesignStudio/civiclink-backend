@@ -12,7 +12,20 @@ const select = {
   lastLoginAt: true,
   createdAt: true,
   updatedAt: true,
+  invitedBy: true,
 } as const;
+
+type AdminRow = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: AdminRole;
+  status: AdminStatus;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  invitedBy: string | null;
+};
 
 export class AdminUsersRepo implements AdminUsersStore {
   constructor(private readonly db: Db) {}
@@ -23,11 +36,14 @@ export class AdminUsersRepo implements AdminUsersStore {
   }
 
   async findById(tx: Tx, id: string): Promise<AdminUserRecord | null> {
-    return dbCall(() => this.use(tx).adminUser.findUnique({ where: { id }, select }));
+    const db = this.use(tx);
+    const row = await dbCall(() => db.adminUser.findUnique({ where: { id }, select }));
+    return this.present(db, row);
   }
 
   async findByEmail(email: string): Promise<AdminUserRecord | null> {
-    return dbCall(() => this.db.adminUser.findUnique({ where: { email }, select }));
+    const row = await dbCall(() => this.db.adminUser.findUnique({ where: { email }, select }));
+    return this.present(this.db, row);
   }
 
   async countActiveSuperAdmins(tx: Tx): Promise<number> {
@@ -36,9 +52,22 @@ export class AdminUsersRepo implements AdminUsersStore {
     );
   }
 
+  async counts() {
+    const [total, superAdmins, staff, invited] = await dbCall(() =>
+      Promise.all([
+        this.db.adminUser.count(),
+        this.db.adminUser.count({ where: { role: 'SUPER_ADMIN' } }),
+        this.db.adminUser.count({ where: { role: 'ADMIN_STAFF' } }),
+        this.db.adminUser.count({ where: { status: 'INVITED' } }),
+      ]),
+    );
+    return { total, superAdmins, staff, invited };
+  }
+
   async insert(tx: Tx, input: AdminUserWrite): Promise<AdminUserRecord> {
-    return dbCall(() =>
-      this.use(tx).adminUser.create({
+    const db = this.use(tx);
+    const row = await dbCall(() =>
+      db.adminUser.create({
         data: {
           id: input.id,
           email: input.email,
@@ -52,18 +81,25 @@ export class AdminUsersRepo implements AdminUsersStore {
         select,
       }),
     );
+    return this.presentOne(db, row);
   }
 
   async updateName(tx: Tx, id: string, name: string): Promise<AdminUserRecord> {
-    return dbCall(() => this.use(tx).adminUser.update({ where: { id }, data: { name }, select }));
+    const db = this.use(tx);
+    const row = await dbCall(() => db.adminUser.update({ where: { id }, data: { name }, select }));
+    return this.presentOne(db, row);
   }
 
   async updateRole(tx: Tx, id: string, role: AdminRole): Promise<AdminUserRecord> {
-    return dbCall(() => this.use(tx).adminUser.update({ where: { id }, data: { role }, select }));
+    const db = this.use(tx);
+    const row = await dbCall(() => db.adminUser.update({ where: { id }, data: { role }, select }));
+    return this.presentOne(db, row);
   }
 
   async updateStatus(tx: Tx, id: string, status: AdminStatus): Promise<AdminUserRecord> {
-    return dbCall(() => this.use(tx).adminUser.update({ where: { id }, data: { status }, select }));
+    const db = this.use(tx);
+    const row = await dbCall(() => db.adminUser.update({ where: { id }, data: { status }, select }));
+    return this.presentOne(db, row);
   }
 
   async list(query: {
@@ -95,6 +131,33 @@ export class AdminUsersRepo implements AdminUsersStore {
         this.db.adminUser.count({ where }),
       ]),
     );
-    return { rows, total };
+    const names = await this.namesFor(this.db, rows.map((row) => row.invitedBy));
+    return { rows: rows.map((row) => this.withCreator(row, names)), total };
+  }
+
+  private async present(db: Db, row: AdminRow | null): Promise<AdminUserRecord | null> {
+    if (!row) return null;
+    return this.presentOne(db, row);
+  }
+
+  private async presentOne(db: Db, row: AdminRow): Promise<AdminUserRecord> {
+    const names = await this.namesFor(db, [row.invitedBy]);
+    return this.withCreator(row, names);
+  }
+
+  private async namesFor(db: Db, ids: Array<string | null>): Promise<Map<string, string | null>> {
+    const unique = [...new Set(ids.filter((id): id is string => id !== null))];
+    if (unique.length === 0) return new Map();
+    const found = await dbCall(() =>
+      db.adminUser.findMany({ where: { id: { in: unique } }, select: { id: true, name: true } }),
+    );
+    return new Map(found.map((row) => [row.id, row.name]));
+  }
+
+  private withCreator(row: AdminRow, names: Map<string, string | null>): AdminUserRecord {
+    return {
+      ...row,
+      createdByName: row.invitedBy ? (names.get(row.invitedBy) ?? null) : null,
+    };
   }
 }

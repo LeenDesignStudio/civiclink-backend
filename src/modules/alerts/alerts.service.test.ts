@@ -115,7 +115,7 @@ class MemoryAlerts implements AlertsRepo {
   }
 }
 
-function admin(role: 'VIEWER' | 'COMMUNICATIONS' | 'EDITOR'): ServiceContext {
+function admin(role: 'ADMIN_STAFF' | 'SUPER_ADMIN'): ServiceContext {
   const principal = { kind: 'admin' as const, adminId: ADMIN, role, sessionId: 'session' };
   return { requestId: 'req', principal, authz: new Authz(principal), ipHash: 'ip' };
 }
@@ -144,12 +144,12 @@ describe('AlertsService', () => {
     const repo = new MemoryAlerts();
     repo.followers = 10;
     const alerts = service(repo);
-    const { alert } = await alerts.saveAlertDraft(admin('COMMUNICATIONS'), draftInput);
-    await alerts.sendAlert(admin('COMMUNICATIONS'), { id: alert.id, confirmRecipientCount: 10 });
+    const { alert } = await alerts.saveAlertDraft(admin('ADMIN_STAFF'), draftInput);
+    await alerts.sendAlert(admin('ADMIN_STAFF'), { id: alert.id, confirmRecipientCount: 10 });
     await expect(
-      alerts.sendAlert(admin('COMMUNICATIONS'), { id: alert.id, confirmRecipientCount: 10 }),
+      alerts.sendAlert(admin('ADMIN_STAFF'), { id: alert.id, confirmRecipientCount: 10 }),
     ).rejects.toBeInstanceOf(AlertAlreadySentError);
-    await expect(alerts.saveAlertDraft(admin('COMMUNICATIONS'), { ...draftInput, id: alert.id })).rejects.toBeInstanceOf(
+    await expect(alerts.saveAlertDraft(admin('ADMIN_STAFF'), { ...draftInput, id: alert.id })).rejects.toBeInstanceOf(
       AlertAlreadySentError,
     );
   });
@@ -158,9 +158,9 @@ describe('AlertsService', () => {
     const repo = new MemoryAlerts();
     repo.followers = 10;
     const alerts = service(repo);
-    const { alert } = await alerts.saveAlertDraft(admin('COMMUNICATIONS'), draftInput);
+    const { alert } = await alerts.saveAlertDraft(admin('ADMIN_STAFF'), draftInput);
     await expect(
-      alerts.sendAlert(admin('COMMUNICATIONS'), { id: alert.id, confirmRecipientCount: 20 }),
+      alerts.sendAlert(admin('ADMIN_STAFF'), { id: alert.id, confirmRecipientCount: 20 }),
     ).rejects.toBeInstanceOf(RecipientsChangedError);
     expect(repo.rows[0]?.status).toBe('DRAFT');
   });
@@ -169,19 +169,25 @@ describe('AlertsService', () => {
     const repo = new MemoryAlerts();
     repo.followers = 0;
     const alerts = service(repo);
-    const { alert } = await alerts.saveAlertDraft(admin('COMMUNICATIONS'), draftInput);
+    const { alert } = await alerts.saveAlertDraft(admin('ADMIN_STAFF'), draftInput);
     await expect(
-      alerts.sendAlert(admin('COMMUNICATIONS'), { id: alert.id, confirmRecipientCount: 0 }),
+      alerts.sendAlert(admin('ADMIN_STAFF'), { id: alert.id, confirmRecipientCount: 0 }),
     ).rejects.toBeInstanceOf(NoRecipientsError);
   });
 
-  it('denies sendAlert for a viewer', async () => {
+  it('denies sendAlert for a resident', async () => {
     const repo = new MemoryAlerts();
     repo.followers = 4;
     const alerts = service(repo);
-    const { alert } = await alerts.saveAlertDraft(admin('COMMUNICATIONS'), draftInput);
-    await expect(
-      alerts.sendAlert(admin('VIEWER'), { id: alert.id, confirmRecipientCount: 4 }),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    const { alert } = await alerts.saveAlertDraft(admin('ADMIN_STAFF'), draftInput);
+    const resident = {
+      kind: 'resident' as const,
+      userId: 'user-1',
+      status: 'ACTIVE' as const,
+      termsAccepted: true,
+      sessionId: 'session',
+    };
+    const ctx: ServiceContext = { requestId: 'req', principal: resident, authz: new Authz(resident), ipHash: 'ip' };
+    await expect(alerts.sendAlert(ctx, { id: alert.id, confirmRecipientCount: 4 })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

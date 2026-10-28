@@ -15,7 +15,7 @@ function systemCtx(): ServiceContext {
 }
 
 function viewerCtx(): ServiceContext {
-  const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'VIEWER' as const, sessionId: 's' };
+  const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'ADMIN_STAFF' as const, sessionId: 's' };
   return { requestId: 'job', principal, authz: new Authz(principal), ipHash: 'system' };
 }
 

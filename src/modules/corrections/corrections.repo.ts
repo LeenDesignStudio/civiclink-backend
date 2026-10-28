@@ -344,7 +344,7 @@ export class CorrectionsRepo implements CorrectionsStore {
         select: { role: true },
       }),
     );
-    return admin?.role === 'EDITOR' || admin?.role === 'SUPER_ADMIN';
+    return admin?.role === 'ADMIN_STAFF' || admin?.role === 'SUPER_ADMIN';
   }
 
   async submitterDisplayName(userId: string): Promise<string | null> {

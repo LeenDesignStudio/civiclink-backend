@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ROLE_PERMISSIONS, type Permission, type RoleName } from '../src/authz/permissions.js';
 
-const ROLES: RoleName[] = ['Resident', 'VIEWER', 'EDITOR', 'COMMUNICATIONS', 'SUPER_ADMIN', 'System'];
+const ROLES: RoleName[] = ['Resident', 'ADMIN_STAFF', 'SUPER_ADMIN', 'System'];
 
 function parseMatrix(): Map<Permission, Record<RoleName, boolean>> {
   const doc = readFileSync(new URL('../docs/02-RBAC-PERMISSIONS.md', import.meta.url), 'utf8');

@@ -4,6 +4,7 @@ import type { Clock } from '../../lib/clock.js';
 import { fromZod } from '../../lib/errors.js';
 import {
   ConflictError,
+  ForbiddenError,
   HasActiveChildrenError,
   HasCurrentTermError,
   isAppError,
@@ -268,6 +269,11 @@ export class CivicService {
     if (deps.enqueue) this.enqueue = deps.enqueue;
   }
 
+  /** `admin.civic:retire` covers offices, officials, and services. Jurisdiction retire is Super Admin only. */
+  private requireSuperAdmin(ctx: ServiceContext): void {
+    if (ctx.principal.kind !== 'admin' || ctx.principal.role !== 'SUPER_ADMIN') throw new ForbiddenError();
+  }
+
   async getOffice(ctx: ServiceContext, input: unknown): Promise<OfficeProfile> {
     ctx.authz.require('public.civic:read');
     const query = parseOfficeQuery(input);
@@ -489,8 +495,9 @@ export class CivicService {
     }, 'ReadCommitted');
   }
 
-  retireJurisdiction(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'RETIRED' }> {
+  async retireJurisdiction(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'RETIRED' }> {
     ctx.authz.require('admin.civic:retire');
+    this.requireSuperAdmin(ctx);
     const parsed = parseRetireJurisdiction(input);
     return this.repo.transaction(async (store, tx) => {
       const current = await store.findJurisdiction(parsed.id);
@@ -515,8 +522,9 @@ export class CivicService {
     }, 'ReadCommitted');
   }
 
-  restoreJurisdiction(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'ACTIVE' }> {
+  async restoreJurisdiction(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'ACTIVE' }> {
     ctx.authz.require('admin.civic:retire');
+    this.requireSuperAdmin(ctx);
     const id = parseId(input);
     return this.repo.transaction(async (store, tx) => {
       const current = await store.findJurisdiction(id);

@@ -233,11 +233,13 @@ type AdminOfficialTermOffice {
   status: RecordStatus
 }
 
+type AdminPasswordResetPayload {
+  sent: Boolean
+}
+
 enum AdminRole {
-  COMMUNICATIONS
-  EDITOR
+  ADMIN_STAFF
   SUPER_ADMIN
-  VIEWER
 }
 
 type AdminService {
@@ -308,6 +310,7 @@ enum AdminStatusChange {
 
 type AdminUser {
   createdAt: DateTime
+  createdByName: String
   email: String
   id: ID
   lastLoginAt: DateTime
@@ -332,8 +335,19 @@ input AdminUserFilter {
   status: AdminStatus
 }
 
+input AdminUserIdInput {
+  adminId: UUID!
+}
+
 type AdminUserPayload {
   adminUser: AdminUser
+}
+
+type AdminUserTiles {
+  invited: Int
+  staff: Int
+  superAdmins: Int
+  total: Int
 }
 
 type Alert {
@@ -696,7 +710,7 @@ enum GovLevel {
 
 input InviteAdminInput {
   email: String!
-  name: String
+  name: String!
   role: AdminRole!
 }
 
@@ -836,6 +850,7 @@ type Mutation {
   registerPushSubscription(input: RegisterPushSubscriptionInput!): RegisterPushSubscriptionPayload
   removePushSubscription(input: RemovePushSubscriptionInput!): RemovePushSubscriptionPayload
   requestAccountDeletion(input: RequestAccountDeletionInput!): RequestAccountDeletionPayload
+  resendInvite(input: AdminUserIdInput!): AdminUserPayload
   restoreAccount: MePayload
   restoreJurisdiction(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
   restoreOffice(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
@@ -848,6 +863,7 @@ type Mutation {
   saveAlertDraft(input: SaveAlertDraftInput!): AlertPayload
   saveLocation(input: SaveLocationInput!): SaveLocationPayload
   sendAlert(input: SendAlertInput!): AlertPayload
+  sendPasswordReset(input: AdminUserIdInput!): AdminPasswordResetPayload
   sendTestAlert(input: AlertIdInput!): SendTestAlertPayload
   sendTestNotification: SendTestNotificationPayload
   setAdminStatus(input: SetAdminStatusInput!): AdminUserPayload
@@ -859,6 +875,7 @@ type Mutation {
   triggerSourceRefresh(input: TriggerSourceRefreshInput!): TriggerSourceRefreshPayload
   unfollow(input: UnfollowInput!): UnfollowPayload
   updateAdminRole(input: UpdateAdminRoleInput!): AdminUserPayload
+  updateAdminUser(input: UpdateAdminUserInput!): AdminUserPayload
   updateMyProfile(input: UpdateMyProfileInput!): AdminUserPayload
   updateNotificationPreference(input: UpdateNotificationPreferenceInput!): UpdateNotificationPreferencePayload
   updateProfile(input: UpdateProfileInput!): MePayload
@@ -1058,6 +1075,7 @@ type Query {
   adminServices(after: String, filter: AdminServiceFilter, first: Int, sort: AdminCivicSort): AdminServiceConnection
   adminSource(id: UUID!): AdminSource
   adminSources(after: String, first: Int): SourceConnection
+  adminUserTiles: AdminUserTiles
   adminUsers(after: String, filter: AdminUserFilter, first: Int): AdminUserConnection
   changeLog(after: String, entityId: UUID!, entityType: String!, first: Int): ChangeLogConnection
   civicCard(token: String!): CivicCard
@@ -1415,6 +1433,12 @@ type UnfollowPayload {
 input UpdateAdminRoleInput {
   adminId: UUID!
   role: AdminRole!
+}
+
+input UpdateAdminUserInput {
+  adminId: UUID!
+  name: String
+  role: AdminRole
 }
 
 input UpdateMyProfileInput {

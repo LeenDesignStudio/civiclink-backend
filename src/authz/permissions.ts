@@ -57,46 +57,35 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-export type RoleName = 'Resident' | 'VIEWER' | 'EDITOR' | 'COMMUNICATIONS' | 'SUPER_ADMIN' | 'System';
+export type RoleName = 'Resident' | 'ADMIN_STAFF' | 'SUPER_ADMIN' | 'System';
 
-const viewer: Permission[] = [
+/** Admin / Staff. Jurisdiction retire is Super Admin only and is enforced in the civic service. */
+const adminStaff: Permission[] = [
   'admin.dashboard:read',
   'admin.civic:read',
-  'admin.correction:read',
-  'admin.alert:read',
-  'admin.changelog:read',
-  'admin.export:csv',
-];
-
-const editor: Permission[] = [
-  ...viewer,
   'admin.civic:write',
   'admin.civic:retire',
-  'admin.source:write',
-  'admin.source:run',
-  'admin.source:decide',
+  'admin.correction:read',
   'admin.correction:resolve',
-];
-
-const communications: Permission[] = [
-  ...viewer,
+  'admin.alert:read',
   'admin.alert:write',
   'admin.alert:send',
+  'admin.changelog:read',
 ];
 
 const superAdmin: Permission[] = [
-  ...editor.filter((p) => !communications.includes(p) || editor.includes(p)),
-  'admin.alert:write',
-  'admin.alert:send',
+  ...adminStaff,
+  'admin.source:write',
+  'admin.source:run',
+  'admin.source:decide',
+  'admin.export:csv',
   'admin.users:read',
   'admin.users:manage',
 ];
 
 export const ROLE_PERMISSIONS: Record<RoleName, readonly Permission[]> = {
   Resident: RESIDENT_PERMISSIONS,
-  VIEWER: viewer,
-  EDITOR: editor,
-  COMMUNICATIONS: communications,
-  SUPER_ADMIN: [...new Set(superAdmin)],
+  ADMIN_STAFF: adminStaff,
+  SUPER_ADMIN: superAdmin,
   System: SYSTEM_PERMISSIONS,
 };

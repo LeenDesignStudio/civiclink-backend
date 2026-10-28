@@ -40,7 +40,7 @@ const USER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const SESSION_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const WHEN = '2026-01-15T00:00:00.000Z';
 
-const CALLERS = ['Resident', 'VIEWER', 'EDITOR', 'COMMUNICATIONS', 'SUPER_ADMIN'] as const satisfies readonly RoleName[];
+const CALLERS = ['Resident', 'ADMIN_STAFF', 'SUPER_ADMIN'] as const satisfies readonly RoleName[];
 type Caller = (typeof CALLERS)[number];
 
 interface Fixture {
@@ -79,7 +79,7 @@ function principal(role: Caller): Principal {
 }
 
 function editorContext(): ServiceContext {
-  const who = principal('EDITOR');
+  const who = principal('SUPER_ADMIN');
   return { requestId: 'req-int', principal: who, authz: new Authz(who), ipHash: 'hash' };
 }
 
@@ -421,7 +421,7 @@ describe('section H admin civic API', () => {
   let owner: PrismaClient;
   let server: FastifyInstance;
   let sources: SourcesService;
-  let current: Principal = principal('EDITOR');
+  let current: Principal = principal('SUPER_ADMIN');
   let fx: Fixture;
 
   beforeAll(async () => {
@@ -519,7 +519,7 @@ describe('section H admin civic API', () => {
   for (const operation of operations()) {
     it(`${operation.name} succeeds for an editor`, async () => {
       const variables = operation.success(fx);
-      const result = await execute('EDITOR', operation.query, variables);
+      const result = await execute('SUPER_ADMIN', operation.query, variables);
       expect(result.body.errors, JSON.stringify(result.body.errors)).toBeUndefined();
       const value = result.body.data?.[operation.name];
       expect(value).toBeTruthy();
@@ -547,7 +547,7 @@ describe('section H admin civic API', () => {
       }
       const query = operation.invalidCode === 'BAD_REQUEST' ? (documentInvalid[operation.name] ?? operation.query) : operation.query;
       const variables = operation.invalidCode === 'BAD_REQUEST' ? undefined : operation.invalid(fx);
-      const result = await execute('EDITOR', query, variables);
+      const result = await execute('SUPER_ADMIN', query, variables);
       expectCode(result, operation.invalidCode ?? 'VALIDATION');
     });
   }

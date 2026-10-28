@@ -26,7 +26,6 @@ import { CorrectionsService } from './corrections.service.js';
 const USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const EDITOR = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const VIEWER = 'vvvvvvvv-vvvv-4vvv-8vvv-vvvvvvvvvvvv';
-const COMMS = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 const passthrough: TxRunner = (fn) => fn(undefined);
 
@@ -180,7 +179,7 @@ class MemoryAudit implements AuditRecorder {
 
 function principal(
   kind: 'resident' | 'admin',
-  role: 'EDITOR' | 'VIEWER' | 'COMMUNICATIONS' = 'EDITOR',
+  role: 'ADMIN_STAFF' | 'SUPER_ADMIN' = 'ADMIN_STAFF',
   id = EDITOR,
 ): ServiceContext {
   if (kind === 'resident') {
@@ -283,13 +282,13 @@ describe('CorrectionsService', () => {
     expect(dismissed.correction.status).toBe('DISMISSED');
     expect(dismissed.correction.dismissNote).toContain('Not enough');
 
-    const detail = await svc.adminCorrection(principal('admin', 'VIEWER', VIEWER), { id: created.correction.id });
+    const detail = await svc.adminCorrection(principal('admin', 'ADMIN_STAFF', VIEWER), { id: created.correction.id });
     expect(detail.submitterDisplayName).toBe('Ada Lovelace');
     expect(JSON.stringify(detail)).not.toContain('email');
     expect(audit.entries.filter((entry) => entry.action === 'APPLY')).toHaveLength(0);
   });
 
-  it('writes two audit rows when applying and blocks viewers and communications', async () => {
+  it('writes two audit rows when applying and blocks a resident from resolving', async () => {
     const { svc, audit } = harness();
     const created = await svc.submitCorrection(principal('resident'), {
       entityType: 'OFFICE',
@@ -299,14 +298,8 @@ describe('CorrectionsService', () => {
     });
     expect(audit.entries[0]).toMatchObject({ actorType: 'RESIDENT', actorId: null, action: 'SUBMIT' });
     await expect(
-      svc.markCorrectionInReview(principal('admin', 'VIEWER', VIEWER), { id: created.correction.id }),
+      svc.markCorrectionInReview(principal('resident'), { id: created.correction.id }),
     ).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(
-      svc.dismissCorrection(principal('admin', 'COMMUNICATIONS', COMMS), {
-        id: created.correction.id,
-        reason: 'DUPLICATE',
-      }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await svc.applyCorrection(principal('admin'), { id: created.correction.id, value: 'Updated name' });
     const applied = audit.entries.filter((entry) => entry.action === 'APPLY' || entry.action === 'UPDATE');
     expect(applied).toHaveLength(2);

@@ -109,10 +109,14 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 | `updateMyProfile` | Mutation | any admin | admin | `{ name ≤100 }` | Audit `admin.profile_updated` | `VALIDATION` |
 | `changeMyPassword` | Mutation | any admin | admin | `{ currentPassword, newPassword }` | Password rules. Revokes other sessions. Audit `admin.password_changed` without the password | `ADMIN_INVALID_CREDENTIALS`, `VALIDATION` |
 | `adminSignOut` | Mutation | any admin | admin | — | Revoke session | — |
-| `adminUsers` | Query | `admin.users:read` | admin | `filter { role?, status? }, first, after` | — | `FORBIDDEN` |
-| `inviteAdmin` | Mutation | `admin.users:manage` | admin | `{ email, name? ≤100, role }` | Any unique email. status INVITED; sets invitedAt; audit | `CONFLICT` (exists), `VALIDATION` |
+| `adminUsers` | Query | `admin.users:read` | admin | `filter { role?, status? }, first, after` | Each node includes `createdByName` (inviter's name) and `createdAt` | `FORBIDDEN` |
+| `adminUserTiles` | Query | `admin.users:read` | admin | — | `{ total, superAdmins, staff, invited }` | `FORBIDDEN` |
+| `inviteAdmin` | Mutation | `admin.users:manage` | admin | `{ name ≤100, email, role }` | Any unique email. status INVITED; sets invitedAt; emails the invite link; audit. Never deletes an admin | `CONFLICT` (exists), `VALIDATION` |
+| `updateAdminUser` | Mutation | `admin.users:manage` | admin | `{ adminId, role?, name? }` | At least one of role or name. Not own role; not last Super Admin; audit | `SELF_ROLE_CHANGE`, `LAST_SUPER_ADMIN`, `NOT_FOUND`, `VALIDATION` |
+| `resendInvite` | Mutation | `admin.users:manage` | admin | `{ adminId }` | Only while status is INVITED. Emails a new invite link; audit omits the URL | `NOT_FOUND`, `VALIDATION` |
+| `sendPasswordReset` | Mutation | `admin.users:manage` | admin | `{ adminId }` | Active admin with a password. Emails a reset link; audit omits the URL | `NOT_FOUND`, `VALIDATION` |
 | `updateAdminRole` | Mutation | `admin.users:manage` | admin | `{ adminId, role }` | Not self; not last Super Admin; audit; effective next request | `SELF_ROLE_CHANGE`, `LAST_SUPER_ADMIN`, `NOT_FOUND` |
-| `setAdminStatus` | Mutation | `admin.users:manage` | admin | `{ adminId, status: ACTIVE\|DEACTIVATED }` | Not self; not last Super Admin; deactivation revokes sessions; audit | same |
+| `setAdminStatus` | Mutation | `admin.users:manage` | admin | `{ adminId, status: ACTIVE\|DEACTIVATED }` | Not self; not last Super Admin; deactivation revokes sessions; audit. Reactivate does not delete history | same |
 
 ## H. Admin — dashboard, civic data, sources, services
 
@@ -121,7 +125,7 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 | `adminDashboardCounts` | Query | `admin.dashboard:read` | — | Corrections by status/age>5d, stale records per level, failed source runs, pending source changes, alerts last 7d + failures | — |
 | `adminJurisdictions` / `adminJurisdiction(id)` | Query | `admin.civic:read` | `filter { level?, type?, state?, status?, freshness?, q? ≤100 }`, `sort: NEWEST\|NAME`, first/after | Includes RETIRED, boundary vintage, has-boundary flag (no geometry), sourceRecordUrl. Connection includes totalCount. NAME orders by name | `NOT_FOUND` |
 | `upsertJurisdiction` | Mutation | `admin.civic:write` | `{ id?, name 2–150, level, type, subtype?, parentId? (required unless NATION; no cycles), districtCode? ≤40, geoid? ≤40, state? ^[A-Z]{2}$, website? URL, sourceId, sourceRecordUrl?, lastUpdatedAt, freshnessOverride, freshnessNote? (required if override≠NONE) }` | Geometry not editable; audit | `VALIDATION`, `CONFLICT` (type+geoid), `JURISDICTION_CYCLE` |
-| `retireJurisdiction` / `restoreJurisdiction` | Mutation | `admin.civic:retire` | `{ id, retireActiveOffices?: bool }` | If active offices exist and flag false → error | `HAS_ACTIVE_CHILDREN` |
+| `retireJurisdiction` / `restoreJurisdiction` | Mutation | `admin.civic:retire` | `{ id, retireActiveOffices?: bool }` | Super Admin only. If active offices exist and flag false → error | `FORBIDDEN`, `HAS_ACTIVE_CHILDREN` |
 | `adminOffices` / `adminOffice(id)` | Query | `admin.civic:read` | `filter { level?, jurisdictionId?, vacantOnly?, staleOnly?, status?, q? }`, `sort: NEWEST\|NAME`, first/after | Includes followerCount (aggregate) and totalCount. NAME orders by name | — |
 | `upsertOffice` | Mutation | `admin.civic:write` | `{ id?, jurisdictionId, name 2–150, seatLabel? ≤60, selectionMethod, displayOrder 0–10000, whyTemplate? ≤300 (tokens: {jurisdiction},{office},{district}), phone? E.164, email?, website?, contactUrl?, addresses[≤5] {label,street,city,state,zip ^\d{5}(-\d{4})?$,phone?,hours?}, holderUnknown, sourceId, sourceRecordUrl?, lastUpdatedAt, freshnessOverride, freshnessNote?, notifyFollowers?: bool }` | Slug generated, unique; audit; if notifyFollowers and contact/holder fields changed → enqueue RECORD_UPDATE fan-out | `VALIDATION`, `NOT_FOUND` |
 | `retireOffice` / `restoreOffice` | Mutation | `admin.civic:retire` | `{ id }` | Retired offices hidden from cards; follows kept, hidden | `NOT_FOUND` |

@@ -294,6 +294,13 @@ export function buildContainer(): AppContainer {
       revokeAll: (adminId) => adminAuth.revokeAll(adminId),
     },
     auth: adminAuth,
+    mail: {
+      issueInvite: (adminId) => adminAuth.issueInvite(adminId),
+      requestPasswordReset: (email) => adminAuth.requestPasswordReset(email),
+      enqueue: async (job) => {
+        await jobs.send(QUEUES.emailAdminPasswordReset, job);
+      },
+    },
     clock: systemClock,
     random: systemRandom,
     runTx,

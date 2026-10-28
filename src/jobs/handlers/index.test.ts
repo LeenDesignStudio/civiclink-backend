@@ -18,7 +18,7 @@ describe('job permissions', () => {
     const viewer = {
       kind: 'admin' as const,
       adminId: 'admin-1',
-      role: 'VIEWER' as const,
+      role: 'ADMIN_STAFF' as const,
       sessionId: 'session-1',
     };
     const denied: ServiceContext = {

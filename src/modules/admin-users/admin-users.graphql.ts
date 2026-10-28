@@ -1,10 +1,10 @@
 import { builder, rememberScope } from '../../graphql/builder.js';
 import { clearAdminCookie } from '../../auth/cookies.js';
 import { PageInfoRef } from '../audit/audit.graphql.js';
-import type { AdminMeDto, AdminUserDto } from './admin-users.dto.js';
+import type { AdminMeDto, AdminUserDto, AdminUserTiles } from './admin-users.dto.js';
 
 const AdminRoleEnum = builder.enumType('AdminRole', {
-  values: ['VIEWER', 'EDITOR', 'COMMUNICATIONS', 'SUPER_ADMIN'] as const,
+  values: ['SUPER_ADMIN', 'ADMIN_STAFF'] as const,
 });
 
 const AdminStatusEnum = builder.enumType('AdminStatus', {
@@ -24,6 +24,7 @@ const AdminUserRef = builder.objectRef<AdminUserDto>('AdminUser').implement({
     status: t.field({ type: AdminStatusEnum, resolve: (row) => row.status }),
     lastLoginAt: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.lastLoginAt }),
     createdAt: t.field({ type: 'DateTime', resolve: (row) => row.createdAt }),
+    createdByName: t.exposeString('createdByName', { nullable: true }),
   }),
 });
 
@@ -64,8 +65,22 @@ const AdminUserConnection = builder
 const InviteAdminInput = builder.inputType('InviteAdminInput', {
   fields: (t) => ({
     email: t.string({ required: true }),
-    name: t.string({ required: false }),
+    name: t.string({ required: true }),
     role: t.field({ type: AdminRoleEnum, required: true }),
+  }),
+});
+
+const UpdateAdminUserInput = builder.inputType('UpdateAdminUserInput', {
+  fields: (t) => ({
+    adminId: t.field({ type: 'UUID', required: true }),
+    role: t.field({ type: AdminRoleEnum, required: false }),
+    name: t.string({ required: false }),
+  }),
+});
+
+const AdminUserIdInput = builder.inputType('AdminUserIdInput', {
+  fields: (t) => ({
+    adminId: t.field({ type: 'UUID', required: true }),
   }),
 });
 
@@ -209,6 +224,24 @@ builder.queryField('adminUsers', (t) =>
 );
 rememberScope('Query', 'adminUsers', usersRead);
 
+const AdminUserTilesRef = builder.objectRef<AdminUserTiles>('AdminUserTiles').implement({
+  fields: (t) => ({
+    total: t.exposeInt('total'),
+    superAdmins: t.exposeInt('superAdmins'),
+    staff: t.exposeInt('staff'),
+    invited: t.exposeInt('invited'),
+  }),
+});
+
+builder.queryField('adminUserTiles', (t) =>
+  t.field({
+    type: AdminUserTilesRef,
+    authScopes: usersRead,
+    resolve: (_root, _args, ctx) => ctx.services.adminUsers.adminUserTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminUserTiles', usersRead);
+
 const usersManage = { permission: 'admin.users:manage' as const };
 
 builder.mutationField('inviteAdmin', (t) =>
@@ -220,12 +253,61 @@ builder.mutationField('inviteAdmin', (t) =>
       adminUser: await ctx.services.adminUsers.inviteAdmin(ctx, {
         email: args.input.email,
         role: args.input.role,
-        ...(args.input.name != null ? { name: args.input.name } : {}),
+        name: args.input.name,
       }),
     }),
   }),
 );
 rememberScope('Mutation', 'inviteAdmin', usersManage);
+
+builder.mutationField('updateAdminUser', (t) =>
+  t.field({
+    type: AdminUserPayload,
+    authScopes: usersManage,
+    args: { input: t.arg({ type: UpdateAdminUserInput, required: true }) },
+    resolve: async (_root, args, ctx) => ({
+      adminUser: await ctx.services.adminUsers.updateAdminUser(ctx, {
+        adminId: args.input.adminId,
+        ...(args.input.role != null ? { role: args.input.role } : {}),
+        ...(args.input.name != null ? { name: args.input.name } : {}),
+      }),
+    }),
+  }),
+);
+rememberScope('Mutation', 'updateAdminUser', usersManage);
+
+builder.mutationField('resendInvite', (t) =>
+  t.field({
+    type: AdminUserPayload,
+    authScopes: usersManage,
+    args: { input: t.arg({ type: AdminUserIdInput, required: true }) },
+    resolve: async (_root, args, ctx) => ({
+      adminUser: await ctx.services.adminUsers.resendInvite(ctx, args.input),
+    }),
+  }),
+);
+rememberScope('Mutation', 'resendInvite', usersManage);
+
+const AdminPasswordResetPayload = builder
+  .objectRef<{ sent: boolean }>('AdminPasswordResetPayload')
+  .implement({
+    fields: (t) => ({
+      sent: t.exposeBoolean('sent'),
+    }),
+  });
+
+builder.mutationField('sendPasswordReset', (t) =>
+  t.field({
+    type: AdminPasswordResetPayload,
+    authScopes: usersManage,
+    args: { input: t.arg({ type: AdminUserIdInput, required: true }) },
+    resolve: async (_root, args, ctx) => {
+      await ctx.services.adminUsers.sendPasswordReset(ctx, args.input);
+      return { sent: true };
+    },
+  }),
+);
+rememberScope('Mutation', 'sendPasswordReset', usersManage);
 
 builder.mutationField('updateAdminRole', (t) =>
   t.field({

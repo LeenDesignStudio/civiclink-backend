@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-const ROLES = ['VIEWER', 'EDITOR', 'COMMUNICATIONS', 'SUPER_ADMIN'] as const;
+const ROLES = ['ADMIN_STAFF', 'SUPER_ADMIN'] as const;
 type AdminRoleFlag = (typeof ROLES)[number];
 
 function flag(name: string): string | undefined {

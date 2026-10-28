@@ -9,6 +9,14 @@ export interface AdminUserDto {
   status: AdminStatus;
   lastLoginAt: Date | null;
   createdAt: Date;
+  createdByName: string | null;
+}
+
+export interface AdminUserTiles {
+  total: number;
+  superAdmins: number;
+  staff: number;
+  invited: number;
 }
 
 export interface AdminMeDto extends AdminUserDto {

@@ -220,10 +220,8 @@ enum InvoiceStatus {
 }
 
 enum AdminRole {
-  VIEWER
-  EDITOR
-  COMMUNICATIONS
   SUPER_ADMIN
+  ADMIN_STAFF
 }
 
 enum AdminStatus {

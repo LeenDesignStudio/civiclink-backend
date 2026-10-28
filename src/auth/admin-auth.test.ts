@@ -253,11 +253,11 @@ describe('admin password login', () => {
   });
 
   it('reads the current role and reports the session deadline', async () => {
-    const { service, store } = setup(admin({ role: 'EDITOR' as AdminRole }));
+    const { service, store } = setup(admin({ role: 'ADMIN_STAFF' as AdminRole }));
     const { token } = await service.login({ email: 'ada@qubalink.com', password: PASSWORD });
     if (!store.admin) throw new Error('missing admin');
-    store.admin.role = 'VIEWER';
-    expect((await service.resolveAdminPrincipal(token, T0))?.role).toBe('VIEWER');
+    store.admin.role = 'SUPER_ADMIN';
+    expect((await service.resolveAdminPrincipal(token, T0))?.role).toBe('SUPER_ADMIN');
     const sessionId = store.sessions[0]?.id ?? '';
     const deadline = await service.sessionDeadline(sessionId);
     expect(deadline?.toISOString()).toBe(new Date(T0.getTime() + ADMIN_IDLE_MS).toISOString());

@@ -26,7 +26,7 @@ describe('csv injection prefix', () => {
       store,
       audit: { record: () => Promise.resolve() },
     });
-    const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'VIEWER' as const, sessionId: 'session-1' };
+    const principal = { kind: 'admin' as const, adminId: 'admin-1', role: 'SUPER_ADMIN' as const, sessionId: 'session-1' };
     const ctx: ServiceContext = {
       requestId: 'req-1',
       principal,

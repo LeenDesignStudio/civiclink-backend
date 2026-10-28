@@ -166,7 +166,7 @@ export async function createServiceLink(db: PrismaClient, serviceId: string, jur
 
 export async function createAdminUser(db: PrismaClient) {
   return db.adminUser.create({
-    data: { email: `admin-${tag()}@qubalink.com`, role: 'EDITOR', status: 'ACTIVE' },
+    data: { email: `admin-${tag()}@qubalink.com`, role: 'ADMIN_STAFF', status: 'ACTIVE' },
   });
 }
 
