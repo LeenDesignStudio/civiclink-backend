@@ -33,7 +33,9 @@ const upsertSchema = z
     termsUrl: https,
     method: z.enum(['API', 'BULK', 'PAGE_COLLECTION', 'MANUAL']),
     schedule: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'ON_DEMAND']),
-    freshnessDays: z.number().int().min(1).max(3650),
+    freshnessDays: z.number().int().min(1).max(730),
+    kind: z.enum(['API', 'BULK_EXPORT', 'SCHEDULED_PAGE', 'MANUAL']).optional(),
+    notes: z.string().trim().max(500).nullish(),
     levels: z.array(z.enum(['FEDERAL', 'STATE', 'COUNTY', 'MUNICIPAL', 'EDUCATION', 'SPECIAL'])).max(6),
     collectorKey: z.string().trim().min(1).max(80).optional(),
     active: z.boolean(),
@@ -134,6 +136,8 @@ export class SourcesService {
           method: parsed.method,
           schedule: parsed.schedule,
           freshnessDays: parsed.freshnessDays,
+          ...(parsed.kind ? { kind: parsed.kind } : {}),
+          ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
           levels: parsed.levels,
           collectorKey: parsed.collectorKey ?? null,
           active: parsed.active,
@@ -227,6 +231,60 @@ export class SourcesService {
       return { ...existing, decision: parsed.decision };
     });
     return { change };
+  }
+
+  pauseSource(ctx: ServiceContext, input: unknown): Promise<{ source: SourceRow }> {
+    return this.setSourceActive(ctx, input, false, 'source.pause');
+  }
+
+  resumeSource(ctx: ServiceContext, input: unknown): Promise<{ source: SourceRow }> {
+    return this.setSourceActive(ctx, input, true, 'source.resume');
+  }
+
+  private async setSourceActive(
+    ctx: ServiceContext,
+    input: unknown,
+    active: boolean,
+    action: string,
+  ): Promise<{ source: SourceRow }> {
+    ctx.authz.require('admin.source:write');
+    const admin = ctx.authz.requireAdmin();
+    const parsed = parse(idSchema, input);
+    const source = await this.deps.store.findSource(parsed.sourceId);
+    if (!source) throw new NotFoundError();
+    const saved = await this.withTx(async (tx) => {
+      const row = await this.deps.store.saveSource(
+        {
+          id: source.id,
+          name: source.name,
+          publisher: source.publisher,
+          url: source.url,
+          termsUrl: source.termsUrl,
+          method: source.method,
+          schedule: source.schedule,
+          freshnessDays: source.freshnessDays,
+          levels: source.levels,
+          collectorKey: source.collectorKey,
+          active,
+          ...(source.kind ? { kind: source.kind } : {}),
+          ...(source.notes !== undefined ? { notes: source.notes } : {}),
+          config: source.config,
+        },
+        this.clock.now(),
+      );
+      await this.deps.audit.record(tx, {
+        actorType: 'ADMIN',
+        actorId: admin.adminId,
+        entityType: 'source',
+        entityId: row.id,
+        action,
+        before: { active: source.active, recordStatus: source.recordStatus ?? null },
+        after: { active, recordStatus: row.recordStatus ?? null },
+        requestId: ctx.requestId,
+      });
+      return row;
+    });
+    return { source: saved };
   }
 
   async adminDashboardCounts(ctx: ServiceContext): Promise<DashboardCounts> {

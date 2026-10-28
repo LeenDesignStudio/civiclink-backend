@@ -51,6 +51,25 @@ export const adminCorrectionsSchema = z
         entityType: z.enum(['JURISDICTION', 'OFFICE', 'OFFICIAL', 'SERVICE']).optional(),
         olderThanDays: z.number().int().positive().max(3650).optional(),
         assignedToMe: z.boolean().optional(),
+        q: z.string().trim().min(1).max(100).optional(),
+        field: z
+          .enum([
+            'OFFICEHOLDER_NAME',
+            'TITLE',
+            'PARTY',
+            'PHONE',
+            'EMAIL',
+            'WEBSITE',
+            'OFFICE_ADDRESS',
+            'DISTRICT',
+            'DOES_NOT_APPLY',
+            'SERVICE_DETAILS',
+            'OTHER',
+          ])
+          .optional(),
+        recordType: z.enum(['JURISDICTION', 'OFFICE', 'OFFICIAL', 'SERVICE']).optional(),
+        submittedFrom: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).optional(),
+        submittedTo: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).optional(),
       })
       .strict()
       .optional(),
@@ -90,7 +109,7 @@ export const applyCorrectionSchema = z
 export const dismissCorrectionSchema = z
   .object({
     id: z.uuid(),
-    reason: z.enum(['ALREADY_CORRECT', 'INSUFFICIENT_EVIDENCE', 'OUT_OF_SCOPE', 'DUPLICATE', 'OTHER']),
+    reason: z.enum(['CANT_VERIFY', 'SOURCE_CORRECT', 'DUPLICATE', 'OUT_OF_SCOPE', 'OTHER']),
     note: plain(1, 500).optional(),
   })
   .strict()

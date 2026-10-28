@@ -38,8 +38,6 @@ import { AdminUsersService } from '../modules/admin-users/admin-users.service.js
 import { SourcesService } from '../modules/sources/sources.service.js';
 import { DashboardRepo } from '../modules/sources/dashboard.repo.js';
 import { DashboardService } from '../modules/sources/dashboard.js';
-import { ExportService } from '../modules/sources/export.js';
-import { MemoryExportStore, PrismaExportReader, S3ExportStore } from '../modules/sources/export.store.js';
 import { PipelineRepo } from '../modules/pipeline/pipeline.repo.js';
 import { SessionRepo } from '../auth/sessions.repo.js';
 import { SessionService } from '../auth/sessions.js';
@@ -65,7 +63,6 @@ export interface AppContainer {
   sessions: SessionService;
   adminAuth: AdminAuthService;
   sendAdminPasswordMail: (job: { adminUserId: string; purpose: 'INVITE' | 'RESET'; url: string }) => Promise<void>;
-  devExports?: MemoryExportStore;
   stopJobs: () => Promise<void>;
 }
 
@@ -306,19 +303,10 @@ export function buildContainer(): AppContainer {
     runTx,
     cache: adminCache,
   });
-  const devExports =
-    env.APP_ENV === 'development' || env.APP_ENV === 'test' ? new MemoryExportStore() : undefined;
-  const exportsService = new ExportService({
-    reader: new PrismaExportReader(prisma),
-    store: devExports ?? new S3ExportStore(env.S3_BUCKET_EXPORTS, env.AWS_REGION, env.S3_EXPORTS_KMS_KEY_ID),
-    audit,
-    withTx: runTx,
-  });
   return {
     sessions,
     adminAuth,
     sendAdminPasswordMail: (job) => jobs.send(QUEUES.emailAdminPasswordReset, job),
-    ...(devExports ? { devExports } : {}),
     services: {
       civic,
       lookup,
@@ -333,7 +321,6 @@ export function buildContainer(): AppContainer {
       audit,
       contact,
       sources,
-      exports: exportsService,
     },
     stopJobs: () => jobs.stop(),
   };

@@ -3,6 +3,7 @@ import type { Connection } from '../../lib/pagination.js';
 import { PageInfoRef } from '../audit/audit.graphql.js';
 import { withoutNulls } from '../follows/relay.graphql.js';
 import { CivicService } from './civic.service.js';
+import type { JurisdictionTreeNode } from './record-rules.js';
 import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminOfficialTerm, AdminServiceLink, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, OfficeTermPayload, OfficeTermRecord, ServiceCategoryRecord } from './civic.dto.js';
 import { FreshnessEnum, FreshnessOverrideEnum, JurisdictionTypeEnum, SelectionMethodEnum, TermStatusEnum } from './civic.graphql.js';
 import { GovLevelEnum } from '../follows/relay.graphql.js';
@@ -23,19 +24,46 @@ IdStatus.implement({
   }),
 });
 
-type AdminJurisdictionView = JurisdictionRecord & { hasBoundary?: boolean };
+const RecordStatusEnum = builder.enumType('RecordStatus', { values: ['ACTIVE', 'RETIRED'] as const });
+const ServiceStatusEnum = builder.enumType('ServiceStatus', { values: ['ACTIVE', 'INACTIVE'] as const });
+const OfficeTypeEnum = builder.enumType('OfficeType', { values: ['ELECTED', 'APPOINTED', 'DEPARTMENT', 'COMMISSION'] as const });
+const BoundaryStatusEnum = builder.enumType('BoundaryStatus', { values: ['OK', 'MISSING'] as const });
+
+type AdminJurisdictionView = JurisdictionRecord & {
+  hasBoundary?: boolean;
+  displayId?: string | null;
+  aliases?: string[];
+  description?: string | null;
+  isPilot?: boolean;
+  parentRetired?: boolean;
+  childCount?: number;
+  officeCount?: number;
+  officialCount?: number;
+  freshness?: 'CURRENT' | 'MAY_BE_OUTDATED';
+  boundaryStatus?: 'OK' | 'MISSING';
+};
 
 const JurisdictionAdmin = builder.objectRef<AdminJurisdictionView>('AdminJurisdiction');
 JurisdictionAdmin.implement({
   fields: (t) => ({
     id: t.exposeID('id'),
     name: t.exposeString('name'),
+    displayId: t.exposeString('displayId', { nullable: true }),
+    aliases: t.stringList({ resolve: (row) => row.aliases ?? [] }),
+    description: t.exposeString('description', { nullable: true }),
+    isPilot: t.boolean({ resolve: (row) => row.isPilot ?? false }),
+    parentRetired: t.boolean({ resolve: (row) => row.parentRetired ?? false }),
+    boundaryStatus: t.field({ type: BoundaryStatusEnum, resolve: (row) => row.boundaryStatus ?? (row.hasBoundary ? 'OK' : 'MISSING') }),
+    childCount: t.int({ resolve: (row) => row.childCount ?? 0 }),
+    officeCount: t.int({ resolve: (row) => row.officeCount ?? 0 }),
+    officialCount: t.int({ resolve: (row) => row.officialCount ?? 0 }),
+    freshness: t.field({ type: FreshnessEnum, nullable: true, resolve: (row) => row.freshness ?? null }),
     level: t.field({ type: GovLevelEnum, resolve: (row) => row.level }),
     type: t.field({
       type: JurisdictionTypeEnum,
       resolve: (row) => row.type,
     }),
-    status: t.exposeString('status'),
+    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
     subtype: t.exposeString('subtype', { nullable: true }),
     parentId: t.exposeID('parentId', { nullable: true }),
     districtCode: t.exposeString('districtCode', { nullable: true }),
@@ -51,8 +79,6 @@ JurisdictionAdmin.implement({
     freshnessNote: t.exposeString('freshnessNote', { nullable: true }),
   }),
 });
-
-const RecordStatusEnum = builder.enumType('RecordStatus', { values: ['ACTIVE', 'RETIRED'] as const });
 
 const AdminAddress = builder.objectRef<OfficeAddressDto>('AdminOfficeAddress').implement({
   fields: (t) => ({
@@ -71,8 +97,12 @@ const OfficeAdmin = builder.objectRef<AdminOfficeRecord>('AdminOffice').implemen
   fields: (t) => ({
     id: t.exposeID('id'),
     slug: t.exposeString('slug'),
+    displayId: t.exposeString('displayId', { nullable: true }),
     jurisdictionId: t.exposeID('jurisdictionId'),
     name: t.exposeString('name'),
+    officeType: t.field({ type: OfficeTypeEnum, nullable: true, resolve: (row) => row.officeType ?? null }),
+    parentRetired: t.boolean({ resolve: (row) => row.parentRetired ?? false }),
+    freshness: t.field({ type: FreshnessEnum, nullable: true, resolve: (row) => row.freshness ?? null }),
     seatLabel: t.exposeString('seatLabel', { nullable: true }),
     selectionMethod: t.field({ type: SelectionMethodEnum, resolve: (row) => row.selectionMethod }),
     displayOrder: t.exposeInt('displayOrder'),
@@ -126,7 +156,10 @@ const OfficialAdmin = builder.objectRef<AdminOfficialRecord>('AdminOfficial').im
   fields: (t) => ({
     id: t.exposeID('id'),
     slug: t.exposeString('slug'),
+    displayId: t.exposeString('displayId', { nullable: true }),
     fullName: t.exposeString('fullName'),
+    useOfficeAddress: t.boolean({ resolve: (row) => row.useOfficeAddress ?? false }),
+    freshness: t.field({ type: FreshnessEnum, nullable: true, resolve: (row) => row.freshness ?? null }),
     displayName: t.exposeString('displayName', { nullable: true }),
     party: t.exposeString('party', { nullable: true }),
     photoUrl: t.exposeString('photoUrl', { nullable: true }),
@@ -144,14 +177,16 @@ const OfficialAdmin = builder.objectRef<AdminOfficialRecord>('AdminOfficial').im
 const ServiceAdmin = builder.objectRef<AdminServiceRecord>('AdminService').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
+    displayId: t.exposeString('displayId', { nullable: true }),
     title: t.exposeString('title'),
     categoryId: t.exposeID('categoryId'),
     description: t.exposeString('description'),
     url: t.exposeString('url', { nullable: true }),
     phoneContact: t.exposeString('phoneContact', { nullable: true }),
+    email: t.exposeString('email', { nullable: true }),
     lastValidatedAt: t.field({ type: 'DateTime', resolve: (row) => row.lastValidatedAt }),
     sourceId: t.exposeID('sourceId'),
-    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    status: t.field({ type: ServiceStatusEnum, resolve: (row) => row.status }),
     links: t.field({ type: [AdminServiceLinkRef], resolve: (row) => row.links }),
     jurisdictionIds: t.field({ type: ['ID'], resolve: (row) => row.jurisdictionIds }),
     officeIds: t.field({ type: ['ID'], resolve: (row) => row.officeIds }),
@@ -186,7 +221,11 @@ builder.mutationField('upsertJurisdiction', (t) =>
         type: builder.inputType('UpsertJurisdictionInput', {
           fields: (i) => ({
             id: i.id({ required: false }),
+            correctionId: i.id({ required: false }),
             name: i.string({ required: true }),
+            aliases: i.stringList({ required: false }),
+            description: i.string({ required: false }),
+            isPilot: i.boolean({ required: false }),
             level: i.field({ type: GovLevelEnum, required: true }),
             type: i.field({ type: JurisdictionTypeEnum, required: true }),
             subtype: i.string({ required: false }),
@@ -263,10 +302,12 @@ builder.mutationField('upsertOffice', (t) =>
         type: builder.inputType('UpsertOfficeInput', {
           fields: (i) => ({
             id: i.id({ required: false }),
+            correctionId: i.id({ required: false }),
             jurisdictionId: i.id({ required: true }),
             name: i.string({ required: true }),
             seatLabel: i.string({ required: false }),
             selectionMethod: i.field({ type: SelectionMethodEnum, required: true }),
+            officeType: i.field({ type: OfficeTypeEnum, required: false }),
             displayOrder: i.int({ required: false }),
             whyTemplate: i.string({ required: false }),
             phone: i.string({ required: false }),
@@ -298,11 +339,13 @@ builder.mutationField('upsertOfficial', (t) =>
         type: builder.inputType('UpsertOfficialInput', {
           fields: (i) => ({
             id: i.id({ required: false }),
+            correctionId: i.id({ required: false }),
             fullName: i.string({ required: true }),
             displayName: i.string({ required: false }),
             party: i.string({ required: false }),
             photoUrl: i.string({ required: false }),
             website: i.string({ required: false }),
+            useOfficeAddress: i.boolean({ required: false }),
             sourceId: i.id({ required: true }),
             sourceRecordUrl: i.string({ required: false }),
             lastUpdatedAt: i.field({ type: 'DateTime', required: true }),
@@ -391,11 +434,13 @@ builder.mutationField('upsertService', (t) =>
         type: builder.inputType('UpsertServiceInput', {
           fields: (i) => ({
             id: i.id({ required: false }),
+            correctionId: i.id({ required: false }),
             title: i.string({ required: true }),
             categoryId: i.id({ required: true }),
             description: i.string({ required: true }),
             url: i.string({ required: false }),
             phoneContact: i.string({ required: false }),
+            email: i.string({ required: false }),
             jurisdictionIds: i.stringList({ required: false }),
             officeIds: i.stringList({ required: false }),
             lastValidatedAt: i.field({ type: 'DateTime', required: true }),
@@ -486,6 +531,9 @@ const JurisdictionFilter = builder.inputType('AdminJurisdictionFilter', {
     type: t.field({ type: JurisdictionTypeEnum, required: false }),
     state: t.string({ required: false }),
     status: t.field({ type: RecordStatusEnum, required: false }),
+    parentId: t.id({ required: false }),
+    isPilot: t.boolean({ required: false }),
+    boundary: t.field({ type: BoundaryStatusEnum, required: false }),
     freshness: t.field({ type: FreshnessEnum, required: false }),
     q: t.string({ required: false }),
   }),
@@ -495,6 +543,9 @@ const OfficeFilter = builder.inputType('AdminOfficeFilter', {
   fields: (t) => ({
     level: t.field({ type: GovLevelEnum, required: false }),
     jurisdictionId: t.id({ required: false }),
+    officeType: t.field({ type: OfficeTypeEnum, required: false }),
+    hasOfficial: t.boolean({ required: false }),
+    missingContact: t.boolean({ required: false }),
     vacantOnly: t.boolean({ required: false }),
     staleOnly: t.boolean({ required: false }),
     status: t.field({ type: RecordStatusEnum, required: false }),
@@ -505,6 +556,10 @@ const OfficeFilter = builder.inputType('AdminOfficeFilter', {
 const OfficialFilter = builder.inputType('AdminOfficialFilter', {
   fields: (t) => ({
     status: t.field({ type: RecordStatusEnum, required: false }),
+    level: t.field({ type: GovLevelEnum, required: false }),
+    jurisdictionId: t.id({ required: false }),
+    officeType: t.field({ type: OfficeTypeEnum, required: false }),
+    freshness: t.field({ type: FreshnessEnum, required: false }),
     officeId: t.id({ required: false }),
     q: t.string({ required: false }),
   }),
@@ -513,7 +568,8 @@ const OfficialFilter = builder.inputType('AdminOfficialFilter', {
 const ServiceFilter = builder.inputType('AdminServiceFilter', {
   fields: (t) => ({
     categoryId: t.id({ required: false }),
-    status: t.field({ type: RecordStatusEnum, required: false }),
+    status: t.field({ type: ServiceStatusEnum, required: false }),
+    needsValidation: t.boolean({ required: false }),
     linkBroken: t.boolean({ required: false }),
     q: t.string({ required: false }),
   }),
@@ -583,3 +639,81 @@ builder.queryField('adminServices', (t) =>
   }),
 );
 rememberScope('Query', 'adminServices', readScope);
+
+const JurisdictionTree = builder.objectRef<JurisdictionTreeNode>('AdminJurisdictionTreeNode');
+JurisdictionTree.implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    parentId: t.exposeID('parentId', { nullable: true }),
+    name: t.exposeString('name'),
+    displayId: t.exposeString('displayId'),
+    level: t.field({ type: GovLevelEnum, resolve: (row) => row.level }),
+    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    parentRetired: t.exposeBoolean('parentRetired'),
+    children: t.field({ type: [JurisdictionTree], resolve: (row) => row.children }),
+  }),
+});
+
+builder.queryField('adminJurisdictionTree', (t) =>
+  t.field({
+    type: [JurisdictionTree],
+    authScopes: readScope,
+    args: { rootId: t.arg.id({ required: false }) },
+    resolve: (_root, args, ctx) => civic(ctx).adminJurisdictionTree(ctx, args.rootId),
+  }),
+);
+rememberScope('Query', 'adminJurisdictionTree', readScope);
+
+const OfficeTiles = builder
+  .objectRef<{ active: number; vacant: number; outdated: number; missingContact: number }>('AdminOfficeTiles')
+  .implement({
+    fields: (t) => ({
+      active: t.exposeInt('active'),
+      vacant: t.exposeInt('vacant'),
+      outdated: t.exposeInt('outdated'),
+      missingContact: t.exposeInt('missingContact'),
+    }),
+  });
+
+const OfficialTiles = builder
+  .objectRef<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number }>('AdminOfficialTiles')
+  .implement({
+    fields: (t) => ({
+      active: t.exposeInt('active'),
+      termsEndingWithin90d: t.exposeInt('termsEndingWithin90d'),
+      outdated: t.exposeInt('outdated'),
+      missingContact: t.exposeInt('missingContact'),
+    }),
+  });
+
+builder.queryField('adminOfficeTiles', (t) =>
+  t.field({
+    type: OfficeTiles,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => civic(ctx).adminOfficeTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminOfficeTiles', readScope);
+
+builder.queryField('adminOfficialTiles', (t) =>
+  t.field({
+    type: OfficialTiles,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => civic(ctx).adminOfficialTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminOfficialTiles', readScope);
+
+const ValidatedService = builder.objectRef<{ id: string }>('ValidatedService').implement({
+  fields: (t) => ({ id: t.exposeID('id') }),
+});
+
+builder.mutationField('markServiceValidated', (t) =>
+  t.field({
+    type: ValidatedService,
+    authScopes: writeScope,
+    args: { id: t.arg.id({ required: true }) },
+    resolve: (_root, args, ctx) => civic(ctx).markServiceValidated(ctx, { id: args.id }),
+  }),
+);
+rememberScope('Mutation', 'markServiceValidated', writeScope);

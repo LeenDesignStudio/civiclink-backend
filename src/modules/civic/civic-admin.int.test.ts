@@ -14,8 +14,6 @@ import { AuditService } from '../audit/audit.service.js';
 import { PipelineRepo } from '../pipeline/pipeline.repo.js';
 import { DashboardRepo } from '../sources/dashboard.repo.js';
 import { DashboardService } from '../sources/dashboard.js';
-import { ExportService } from '../sources/export.js';
-import { MemoryExportStore, PrismaExportReader } from '../sources/export.store.js';
 import { SourcesService } from '../sources/sources.service.js';
 import { CivicRepo } from './civic.repo.js';
 import { CivicService, type AuditEntry } from './civic.service.js';
@@ -396,13 +394,6 @@ function operations(): Operation[] {
       invalid: (fx) => ({ entityType: ' ', entityId: fx.officeId }),
       check: (value) => expect((value as { totalCount: number }).totalCount).toBeGreaterThan(0),
     },
-    {
-      name: 'exportCsv',
-      permission: 'admin.export:csv',
-      query: 'mutation($input: ExportCsvInput!) { exportCsv(input: $input) { url } }',
-      success: () => ({ input: { list: 'OFFICES' } }),
-      invalid: () => ({ input: { list: 'OFFICES', filter: '{' } }),
-    },
   ];
 }
 
@@ -447,12 +438,6 @@ describe('section H admin civic API', () => {
       civic,
       audit: new AuditService(auditRepo),
       sources,
-      exports: new ExportService({
-        reader: new PrismaExportReader(app),
-        store: new MemoryExportStore(),
-        audit: { record },
-        withTx: (fn) => withTx(fn, { client: app }),
-      }),
     } as AppServices;
     server = await buildServer({
       services,

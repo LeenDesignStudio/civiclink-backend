@@ -26,6 +26,8 @@ export interface SourceWrite {
   levels: SourceRow['levels'];
   collectorKey: string | null;
   active: boolean;
+  kind?: SourceRow['kind'];
+  notes?: string | null;
   config: SourceRow['config'];
 }
 

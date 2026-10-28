@@ -88,6 +88,31 @@ enum RecordStatus {
   RETIRED
 }
 
+enum OfficeType {
+  ELECTED
+  APPOINTED
+  DEPARTMENT
+  COMMISSION
+}
+
+enum ServiceStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SourceKind {
+  API
+  BULK_EXPORT
+  SCHEDULED_PAGE
+  MANUAL
+}
+
+enum SourceRecordStatus {
+  ACTIVE
+  PAUSED
+  RETIRED
+}
+
 enum FreshnessOverride {
   NONE
   FORCE_CURRENT
@@ -162,10 +187,10 @@ enum CorrectionStatus {
 }
 
 enum DismissReason {
-  ALREADY_CORRECT
-  INSUFFICIENT_EVIDENCE
-  OUT_OF_SCOPE
+  CANT_VERIFY
+  SOURCE_CORRECT
   DUPLICATE
+  OUT_OF_SCOPE
   OTHER
 }
 
@@ -198,6 +223,8 @@ enum AlertStatus {
   DRAFT
   SENDING
   SENT
+  PARTLY_FAILED
+  FAILED
 }
 
 enum SubscriptionStatus {
@@ -431,13 +458,19 @@ model Follow {
 
 model Source {
   id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId     String         @unique @default(dbgenerated("('SRC-' || lpad(nextval('display_id_src')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
   name          String         @unique @db.VarChar(150)
   publisher     String         @db.VarChar(150)
   url           String         @db.VarChar(2048)
   termsUrl      String         @map("terms_url") @db.VarChar(2048)
   method        SourceMethod
+  kind          SourceKind     @default(MANUAL)
   schedule      SourceSchedule
   freshnessDays Int            @default(90) @map("freshness_days")
+  notes         String?        @db.VarChar(500)
+  recordStatus  SourceRecordStatus @default(ACTIVE) @map("record_status")
+  lastSuccessAt DateTime?      @map("last_success_at") @db.Timestamptz(3)
+  lastAttemptAt DateTime?      @map("last_attempt_at") @db.Timestamptz(3)
   levels        GovLevel[]
   /// Collector key that maps this source to code in src/modules/pipeline/collectors
   collectorKey  String?        @map("collector_key") @db.VarChar(80)
@@ -504,7 +537,12 @@ model PendingSourceChange {
 
 model Jurisdiction {
   id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId         String            @unique @default(dbgenerated("('JUR-' || lpad(nextval('display_id_jur')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
   name              String            @db.VarChar(150)
+  aliases           String[]          @default([])
+  description       String?           @db.VarChar(300)
+  isPilot           Boolean           @default(false) @map("is_pilot")
+  parentRetired     Boolean           @default(false) @map("parent_retired")
   level             GovLevel
   type              JurisdictionType
   subtype           String?           @db.VarChar(80)
@@ -521,6 +559,11 @@ model Jurisdiction {
   lastUpdatedAt     DateTime          @map("last_updated_at") @db.Timestamptz(3)
   freshnessOverride FreshnessOverride @default(NONE) @map("freshness_override")
   freshnessNote     String?           @map("freshness_note") @db.VarChar(500)
+  overrideActive    Boolean           @default(false) @map("override_active")
+  overrideReason    String?           @map("override_reason") @db.VarChar(500)
+  overriddenBy      String?           @map("overridden_by") @db.Uuid
+  overriddenAt      DateTime?         @map("overridden_at") @db.Timestamptz(3)
+  sourceChangedSinceOverride Boolean  @default(false) @map("source_changed_since_override")
   status            RecordStatus      @default(ACTIVE)
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -540,11 +583,14 @@ model Jurisdiction {
 
 model Office {
   id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId         String            @unique @default(dbgenerated("('OFF-' || lpad(nextval('display_id_off')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
   slug              String            @unique @db.VarChar(160)
   jurisdictionId    String            @map("jurisdiction_id") @db.Uuid
   name              String            @db.VarChar(150)
   seatLabel         String?           @map("seat_label") @db.VarChar(60)
   selectionMethod   SelectionMethod   @map("selection_method")
+  officeType        OfficeType        @default(ELECTED) @map("office_type")
+  parentRetired     Boolean           @default(false) @map("parent_retired")
   displayOrder      Int               @default(100) @map("display_order")
   whyTemplate       String?           @map("why_template") @db.VarChar(300)
   phone             String?           @db.VarChar(20)
@@ -557,6 +603,11 @@ model Office {
   lastUpdatedAt     DateTime          @map("last_updated_at") @db.Timestamptz(3)
   freshnessOverride FreshnessOverride @default(NONE) @map("freshness_override")
   freshnessNote     String?           @map("freshness_note") @db.VarChar(500)
+  overrideActive    Boolean           @default(false) @map("override_active")
+  overrideReason    String?           @map("override_reason") @db.VarChar(500)
+  overriddenBy      String?           @map("overridden_by") @db.Uuid
+  overriddenAt      DateTime?         @map("overridden_at") @db.Timestamptz(3)
+  sourceChangedSinceOverride Boolean  @default(false) @map("source_changed_since_override")
   status            RecordStatus      @default(ACTIVE)
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -569,6 +620,7 @@ model Office {
   serviceLinks ServiceLink[]
   alerts       Alert[]
 
+  @@unique([jurisdictionId, name])
   @@index([jurisdictionId, status])
   @@map("offices")
 }
@@ -595,6 +647,7 @@ model OfficeAddress {
 
 model Official {
   id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId         String            @unique @default(dbgenerated("('PER-' || lpad(nextval('display_id_per')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
   slug              String            @unique @db.VarChar(160)
   fullName          String            @map("full_name") @db.VarChar(120)
   displayName       String?           @map("display_name") @db.VarChar(120)
@@ -602,11 +655,17 @@ model Official {
   photoUrl          String?           @map("photo_url") @db.VarChar(2048)
   website           String?           @db.VarChar(2048)
   externalIds       Json              @default("{}") @map("external_ids")
+  useOfficeAddress  Boolean           @default(false) @map("use_office_address")
   sourceId          String            @map("source_id") @db.Uuid
   sourceRecordUrl   String?           @map("source_record_url") @db.VarChar(2048)
   lastUpdatedAt     DateTime          @map("last_updated_at") @db.Timestamptz(3)
   freshnessOverride FreshnessOverride @default(NONE) @map("freshness_override")
   freshnessNote     String?           @map("freshness_note") @db.VarChar(500)
+  overrideActive    Boolean           @default(false) @map("override_active")
+  overrideReason    String?           @map("override_reason") @db.VarChar(500)
+  overriddenBy      String?           @map("overridden_by") @db.Uuid
+  overriddenAt      DateTime?         @map("overridden_at") @db.Timestamptz(3)
+  sourceChangedSinceOverride Boolean  @default(false) @map("source_changed_since_override")
   status            RecordStatus      @default(ACTIVE)
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -654,16 +713,22 @@ model ServiceCategory {
 }
 
 model Service {
-  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  title           String       @db.VarChar(120)
-  categoryId      String       @map("category_id") @db.Uuid
-  description     String       @db.VarChar(400)
-  url             String?      @db.VarChar(2048)
-  phoneContact    String?      @map("phone_contact") @db.VarChar(120)
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId       String        @unique @default(dbgenerated("('SVC-' || lpad(nextval('display_id_svc')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  title           String        @db.VarChar(120)
+  categoryId      String        @map("category_id") @db.Uuid
+  description     String        @db.VarChar(300)
+  url             String?       @db.VarChar(2048)
+  phoneContact    String?       @map("phone_contact") @db.VarChar(120)
+  email           String?       @db.Citext
   lastValidatedAt DateTime     @map("last_validated_at") @db.Timestamptz(3)
   linkBroken      Boolean      @default(false) @map("link_broken")
-  sourceId        String       @map("source_id") @db.Uuid
-  status          RecordStatus @default(ACTIVE)
+  sourceId        String        @map("source_id") @db.Uuid
+  overrideActive  Boolean       @default(false) @map("override_active")
+  overrideReason  String?       @map("override_reason") @db.VarChar(500)
+  overriddenBy    String?       @map("overridden_by") @db.Uuid
+  overriddenAt    DateTime?     @map("overridden_at") @db.Timestamptz(3)
+  status          ServiceStatus @default(ACTIVE)
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -699,6 +764,7 @@ model ServiceLink {
 
 model Correction {
   id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId            String           @unique @default(dbgenerated("('COR-' || lpad(nextval('display_id_cor')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
   /// Nullable so the record survives account purge (de-identified).
   userId               String?          @map("user_id") @db.Uuid
   entityType           CivicEntityType  @map("entity_type")
@@ -767,10 +833,11 @@ model ChangeLog {
 
 model Alert {
   id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayId        String      @unique @default(dbgenerated("('ALT-' || lpad(nextval('display_id_alt')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
   targetOfficeId   String?     @map("target_office_id") @db.Uuid
   targetOfficialId String?     @map("target_official_id") @db.Uuid
   title            String      @db.VarChar(80)
-  body             String      @db.VarChar(1000)
+  body             String      @db.VarChar(500)
   link             String?     @db.VarChar(2048)
   channels         NotificationChannel[]
   status           AlertStatus @default(DRAFT)

@@ -54,7 +54,8 @@ export const ERROR_CODES = [
   'ALERT_ALREADY_SENT',
   'RECIPIENTS_CHANGED',
   'NO_RECIPIENTS',
-  'EXPORT_TOO_LARGE',
+  'OFFICE_HAS_ACTIVE_OFFICIAL',
+  'RECORD_RETIRED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -443,9 +444,16 @@ export const CODE_META: Record<ErrorCode, CodeMeta> = {
     retryable: false,
     logLevel: 'info',
   },
-  EXPORT_TOO_LARGE: {
-    httpStatus: 413,
-    defaultMessage: 'Narrow your filters — exports are limited to 50,000 rows.',
+  OFFICE_HAS_ACTIVE_OFFICIAL: {
+    httpStatus: 409,
+    defaultMessage: 'This office already has an active official.',
+    expose: true,
+    retryable: false,
+    logLevel: 'info',
+  },
+  RECORD_RETIRED: {
+    httpStatus: 409,
+    defaultMessage: "This record is retired, so the correction can't be applied.",
     expose: true,
     retryable: false,
     logLevel: 'info',
@@ -733,6 +741,20 @@ export class HasCurrentTermError extends ConflictError {
   }
 }
 
+export class OfficeHasActiveOfficialError extends ConflictError {
+  override readonly code = 'OFFICE_HAS_ACTIVE_OFFICIAL' as const;
+  constructor() {
+    super(CODE_META.OFFICE_HAS_ACTIVE_OFFICIAL.defaultMessage);
+  }
+}
+
+export class RecordRetiredError extends ConflictError {
+  override readonly code = 'RECORD_RETIRED' as const;
+  constructor() {
+    super(CODE_META.RECORD_RETIRED.defaultMessage);
+  }
+}
+
 export class RunInProgressError extends ConflictError {
   override readonly code = 'RUN_IN_PROGRESS' as const;
   constructor() {
@@ -866,13 +888,6 @@ export class UnknownCollectorError extends ValidationError {
   override readonly code = 'UNKNOWN_COLLECTOR' as const;
   constructor() {
     super(CODE_META.UNKNOWN_COLLECTOR.defaultMessage);
-  }
-}
-
-export class ExportTooLargeError extends ValidationError {
-  override readonly code = 'EXPORT_TOO_LARGE' as const;
-  constructor() {
-    super(CODE_META.EXPORT_TOO_LARGE.defaultMessage);
   }
 }
 

@@ -1,8 +1,10 @@
 import { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { dbCall, prisma, withTx, type Db } from '../../db/prisma.js';
-import { NotFoundError } from '../../lib/errors.js';
+import { NotFoundError, PreconditionError, RecordRetiredError, ValidationError } from '../../lib/errors.js';
+import { boundaryStatus, freshnessLabel } from './record-rules.js';
 import type {
   AdminJurisdictionNode,
+  GovLevel,
   AdminOfficeRecord,
   AdminOfficialRecord,
   OfficeTermRecord,
@@ -48,25 +50,42 @@ export interface JurisdictionAdminQuery extends AdminPageQuery {
   level?: JurisdictionRecord['level'];
   type?: JurisdictionRecord['type'];
   state?: string;
+  parentId?: string;
+  isPilot?: boolean;
+  boundary?: 'OK' | 'MISSING';
   freshness?: 'CURRENT' | 'MAY_BE_OUTDATED';
   freshnessCutoff: Date;
+  asOf: Date;
 }
 
 export interface OfficeAdminQuery extends AdminPageQuery {
   level?: JurisdictionRecord['level'];
   jurisdictionId?: string;
+  officeType?: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION';
+  hasOfficial?: boolean;
+  missingContact?: boolean;
   vacantOnly?: boolean;
   staleOnly?: boolean;
   freshnessCutoff: Date;
+  asOf: Date;
 }
 
 export interface OfficialAdminQuery extends AdminPageQuery {
   officeId?: string;
+  level?: JurisdictionRecord['level'];
+  jurisdictionId?: string;
+  officeType?: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION';
+  freshness?: 'CURRENT' | 'MAY_BE_OUTDATED';
+  freshnessCutoff?: Date;
+  asOf?: Date;
 }
 
-export interface ServiceAdminQuery extends AdminPageQuery {
+export interface ServiceAdminQuery extends Omit<AdminPageQuery, 'status'> {
+  status?: 'ACTIVE' | 'INACTIVE';
   categoryId?: string;
   linkBroken?: boolean;
+  needsValidation?: boolean;
+  validatedBefore?: Date;
 }
 
 export interface ListServicesArgs {
@@ -115,6 +134,22 @@ export interface CivicStore {
   sourceExists(id: string): Promise<boolean>;
   countActiveOffices(jurisdictionId: string): Promise<number>;
   retireActiveOffices(jurisdictionId: string): Promise<string[]>;
+  jurisdictionNameTaken(parentId: string | null, name: string, excludeId?: string): Promise<boolean>;
+  officeNameTaken(jurisdictionId: string, name: string, excludeId?: string): Promise<boolean>;
+  currentOfficialId(officeId: string): Promise<string | null>;
+  flagParentRetired(jurisdictionId: string, retired: boolean): Promise<void>;
+  markServiceValidated(id: string, at: Date): Promise<void>;
+  listJurisdictionNodes(): Promise<
+    Array<{
+      id: string;
+      parentId: string | null;
+      name: string;
+      displayId: string;
+      level: GovLevel;
+      status: RecordStatus;
+      parentRetired: boolean;
+    }>
+  >;
   slugTaken(kind: 'office' | 'official', slug: string, excludeId?: string): Promise<boolean>;
   createJurisdiction(input: UpsertJurisdictionInput): Promise<JurisdictionRecord>;
   updateJurisdiction(id: string, input: UpsertJurisdictionInput): Promise<JurisdictionRecord>;
@@ -133,9 +168,18 @@ export interface CivicStore {
   officialHasCurrentTerm(officialId: string): Promise<boolean>;
   createService(input: UpsertServiceInput): Promise<AdminServiceRecord>;
   updateService(id: string, input: UpsertServiceInput): Promise<AdminServiceRecord>;
-  setServiceStatus(id: string, status: RecordStatus): Promise<void>;
+  setServiceStatus(id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<void>;
+  officeTiles(now: Date): Promise<{ active: number; vacant: number; outdated: number; missingContact: number }>;
+  officialTiles(now: Date): Promise<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number }>;
   createCategory(input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
   updateCategory(id: string, input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
+  completeCorrection(input: {
+    correctionId: string;
+    entityType: 'JURISDICTION' | 'OFFICE' | 'OFFICIAL' | 'SERVICE';
+    entityId: string;
+    adminId: string;
+    now: Date;
+  }): Promise<void>;
 }
 
 function createdBefore(after: { createdAt: Date; id: string } | undefined): { OR: [{ createdAt: { lt: Date } }, { createdAt: Date; id: { lt: string } }] } | undefined {
@@ -342,6 +386,83 @@ export class CivicRepo implements CivicStore {
           : Prisma.TransactionIsolationLevel.ReadCommitted,
       client: this.client,
     });
+  }
+
+  async completeCorrection(input: {
+    correctionId: string;
+    entityType: 'JURISDICTION' | 'OFFICE' | 'OFFICIAL' | 'SERVICE';
+    entityId: string;
+    adminId: string;
+    now: Date;
+  }): Promise<void> {
+    const row = await this.run(() =>
+      this.db.correction.findUnique({
+        where: { id: input.correctionId },
+        select: { id: true, entityType: true, entityId: true, status: true },
+      }),
+    );
+    if (!row) throw new NotFoundError();
+    if (row.entityType !== input.entityType || row.entityId !== input.entityId) {
+      throw new ValidationError('That correction is for a different record.', [
+        { path: 'correctionId', code: 'custom', message: 'That correction is for a different record.' },
+      ]);
+    }
+    if (row.status !== 'SUBMITTED' && row.status !== 'IN_REVIEW') throw new PreconditionError();
+    if (await this.recordRetired(input.entityType, input.entityId)) throw new RecordRetiredError();
+    await this.run(() =>
+      this.db.correction.update({
+        where: { id: row.id },
+        data: { status: 'APPLIED', resolvedAt: input.now, resolvedBy: input.adminId },
+      }),
+    );
+    await this.stampOverride(input.entityType, input.entityId, input.adminId, input.now);
+  }
+
+  private async recordRetired(
+    entityType: 'JURISDICTION' | 'OFFICE' | 'OFFICIAL' | 'SERVICE',
+    entityId: string,
+  ): Promise<boolean> {
+    if (entityType === 'JURISDICTION') {
+      const row = await this.run(() => this.db.jurisdiction.findUnique({ where: { id: entityId }, select: { status: true } }));
+      return !row || row.status === 'RETIRED';
+    }
+    if (entityType === 'OFFICE') {
+      const row = await this.run(() => this.db.office.findUnique({ where: { id: entityId }, select: { status: true } }));
+      return !row || row.status === 'RETIRED';
+    }
+    if (entityType === 'OFFICIAL') {
+      const row = await this.run(() => this.db.official.findUnique({ where: { id: entityId }, select: { status: true } }));
+      return !row || row.status === 'RETIRED';
+    }
+    const row = await this.run(() => this.db.service.findUnique({ where: { id: entityId }, select: { status: true } }));
+    return !row || row.status === 'INACTIVE';
+  }
+
+  private async stampOverride(
+    entityType: 'JURISDICTION' | 'OFFICE' | 'OFFICIAL' | 'SERVICE',
+    entityId: string,
+    adminId: string,
+    now: Date,
+  ): Promise<void> {
+    const data = {
+      overrideActive: true,
+      overrideReason: 'Applied from a resident correction',
+      overriddenBy: adminId,
+      overriddenAt: now,
+    };
+    if (entityType === 'JURISDICTION') {
+      await this.run(() => this.db.jurisdiction.update({ where: { id: entityId }, data }));
+      return;
+    }
+    if (entityType === 'OFFICE') {
+      await this.run(() => this.db.office.update({ where: { id: entityId }, data }));
+      return;
+    }
+    if (entityType === 'OFFICIAL') {
+      await this.run(() => this.db.official.update({ where: { id: entityId }, data }));
+      return;
+    }
+    await this.run(() => this.db.service.update({ where: { id: entityId }, data }));
   }
 
   private run<T>(fn: () => Promise<T>): Promise<T> {
@@ -588,7 +709,26 @@ export class CivicRepo implements CivicStore {
       if (query.type) where.type = query.type;
       if (query.state) where.state = query.state;
       if (query.status) where.status = query.status;
-      if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
+      if (query.parentId) where.parentId = query.parentId;
+      if (query.isPilot !== undefined) where.isPilot = query.isPilot;
+      if (query.boundary === 'OK') {
+        const matched = await this.db.$queryRaw<Array<{ id: string }>>`
+          SELECT id::text AS id FROM jurisdictions WHERE boundary IS NOT NULL
+        `;
+        where.id = { in: matched.map((row) => row.id) };
+      } else if (query.boundary === 'MISSING') {
+        const matched = await this.db.$queryRaw<Array<{ id: string }>>`
+          SELECT id::text AS id FROM jurisdictions WHERE boundary IS NULL
+        `;
+        where.id = { in: matched.map((row) => row.id) };
+      }
+      if (query.q) {
+        where.OR = [
+          { name: { contains: query.q, mode: 'insensitive' } },
+          { displayId: { contains: query.q, mode: 'insensitive' } },
+          { aliases: { has: query.q } },
+        ];
+      }
       const and: Prisma.JurisdictionWhereInput[] = [];
       if (query.freshness === 'CURRENT') {
         and.push({
@@ -633,10 +773,38 @@ export class CivicRepo implements CivicStore {
           freshnessNote: true,
           status: true,
           createdAt: true,
+          displayId: true,
+          aliases: true,
+          description: true,
+          isPilot: true,
+          parentRetired: true,
+          source: { select: { freshnessDays: true } },
         },
       });
       const flags = await this.boundaryFlags(rows.map((row) => row.id));
-      return { totalCount, rows: rows.map((row) => ({ ...row, hasBoundary: flags.get(row.id) ?? false })) };
+      const counts = await this.jurisdictionCounts(rows.map((row) => row.id));
+      return {
+        totalCount,
+        rows: rows.map((row) => {
+          const { source, ...rest } = row;
+          const hasBoundary = flags.get(row.id) ?? false;
+          const tally = counts.get(row.id);
+          return {
+            ...rest,
+            hasBoundary,
+            boundaryStatus: boundaryStatus(hasBoundary),
+            childCount: tally?.children ?? 0,
+            officeCount: tally?.offices ?? 0,
+            officialCount: tally?.officials ?? 0,
+            freshness: freshnessLabel({
+              lastUpdatedAt: row.lastUpdatedAt,
+              outdatedAfterDays: source.freshnessDays,
+              now: query.asOf,
+              override: row.freshnessOverride,
+            }),
+          };
+        }),
+      };
     });
   }
 
@@ -646,9 +814,19 @@ export class CivicRepo implements CivicStore {
       if (query.jurisdictionId) where.jurisdictionId = query.jurisdictionId;
       if (query.status) where.status = query.status;
       if (query.level) where.jurisdiction = { level: query.level };
-      if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
-      if (query.vacantOnly) where.terms = { none: { isCurrent: true } };
+      if (query.officeType) where.officeType = query.officeType;
+      if (query.q) {
+        where.OR = [
+          { name: { contains: query.q, mode: 'insensitive' } },
+          { displayId: { contains: query.q, mode: 'insensitive' } },
+        ];
+      }
+      if (query.hasOfficial === true) where.terms = { some: { isCurrent: true } };
+      else if (query.hasOfficial === false || query.vacantOnly) where.terms = { none: { isCurrent: true } };
       const and: Prisma.OfficeWhereInput[] = [];
+      if (query.missingContact) {
+        and.push({ phone: null, email: null, website: null, contactUrl: null });
+      }
       if (query.staleOnly) {
         and.push({
           OR: [
@@ -687,6 +865,10 @@ export class CivicRepo implements CivicStore {
           freshnessNote: true,
           status: true,
           createdAt: true,
+          displayId: true,
+          officeType: true,
+          parentRetired: true,
+          source: { select: { freshnessDays: true } },
           addresses: {
             orderBy: { sortOrder: 'asc' },
             select: { id: true, label: true, street: true, city: true, state: true, zip: true, phone: true, hours: true },
@@ -698,9 +880,18 @@ export class CivicRepo implements CivicStore {
         totalCount,
         rows: rows.map((row) => ({
           id: row.id,
+          displayId: row.displayId,
           slug: row.slug,
           jurisdictionId: row.jurisdictionId,
           name: row.name,
+          officeType: row.officeType,
+          parentRetired: row.parentRetired,
+          freshness: freshnessLabel({
+            lastUpdatedAt: row.lastUpdatedAt,
+            outdatedAfterDays: row.source.freshnessDays,
+            now: query.asOf,
+            override: row.freshnessOverride,
+          }),
           seatLabel: row.seatLabel,
           selectionMethod: row.selectionMethod,
           displayOrder: row.displayOrder,
@@ -728,16 +919,52 @@ export class CivicRepo implements CivicStore {
     return this.run(async () => {
       const where: Prisma.OfficialWhereInput = {};
       if (query.status) where.status = query.status;
-      if (query.officeId) where.terms = { some: { officeId: query.officeId } };
       if (query.q) {
         where.OR = [
           { fullName: { contains: query.q, mode: 'insensitive' } },
           { displayName: { contains: query.q, mode: 'insensitive' } },
+          { displayId: { contains: query.q, mode: 'insensitive' } },
+        ];
+      }
+      const office: Prisma.OfficeWhereInput = {};
+      if (query.officeType) office.officeType = query.officeType;
+      if (query.jurisdictionId) office.jurisdictionId = query.jurisdictionId;
+      if (query.level) office.jurisdiction = { level: query.level };
+      if (query.officeId || query.officeType || query.jurisdictionId || query.level) {
+        where.terms = {
+          some: {
+            ...(query.officeId ? { officeId: query.officeId } : {}),
+            ...(Object.keys(office).length > 0 ? { office } : {}),
+          },
+        };
+      }
+      if (query.freshness === 'CURRENT' && query.freshnessCutoff) {
+        const cutoff = query.freshnessCutoff;
+        where.AND = [
+          {
+            OR: [
+              { freshnessOverride: 'FORCE_CURRENT' },
+              { freshnessOverride: 'NONE', lastUpdatedAt: { gte: cutoff } },
+            ],
+          },
+        ];
+      } else if (query.freshness === 'MAY_BE_OUTDATED' && query.freshnessCutoff) {
+        const cutoff = query.freshnessCutoff;
+        where.AND = [
+          {
+            OR: [
+              { freshnessOverride: 'FORCE_OUTDATED' },
+              { freshnessOverride: 'NONE', lastUpdatedAt: { lt: cutoff } },
+            ],
+          },
         ];
       }
       const totalCount = await this.db.official.count({ where });
       const cursor = newestClause(query) ?? nameClause('fullName', query);
-      if (cursor) where.AND = [cursor];
+      if (cursor) {
+        const existing = Array.isArray(where.AND) ? where.AND : [];
+        where.AND = [...existing, cursor];
+      }
       const rows = await this.db.official.findMany({
         where,
         orderBy: query.sort === 'NAME' ? [{ fullName: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -757,10 +984,27 @@ export class CivicRepo implements CivicStore {
           freshnessNote: true,
           status: true,
           createdAt: true,
+          displayId: true,
+          useOfficeAddress: true,
+          source: { select: { freshnessDays: true } },
           terms: adminTermSelect,
         },
       });
-      return { totalCount, rows: rows.map((row) => ({ ...mapAdminOfficial(row), createdAt: row.createdAt })) };
+      return {
+        totalCount,
+        rows: rows.map((row) => ({
+          ...mapAdminOfficial(row),
+          displayId: row.displayId,
+          useOfficeAddress: row.useOfficeAddress,
+          freshness: freshnessLabel({
+            lastUpdatedAt: row.lastUpdatedAt,
+            outdatedAfterDays: row.source.freshnessDays,
+            now: query.asOf ?? new Date(),
+            override: row.freshnessOverride,
+          }),
+          createdAt: row.createdAt,
+        })),
+      };
     });
   }
 
@@ -770,7 +1014,13 @@ export class CivicRepo implements CivicStore {
       if (query.categoryId) where.categoryId = query.categoryId;
       if (query.status) where.status = query.status;
       if (query.linkBroken !== undefined) where.linkBroken = query.linkBroken;
-      if (query.q) where.title = { contains: query.q, mode: 'insensitive' };
+      if (query.needsValidation && query.validatedBefore) where.lastValidatedAt = { lt: query.validatedBefore };
+      if (query.q) {
+        where.OR = [
+          { title: { contains: query.q, mode: 'insensitive' } },
+          { displayId: { contains: query.q, mode: 'insensitive' } },
+        ];
+      }
       const totalCount = await this.db.service.count({ where });
       const cursor = newestClause(query) ?? nameClause('title', query);
       if (cursor) where.AND = [cursor];
@@ -785,6 +1035,8 @@ export class CivicRepo implements CivicStore {
           description: true,
           url: true,
           phoneContact: true,
+          email: true,
+          displayId: true,
           lastValidatedAt: true,
           sourceId: true,
           status: true,
@@ -897,6 +1149,71 @@ export class CivicRepo implements CivicStore {
 
   countActiveOffices(jurisdictionId: string): Promise<number> {
     return this.run(() => this.db.office.count({ where: { jurisdictionId, status: 'ACTIVE' } }));
+  }
+
+  jurisdictionNameTaken(parentId: string | null, name: string, excludeId?: string): Promise<boolean> {
+    return this.run(async () => {
+      const row = await this.db.jurisdiction.findFirst({
+        where: {
+          parentId,
+          name,
+          ...(excludeId ? { NOT: { id: excludeId } } : {}),
+        },
+        select: { id: true },
+      });
+      return row !== null;
+    });
+  }
+
+  officeNameTaken(jurisdictionId: string, name: string, excludeId?: string): Promise<boolean> {
+    return this.run(async () => {
+      const row = await this.db.office.findFirst({
+        where: { jurisdictionId, name, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+        select: { id: true },
+      });
+      return row !== null;
+    });
+  }
+
+  currentOfficialId(officeId: string): Promise<string | null> {
+    return this.run(async () => {
+      const term = await this.db.officeTerm.findFirst({
+        where: { officeId, isCurrent: true, official: { status: 'ACTIVE' } },
+        select: { officialId: true },
+      });
+      return term?.officialId ?? null;
+    });
+  }
+
+  flagParentRetired(jurisdictionId: string, retired: boolean): Promise<void> {
+    return this.run(async () => {
+      await this.db.jurisdiction.updateMany({ where: { parentId: jurisdictionId }, data: { parentRetired: retired } });
+      await this.db.office.updateMany({ where: { jurisdictionId }, data: { parentRetired: retired } });
+    });
+  }
+
+  markServiceValidated(id: string, at: Date): Promise<void> {
+    return this.run(async () => {
+      await this.db.service.update({ where: { id }, data: { lastValidatedAt: at } });
+    });
+  }
+
+  listJurisdictionNodes() {
+    return this.run(() =>
+      this.db.jurisdiction.findMany({
+        orderBy: [{ name: 'asc' }],
+        take: 500,
+        select: {
+          id: true,
+          parentId: true,
+          name: true,
+          displayId: true,
+          level: true,
+          status: true,
+          parentRetired: true,
+        },
+      }),
+    );
   }
 
   retireActiveOffices(jurisdictionId: string): Promise<string[]> {
@@ -1086,9 +1403,55 @@ export class CivicRepo implements CivicStore {
     });
   }
 
-  setServiceStatus(id: string, status: RecordStatus): Promise<void> {
+  setServiceStatus(id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<void> {
     return this.run(async () => {
       await this.db.service.update({ where: { id }, data: { status } });
+    });
+  }
+
+  officeTiles(now: Date) {
+    const outdatedBefore = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const missing = { phone: null, email: null, website: null, contactUrl: null, status: 'ACTIVE' as const };
+    return this.run(async () => {
+      const [active, vacant, outdated, missingContact] = await Promise.all([
+        this.db.office.count({ where: { status: 'ACTIVE' } }),
+        this.db.office.count({ where: { status: 'ACTIVE', terms: { none: { isCurrent: true } } } }),
+        this.db.office.count({
+          where: {
+            status: 'ACTIVE',
+            OR: [
+              { freshnessOverride: 'FORCE_OUTDATED' },
+              { freshnessOverride: 'NONE', lastUpdatedAt: { lt: outdatedBefore } },
+            ],
+          },
+        }),
+        this.db.office.count({ where: missing }),
+      ]);
+      return { active, vacant, outdated, missingContact };
+    });
+  }
+
+  officialTiles(now: Date) {
+    const outdatedBefore = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const endingBy = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    return this.run(async () => {
+      const [active, termsEndingWithin90d, outdated, missingContact] = await Promise.all([
+        this.db.official.count({ where: { status: 'ACTIVE' } }),
+        this.db.officeTerm.count({
+          where: { isCurrent: true, termEnd: { gte: now, lte: endingBy }, official: { status: 'ACTIVE' } },
+        }),
+        this.db.official.count({
+          where: {
+            status: 'ACTIVE',
+            OR: [
+              { freshnessOverride: 'FORCE_OUTDATED' },
+              { freshnessOverride: 'NONE', lastUpdatedAt: { lt: outdatedBefore } },
+            ],
+          },
+        }),
+        this.db.official.count({ where: { status: 'ACTIVE', website: null } }),
+      ]);
+      return { active, termsEndingWithin90d, outdated, missingContact };
     });
   }
 
@@ -1109,6 +1472,45 @@ export class CivicRepo implements CivicStore {
         select: { id: true, name: true, sortOrder: true, active: true },
       }),
     );
+  }
+
+  private async jurisdictionCounts(ids: string[]): Promise<Map<string, { children: number; offices: number; officials: number }>> {
+    const map = new Map<string, { children: number; offices: number; officials: number }>();
+    if (ids.length === 0) return map;
+    for (const id of ids) map.set(id, { children: 0, offices: 0, officials: 0 });
+    const [children, offices, officials] = await Promise.all([
+      this.db.jurisdiction.groupBy({
+        by: ['parentId'],
+        where: { parentId: { in: ids } },
+        _count: { _all: true },
+      }),
+      this.db.office.groupBy({
+        by: ['jurisdictionId'],
+        where: { jurisdictionId: { in: ids } },
+        _count: { _all: true },
+      }),
+      this.db.$queryRaw<Array<{ jurisdiction_id: string; n: number }>>`
+        SELECT o.jurisdiction_id::text AS jurisdiction_id, COUNT(DISTINCT t.official_id)::int AS n
+        FROM office_terms t
+        JOIN offices o ON o.id = t.office_id
+        WHERE o.jurisdiction_id::text IN (${Prisma.join(ids)})
+        GROUP BY o.jurisdiction_id
+      `,
+    ]);
+    for (const row of children) {
+      if (!row.parentId) continue;
+      const tally = map.get(row.parentId);
+      if (tally) tally.children = row._count._all;
+    }
+    for (const row of offices) {
+      const tally = map.get(row.jurisdictionId);
+      if (tally) tally.offices = row._count._all;
+    }
+    for (const row of officials) {
+      const tally = map.get(row.jurisdiction_id);
+      if (tally) tally.officials = row.n;
+    }
+    return map;
   }
 
   private async boundaryFlags(ids: string[]): Promise<Map<string, boolean>> {
@@ -1179,6 +1581,8 @@ export class CivicRepo implements CivicStore {
         description: true,
         url: true,
         phoneContact: true,
+        email: true,
+        displayId: true,
         lastValidatedAt: true,
         sourceId: true,
         status: true,
@@ -1281,18 +1685,22 @@ function mapAdminService(row: {
   description: string;
   url: string | null;
   phoneContact: string | null;
+  email: string | null;
+  displayId?: string;
   lastValidatedAt: Date;
   sourceId: string;
-  status: RecordStatus;
+  status: 'ACTIVE' | 'INACTIVE';
   links: AdminServiceLink[];
 }): AdminServiceRecord {
   return {
     id: row.id,
+    ...(row.displayId ? { displayId: row.displayId } : {}),
     title: row.title,
     categoryId: row.categoryId,
     description: row.description,
     url: row.url,
     phoneContact: row.phoneContact,
+    email: row.email,
     lastValidatedAt: row.lastValidatedAt,
     sourceId: row.sourceId,
     status: row.status,
@@ -1305,6 +1713,9 @@ function mapAdminService(row: {
 function jurisdictionData(input: UpsertJurisdictionInput) {
   return {
     name: input.name,
+    aliases: input.aliases,
+    description: input.description,
+    isPilot: input.isPilot,
     level: input.level,
     type: input.type,
     subtype: input.subtype,
@@ -1327,6 +1738,7 @@ function officeData(input: UpsertOfficeInput) {
     name: input.name,
     seatLabel: input.seatLabel,
     selectionMethod: input.selectionMethod,
+    officeType: input.officeType,
     displayOrder: input.displayOrder,
     whyTemplate: input.whyTemplate,
     phone: input.phone,
@@ -1349,6 +1761,7 @@ function officialData(input: UpsertOfficialInput) {
     party: input.party,
     photoUrl: input.photoUrl,
     website: input.website,
+    useOfficeAddress: input.useOfficeAddress,
     sourceId: input.sourceId,
     sourceRecordUrl: input.sourceRecordUrl,
     lastUpdatedAt: input.lastUpdatedAt,
@@ -1364,6 +1777,7 @@ function serviceData(input: UpsertServiceInput) {
     description: input.description,
     url: input.url,
     phoneContact: input.phoneContact,
+    email: input.email,
     lastValidatedAt: input.lastValidatedAt,
     sourceId: input.sourceId,
   };

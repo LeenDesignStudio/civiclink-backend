@@ -1,9 +1,8 @@
 import { builder, rememberScope } from '../../graphql/builder.js';
-import { ValidationError } from '../../lib/errors.js';
 import type { Connection } from '../../lib/pagination.js';
 import { GovLevelEnum, PageInfoType, withoutNulls } from '../follows/relay.graphql.js';
+import { sourceHealth } from '../civic/record-rules.js';
 import type { DashboardCounts } from './dashboard.js';
-import { ExportService } from './export.js';
 import { SourcesService } from './sources.service.js';
 import type { PendingRow, RunRow, SourceRow } from '../pipeline/records.js';
 
@@ -12,7 +11,15 @@ const writeScope = { permission: 'admin.source:write' as const };
 const runScope = { permission: 'admin.source:run' as const };
 const decideScope = { permission: 'admin.source:decide' as const };
 const dashboardScope = { permission: 'admin.dashboard:read' as const };
-const exportScope = { permission: 'admin.export:csv' as const };
+const SourceKindEnum = builder.enumType('SourceKind', {
+  values: ['API', 'BULK_EXPORT', 'SCHEDULED_PAGE', 'MANUAL'] as const,
+});
+const SourceRecordStatusEnum = builder.enumType('SourceRecordStatus', {
+  values: ['ACTIVE', 'PAUSED', 'RETIRED'] as const,
+});
+const SourceHealthEnum = builder.enumType('SourceHealth', {
+  values: ['HEALTHY', 'OVERDUE', 'FAILED', 'PAUSED'] as const,
+});
 
 const SourceMethodEnum = builder.enumType('SourceMethod', {
   values: ['API', 'BULK', 'PAGE_COLLECTION', 'MANUAL'] as const,
@@ -26,24 +33,48 @@ const RunStatusEnum = builder.enumType('RunStatus', {
 const ChangeDecisionEnum = builder.enumType('ChangeDecision', {
   values: ['PENDING', 'ACCEPTED', 'REJECTED'] as const,
 });
-const ExportListEnum = builder.enumType('ExportList', {
-  values: ['JURISDICTIONS', 'OFFICES', 'OFFICIALS', 'SERVICES', 'SOURCES', 'CORRECTIONS', 'ALERTS'] as const,
-});
 
 const SourceType = builder.objectRef<SourceRow>('Source').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
+    displayId: t.exposeString('displayId', { nullable: true }),
     name: t.exposeString('name'),
     publisher: t.exposeString('publisher'),
     url: t.exposeString('url'),
     termsUrl: t.exposeString('termsUrl'),
+    termsOfUseUrl: t.string({ resolve: (row) => row.termsUrl }),
     method: t.field({ type: SourceMethodEnum, resolve: (row) => row.method }),
+    kind: t.field({ type: SourceKindEnum, resolve: (row) => row.kind ?? 'MANUAL' }),
     schedule: t.field({ type: SourceScheduleEnum, resolve: (row) => row.schedule }),
     freshnessDays: t.exposeInt('freshnessDays'),
+    outdatedAfterDays: t.int({ resolve: (row) => row.freshnessDays }),
+    notes: t.exposeString('notes', { nullable: true }),
     levels: t.field({ type: [GovLevelEnum], resolve: (row) => row.levels as ('FEDERAL' | 'STATE' | 'COUNTY' | 'MUNICIPAL' | 'EDUCATION' | 'SPECIAL')[] }),
+    coverage: t.field({
+      type: [GovLevelEnum],
+      resolve: (row) => row.levels as ('FEDERAL' | 'STATE' | 'COUNTY' | 'MUNICIPAL' | 'EDUCATION' | 'SPECIAL')[],
+    }),
+    status: t.field({
+      type: SourceRecordStatusEnum,
+      resolve: (row) => row.recordStatus ?? (row.active ? 'ACTIVE' : 'PAUSED'),
+    }),
+    health: t.field({
+      type: SourceHealthEnum,
+      resolve: (row) =>
+        sourceHealth({
+          status: row.recordStatus ?? (row.active ? 'ACTIVE' : 'PAUSED'),
+          lastRunFailed: false,
+          lastSuccessAt: row.lastSuccessAt ?? null,
+          outdatedAfterDays: row.freshnessDays,
+          now: new Date(),
+        }),
+    }),
+    recordsUsingCount: t.int({ resolve: (row) => row.recordsUsingCount ?? 0 }),
     collectorKey: t.exposeString('collectorKey', { nullable: true }),
     active: t.exposeBoolean('active'),
     lastRunAt: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.lastRunAt }),
+    lastSuccessAt: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.lastSuccessAt ?? null }),
+    lastAttemptAt: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.lastAttemptAt ?? null }),
   }),
 });
 
@@ -128,10 +159,6 @@ const RefreshPayload = builder.objectRef<{ run: RunRow }>('TriggerSourceRefreshP
 const DecidePayload = builder.objectRef<{ change: PendingRow }>('DecideSourceChangePayload').implement({
   fields: (t) => ({ change: t.field({ type: PendingType, resolve: (row) => row.change }) }),
 });
-const ExportPayload = builder.objectRef<{ url: string }>('ExportCsvPayload').implement({
-  fields: (t) => ({ url: t.exposeString('url') }),
-});
-
 const UpsertInput = builder.inputType('UpsertSourceInput', {
   fields: (t) => ({
     id: t.field({ type: 'UUID', required: false }),
@@ -140,6 +167,8 @@ const UpsertInput = builder.inputType('UpsertSourceInput', {
     url: t.string({ required: true }),
     termsUrl: t.string({ required: true }),
     method: t.field({ type: SourceMethodEnum, required: true }),
+    kind: t.field({ type: SourceKindEnum, required: false }),
+    notes: t.string({ required: false }),
     schedule: t.field({ type: SourceScheduleEnum, required: true }),
     freshnessDays: t.int({ required: true }),
     levels: t.field({ type: [GovLevelEnum], required: true }),
@@ -156,42 +185,8 @@ const DecideInput = builder.inputType('DecideSourceChangeInput', {
     decision: t.field({ type: ChangeDecisionEnum, required: true }),
   }),
 });
-const ExportInput = builder.inputType('ExportCsvInput', {
-  fields: (t) => ({
-    list: t.field({ type: ExportListEnum, required: true }),
-    filter: t.string({ required: false }),
-  }),
-});
-
 function sources(ctx: { services: unknown }): SourcesService {
   return (ctx.services as { sources: SourcesService }).sources;
-}
-
-function apiBase(request: {
-  protocol: string;
-  hostname: string;
-  headers: {
-    'x-forwarded-proto'?: string | string[];
-    'x-forwarded-host'?: string | string[];
-    host?: string | string[] | undefined;
-  };
-}): string {
-  const forwardedProto = request.headers['x-forwarded-proto'];
-  const forwardedHost = request.headers['x-forwarded-host'] ?? request.headers.host;
-  const proto = firstHeader(forwardedProto) ?? request.protocol;
-  const host = firstHeader(forwardedHost) ?? request.hostname;
-  return `${proto}://${host}`;
-}
-
-function firstHeader(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  if (!value) return undefined;
-  const first = value.split(',')[0]?.trim();
-  return first && first.length > 0 ? first : undefined;
-}
-
-function exportsOf(ctx: { services: unknown }): ExportService {
-  return (ctx.services as { exports: ExportService }).exports;
 }
 
 builder.queryField('adminSources', (t) =>
@@ -267,29 +262,22 @@ builder.mutationField('decideSourceChange', (t) =>
 );
 rememberScope('Mutation', 'decideSourceChange', decideScope);
 
-builder.mutationField('exportCsv', (t) =>
+builder.mutationField('pauseSource', (t) =>
   t.field({
-    type: ExportPayload,
-    authScopes: exportScope,
-    args: { input: t.arg({ type: ExportInput, required: true }) },
-    resolve: (_root, args, ctx) => {
-      const input = withoutNulls(args.input) as { list: string; filter?: string };
-      let filter: Record<string, string> | undefined;
-      if (input.filter) {
-        try {
-          const parsed: unknown = JSON.parse(input.filter);
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            filter = Object.fromEntries(
-              Object.entries(parsed).flatMap(([key, value]) => (typeof value === 'string' ? [[key, value]] : [])),
-            );
-          }
-        } catch {
-          throw new ValidationError('Filter must be JSON.');
-        }
-      }
-      const body = filter ? { list: input.list, filter } : { list: input.list };
-      return exportsOf(ctx).exportCsv(ctx, body, apiBase(ctx.reply.request));
-    },
+    type: SourcePayload,
+    authScopes: writeScope,
+    args: { input: t.arg({ type: RefreshInput, required: true }) },
+    resolve: (_root, args, ctx) => sources(ctx).pauseSource(ctx, withoutNulls(args.input)),
   }),
 );
-rememberScope('Mutation', 'exportCsv', exportScope);
+rememberScope('Mutation', 'pauseSource', writeScope);
+
+builder.mutationField('resumeSource', (t) =>
+  t.field({
+    type: SourcePayload,
+    authScopes: writeScope,
+    args: { input: t.arg({ type: RefreshInput, required: true }) },
+    resolve: (_root, args, ctx) => sources(ctx).resumeSource(ctx, withoutNulls(args.input)),
+  }),
+);
+rememberScope('Mutation', 'resumeSource', writeScope);

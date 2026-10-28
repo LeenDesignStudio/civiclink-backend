@@ -11,8 +11,32 @@ export interface ChannelStats {
   clicks: number;
 }
 
+export interface ChannelDelivery {
+  channel: NotificationChannel;
+  targeted: number;
+  sent: number;
+  delivered: number;
+  failed: number;
+  notEligible: number;
+  opens: number;
+  clicks: number;
+}
+
+export interface FailureReason {
+  reason: string;
+  count: number;
+}
+
+export interface AlertTiles {
+  total: number;
+  sent7d: number;
+  drafts: number;
+  failedOrPartly: number;
+}
+
 export interface AlertDto {
   id: string;
+  displayId?: string;
   targetOfficeId: string | null;
   targetOfficialId: string | null;
   title: string;
@@ -22,6 +46,7 @@ export interface AlertDto {
   status: AlertStatus;
   createdBy: string;
   sentBy: string | null;
+  sentByName?: string | null;
   sentAt: Date | null;
   recipientCount: number | null;
   createdAt: Date;

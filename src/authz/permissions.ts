@@ -35,7 +35,6 @@ export const ADMIN_PERMISSIONS = [
   'admin.alert:write',
   'admin.alert:send',
   'admin.changelog:read',
-  'admin.export:csv',
   'admin.users:read',
   'admin.users:manage',
 ] as const;
@@ -78,7 +77,6 @@ const superAdmin: Permission[] = [
   'admin.source:write',
   'admin.source:run',
   'admin.source:decide',
-  'admin.export:csv',
   'admin.users:read',
   'admin.users:manage',
 ];

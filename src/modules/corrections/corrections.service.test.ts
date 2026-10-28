@@ -6,6 +6,7 @@ import {
   DuplicateCorrectionError,
   ForbiddenError,
   PreconditionError,
+  RecordRetiredError,
   ValidationError,
 } from '../../lib/errors.js';
 import type { CivicEntityType, CorrectionField, GovLevel } from './corrections.dto.js';
@@ -157,14 +158,50 @@ class MemoryCorrections implements CorrectionsRepo {
     return Promise.resolve(this.names.get(userId) ?? null);
   }
 
+  recordFlags(entityType: CivicEntityType, entityId: string) {
+    const entity = this.entities.get(`${entityType}:${entityId}`);
+    return Promise.resolve({
+      retired: !entity?.active,
+      lastUpdatedAt: null,
+      displayId: null,
+      name: null,
+    });
+  }
+
+  listOpenOnRecord() {
+    return Promise.resolve([]);
+  }
+
+  correctionTiles(now: Date) {
+    const since = now.getTime() - 30 * 86_400_000;
+    return Promise.resolve({
+      pending: this.rows.filter((row) => row.status === 'SUBMITTED').length,
+      inReview: this.rows.filter((row) => row.status === 'IN_REVIEW').length,
+      applied30d: this.rows.filter(
+        (row) => row.status === 'APPLIED' && (row.resolvedAt?.getTime() ?? 0) >= since,
+      ).length,
+      dismissed30d: this.rows.filter(
+        (row) => row.status === 'DISMISSED' && (row.resolvedAt?.getTime() ?? 0) >= since,
+      ).length,
+    });
+  }
+
+  adminName(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
   private filterAdmin(query: AdminListQuery): StoredCorrection[] {
+    const rank = { SUBMITTED: 0, IN_REVIEW: 1, APPLIED: 2, DISMISSED: 3 };
     return this.rows
       .filter((row) => (query.status ? row.status === query.status : true))
       .filter((row) => (query.level ? row.level === query.level : true))
       .filter((row) => (query.entityType ? row.entityType === query.entityType : true))
+      .filter((row) => (query.field ? row.field === query.field : true))
       .filter((row) => (query.assigneeId ? row.assigneeId === query.assigneeId : true))
       .filter((row) => (query.olderThan ? row.createdAt.getTime() < query.olderThan.getTime() : true))
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      .filter((row) => (query.submittedFrom ? row.createdAt.getTime() >= query.submittedFrom.getTime() : true))
+      .filter((row) => (query.submittedTo ? row.createdAt.getTime() <= query.submittedTo.getTime() : true))
+      .sort((a, b) => rank[a.status] - rank[b.status] || a.createdAt.getTime() - b.createdAt.getTime());
   }
 }
 
@@ -304,5 +341,30 @@ describe('CorrectionsService', () => {
     const applied = audit.entries.filter((entry) => entry.action === 'APPLY' || entry.action === 'UPDATE');
     expect(applied).toHaveLength(2);
     expect(applied.map((entry) => entry.entityType).sort()).toEqual(['Correction', 'OFFICE']);
+  });
+
+  it('refuses to apply a correction when the record is retired and accepts the spec dismiss reasons', async () => {
+    const { svc, repo } = harness();
+    const created = await svc.submitCorrection(principal('resident'), {
+      entityType: 'OFFICE',
+      entityId: officeId(1),
+      field: 'OTHER',
+      proposedValue: 'Updated name',
+    });
+    const entity = repo.entities.get(`OFFICE:${officeId(1)}`);
+    if (entity) entity.active = false;
+    await expect(
+      svc.applyCorrection(principal('admin'), { id: created.correction.id, value: 'Updated name' }),
+    ).rejects.toBeInstanceOf(RecordRetiredError);
+    if (entity) entity.active = true;
+    const dismissed = await svc.dismissCorrection(principal('admin'), {
+      id: created.correction.id,
+      reason: 'CANT_VERIFY',
+    });
+    expect(dismissed.correction.status).toBe('DISMISSED');
+    expect(dismissed.correction.dismissReason).toBe('CANT_VERIFY');
+    const tiles = await svc.adminCorrectionTiles(principal('admin'));
+    expect(tiles.dismissed30d).toBe(1);
+    expect(tiles.pending).toBe(0);
   });
 });

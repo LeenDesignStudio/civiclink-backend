@@ -12,12 +12,21 @@ input AddCorrectionNoteInput {
 
 type AdminAlert {
   alert: Alert
+  delivery: [AlertChannelDelivery!]
+  failureReasons: [AlertFailureReason!]
+  followerCount: Int
   stats: [AlertChannelStats!]
 }
 
 input AdminAlertFilter {
+  channel: NotificationChannel
+  q: String
+  sentBy: UUID
+  sentFrom: DateTime
+  sentTo: DateTime
   status: AlertStatus
   targetOfficeId: UUID
+  targetType: AlertTargetType
 }
 
 enum AdminCivicSort {
@@ -28,18 +37,29 @@ enum AdminCivicSort {
 type AdminCorrection {
   assigneeId: ID
   createdAt: DateTime
+  currentValue: String
   currentValueSnapshot: String
+  decidedAt: DateTime
+  decidedBy: CorrectionDecidedBy
+  description: String
   details: String
   dismissNote: String
   dismissReason: DismissReason
+  displayId: String
   entityId: ID
   entityType: CivicEntityType
   evidenceUrl: String
   field: CorrectionField
   id: ID
   notes: [CorrectionNote!]
+  otherOpenCorrections: [OpenCorrectionBrief!]
   proposedValue: String
+  record: CorrectionRecordBrief
+  recordChangedSinceSubmission: Boolean
+  recordRetired: Boolean
+  recordType: CivicEntityType
   status: CorrectionStatus
+  submittedBy: CorrectionSubmitter
   submitterDisplayName: String
   updatedAt: DateTime
 }
@@ -58,9 +78,14 @@ type AdminCorrectionEdge {
 input AdminCorrectionFilter {
   assignedToMe: Boolean
   entityType: CivicEntityType
+  field: CorrectionField
   level: GovLevel
   olderThanDays: Int
+  q: String
+  recordType: CivicEntityType
   status: CorrectionStatus
+  submittedFrom: DateTime
+  submittedTo: DateTime
 }
 
 type AdminCorrectionPayload {
@@ -78,21 +103,31 @@ type AdminDashboardCounts {
 }
 
 type AdminJurisdiction {
+  aliases: [String!]
+  boundaryStatus: BoundaryStatus
   boundaryVintage: String
+  childCount: Int
+  description: String
+  displayId: String
   districtCode: String
+  freshness: Freshness
   freshnessNote: String
   freshnessOverride: FreshnessOverride
   geoid: String
   hasBoundary: Boolean
   id: ID
+  isPilot: Boolean
   lastUpdatedAt: DateTime
   level: GovLevel
   name: String
+  officeCount: Int
+  officialCount: Int
   parentId: ID
+  parentRetired: Boolean
   sourceId: ID
   sourceRecordUrl: String
   state: String
-  status: String
+  status: RecordStatus
   subtype: String
   type: JurisdictionType
   website: String
@@ -110,12 +145,26 @@ type AdminJurisdictionEdge {
 }
 
 input AdminJurisdictionFilter {
+  boundary: BoundaryStatus
   freshness: Freshness
+  isPilot: Boolean
   level: GovLevel
+  parentId: ID
   q: String
   state: String
   status: RecordStatus
   type: JurisdictionType
+}
+
+type AdminJurisdictionTreeNode {
+  children: [AdminJurisdictionTreeNode!]
+  displayId: String
+  id: ID
+  level: GovLevel
+  name: String
+  parentId: ID
+  parentRetired: Boolean
+  status: RecordStatus
 }
 
 type AdminMe {
@@ -130,9 +179,11 @@ type AdminMe {
 type AdminOffice {
   addresses: [AdminOfficeAddress!]
   contactUrl: String
+  displayId: String
   displayOrder: Int
   email: String
   followerCount: Int
+  freshness: Freshness
   freshnessNote: String
   freshnessOverride: FreshnessOverride
   holderUnknown: Boolean
@@ -140,6 +191,8 @@ type AdminOffice {
   jurisdictionId: ID
   lastUpdatedAt: DateTime
   name: String
+  officeType: OfficeType
+  parentRetired: Boolean
   phone: String
   seatLabel: String
   selectionMethod: SelectionMethod
@@ -174,16 +227,28 @@ type AdminOfficeEdge {
 }
 
 input AdminOfficeFilter {
+  hasOfficial: Boolean
   jurisdictionId: ID
   level: GovLevel
+  missingContact: Boolean
+  officeType: OfficeType
   q: String
   staleOnly: Boolean
   status: RecordStatus
   vacantOnly: Boolean
 }
 
+type AdminOfficeTiles {
+  active: Int
+  missingContact: Int
+  outdated: Int
+  vacant: Int
+}
+
 type AdminOfficial {
+  displayId: String
   displayName: String
+  freshness: Freshness
   freshnessNote: String
   freshnessOverride: FreshnessOverride
   fullName: String
@@ -196,6 +261,7 @@ type AdminOfficial {
   sourceRecordUrl: String
   status: RecordStatus
   terms: [AdminOfficialTerm!]
+  useOfficeAddress: Boolean
   website: String
 }
 
@@ -211,7 +277,11 @@ type AdminOfficialEdge {
 }
 
 input AdminOfficialFilter {
+  freshness: Freshness
+  jurisdictionId: ID
+  level: GovLevel
   officeId: ID
+  officeType: OfficeType
   q: String
   status: RecordStatus
 }
@@ -233,6 +303,13 @@ type AdminOfficialTermOffice {
   status: RecordStatus
 }
 
+type AdminOfficialTiles {
+  active: Int
+  missingContact: Int
+  outdated: Int
+  termsEndingWithin90d: Int
+}
+
 type AdminPasswordResetPayload {
   sent: Boolean
 }
@@ -245,6 +322,8 @@ enum AdminRole {
 type AdminService {
   categoryId: ID
   description: String
+  displayId: String
+  email: String
   id: ID
   jurisdictionIds: [ID!]
   lastValidatedAt: DateTime
@@ -252,7 +331,7 @@ type AdminService {
   officeIds: [ID!]
   phoneContact: String
   sourceId: ID
-  status: RecordStatus
+  status: ServiceStatus
   title: String
   url: String
 }
@@ -278,8 +357,9 @@ type AdminServiceEdge {
 input AdminServiceFilter {
   categoryId: ID
   linkBroken: Boolean
+  needsValidation: Boolean
   q: String
-  status: RecordStatus
+  status: ServiceStatus
 }
 
 type AdminServiceLink {
@@ -354,14 +434,29 @@ type Alert {
   body: String
   channels: [NotificationChannel!]
   createdAt: DateTime
+  displayId: String
   id: ID
   link: String
+  message: String
   recipientCount: Int
   sentAt: DateTime
+  sentBy: ID
+  sentByName: String
   status: AlertStatus
   targetOfficeId: ID
   targetOfficialId: ID
   title: String
+}
+
+type AlertChannelDelivery {
+  channel: NotificationChannel
+  clicks: Int
+  delivered: Int
+  failed: Int
+  notEligible: Int
+  opens: Int
+  sent: Int
+  targeted: Int
 }
 
 type AlertChannelStats {
@@ -383,12 +478,18 @@ type AlertConnection {
 
 enum AlertDraftChannel {
   EMAIL
+  IN_APP
   PUSH
 }
 
 type AlertEdge {
   cursor: String
   node: Alert
+}
+
+type AlertFailureReason {
+  count: Int
+  reason: String
 }
 
 input AlertIdInput {
@@ -414,8 +515,22 @@ type AlertPreview {
 
 enum AlertStatus {
   DRAFT
+  FAILED
+  PARTLY_FAILED
   SENDING
   SENT
+}
+
+enum AlertTargetType {
+  OFFICE
+  OFFICIAL
+}
+
+type AlertTiles {
+  drafts: Int
+  failedOrPartly: Int
+  sent7d: Int
+  total: Int
 }
 
 input ApplyCorrectionInput {
@@ -429,6 +544,11 @@ input ApplyCorrectionInput {
 input AssignCorrectionInput {
   assigneeId: UUID
   id: UUID!
+}
+
+enum BoundaryStatus {
+  MISSING
+  OK
 }
 
 enum ChangeDecision {
@@ -540,6 +660,11 @@ type Correction {
   updatedAt: DateTime
 }
 
+type CorrectionDecidedBy {
+  id: ID
+  name: String
+}
+
 enum CorrectionField {
   DISTRICT
   DOES_NOT_APPLY
@@ -565,11 +690,29 @@ type CorrectionNote {
   id: ID
 }
 
+type CorrectionRecordBrief {
+  displayId: String
+  id: ID
+  name: String
+}
+
 enum CorrectionStatus {
   APPLIED
   DISMISSED
   IN_REVIEW
   SUBMITTED
+}
+
+type CorrectionSubmitter {
+  accountId: ID
+  displayName: String
+}
+
+type CorrectionTiles {
+  applied30d: Int
+  dismissed30d: Int
+  inReview: Int
+  pending: Int
 }
 
 enum Coverage {
@@ -616,35 +759,16 @@ input DismissCorrectionInput {
 }
 
 enum DismissReason {
-  ALREADY_CORRECT
+  CANT_VERIFY
   DUPLICATE
-  INSUFFICIENT_EVIDENCE
   OTHER
   OUT_OF_SCOPE
+  SOURCE_CORRECT
 }
 
 input EndOfficeTermInput {
   termEnd: DateTime
   termId: ID!
-}
-
-input ExportCsvInput {
-  filter: String
-  list: ExportList!
-}
-
-type ExportCsvPayload {
-  url: String
-}
-
-enum ExportList {
-  ALERTS
-  CORRECTIONS
-  JURISDICTIONS
-  OFFICES
-  OFFICIALS
-  SERVICES
-  SOURCES
 }
 
 type Follow {
@@ -841,12 +965,14 @@ type Mutation {
   deleteNotification(input: DeleteNotificationInput!): DeleteNotificationPayload
   deleteSavedLocation(input: SavedLocationIdInput!): DeleteSavedLocationPayload
   dismissCorrection(input: DismissCorrectionInput!): AdminCorrectionPayload
+  duplicateAlertAsDraft(input: AlertIdInput!): AlertPayload
   endOfficeTerm(input: EndOfficeTermInput!): OfficeTermPayload
-  exportCsv(input: ExportCsvInput!): ExportCsvPayload
   follow(input: FollowInput!): FollowPayload
   inviteAdmin(input: InviteAdminInput!): AdminUserPayload
   markCorrectionInReview(input: CorrectionIdInput!): AdminCorrectionPayload
   markNotificationsRead(input: MarkNotificationsReadInput!): MarkNotificationsReadPayload
+  markServiceValidated(id: ID!): ValidatedService
+  pauseSource(input: TriggerSourceRefreshInput!): SourcePayload
   registerPushSubscription(input: RegisterPushSubscriptionInput!): RegisterPushSubscriptionPayload
   removePushSubscription(input: RemovePushSubscriptionInput!): RemovePushSubscriptionPayload
   requestAccountDeletion(input: RequestAccountDeletionInput!): RequestAccountDeletionPayload
@@ -856,6 +982,7 @@ type Mutation {
   restoreOffice(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
   restoreOfficial(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
   restoreService(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
+  resumeSource(input: TriggerSourceRefreshInput!): SourcePayload
   retireJurisdiction(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
   retireOffice(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
   retireOfficial(id: ID!, retireActiveOffices: Boolean): RecordStatusPayload
@@ -1007,6 +1134,13 @@ type OfficeTermPayload {
   term: OfficeTerm
 }
 
+enum OfficeType {
+  APPOINTED
+  COMMISSION
+  DEPARTMENT
+  ELECTED
+}
+
 type Official {
   displayName: String
   freshness: Freshness
@@ -1020,6 +1154,12 @@ type Official {
   source: CivicSource
   website: URL
   whyItApplies: String
+}
+
+type OpenCorrectionBrief {
+  displayId: String
+  id: ID
+  status: CorrectionStatus
 }
 
 type PageInfo {
@@ -1060,16 +1200,21 @@ type PortalSessionPayload {
 
 type Query {
   adminAlert(id: UUID!): AdminAlert
+  adminAlertTiles: AlertTiles
   adminAlerts(after: String, filter: AdminAlertFilter, first: Int): AlertConnection
   adminCorrection(id: UUID!): AdminCorrection
+  adminCorrectionTiles: CorrectionTiles
   adminCorrections(after: String, filter: AdminCorrectionFilter, first: Int): AdminCorrectionConnection
   adminDashboardCounts: AdminDashboardCounts
   adminJurisdiction(id: ID!): AdminJurisdiction
+  adminJurisdictionTree(rootId: ID): [AdminJurisdictionTreeNode!]
   adminJurisdictions(after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort): AdminJurisdictionConnection
   adminMe: AdminMe
   adminOffice(id: ID!): AdminOffice
+  adminOfficeTiles: AdminOfficeTiles
   adminOffices(after: String, filter: AdminOfficeFilter, first: Int, sort: AdminCivicSort): AdminOfficeConnection
   adminOfficial(id: ID!): AdminOfficial
+  adminOfficialTiles: AdminOfficialTiles
   adminOfficials(after: String, filter: AdminOfficialFilter, first: Int, sort: AdminCivicSort): AdminOfficialConnection
   adminService(id: ID!): AdminService
   adminServices(after: String, filter: AdminServiceFilter, first: Int, sort: AdminCivicSort): AdminServiceConnection
@@ -1174,7 +1319,7 @@ enum RunStatus {
 
 input SaveAlertDraftInput {
   body: String!
-  channels: [AlertDraftChannel!]
+  channels: [AlertDraftChannel!]!
   id: UUID
   link: String
   targetOfficeId: UUID
@@ -1269,6 +1414,11 @@ type ServicePreviewCategory {
   name: String
 }
 
+enum ServiceStatus {
+  ACTIVE
+  INACTIVE
+}
+
 input SetAdminStatusInput {
   adminId: UUID!
   status: AdminStatusChange!
@@ -1295,14 +1445,25 @@ type SignOutPayload {
 type Source {
   active: Boolean
   collectorKey: String
+  coverage: [GovLevel!]
+  displayId: String
   freshnessDays: Int
+  health: SourceHealth
   id: ID
+  kind: SourceKind
+  lastAttemptAt: DateTime
   lastRunAt: DateTime
+  lastSuccessAt: DateTime
   levels: [GovLevel!]
   method: SourceMethod
   name: String
+  notes: String
+  outdatedAfterDays: Int
   publisher: String
+  recordsUsingCount: Int
   schedule: SourceSchedule
+  status: SourceRecordStatus
+  termsOfUseUrl: String
   termsUrl: String
   url: String
 }
@@ -1318,6 +1479,20 @@ type SourceEdge {
   node: Source
 }
 
+enum SourceHealth {
+  FAILED
+  HEALTHY
+  OVERDUE
+  PAUSED
+}
+
+enum SourceKind {
+  API
+  BULK_EXPORT
+  MANUAL
+  SCHEDULED_PAGE
+}
+
 enum SourceMethod {
   API
   BULK
@@ -1327,6 +1502,12 @@ enum SourceMethod {
 
 type SourcePayload {
   source: Source
+}
+
+enum SourceRecordStatus {
+  ACTIVE
+  PAUSED
+  RETIRED
 }
 
 type SourceRun {
@@ -1467,11 +1648,15 @@ input UpdateSavedLocationInput {
 }
 
 input UpsertJurisdictionInput {
+  aliases: [String!]
+  correctionId: ID
+  description: String
   districtCode: String
   freshnessNote: String
   freshnessOverride: FreshnessOverride
   geoid: String
   id: ID
+  isPilot: Boolean
   lastUpdatedAt: DateTime!
   level: GovLevel!
   name: String!
@@ -1486,6 +1671,7 @@ input UpsertJurisdictionInput {
 
 input UpsertOfficeInput {
   contactUrl: String
+  correctionId: ID
   displayOrder: Int
   email: String
   freshnessNote: String
@@ -1495,6 +1681,7 @@ input UpsertOfficeInput {
   lastUpdatedAt: DateTime!
   name: String!
   notifyFollowers: Boolean
+  officeType: OfficeType
   phone: String
   seatLabel: String
   selectionMethod: SelectionMethod!
@@ -1505,6 +1692,7 @@ input UpsertOfficeInput {
 }
 
 input UpsertOfficialInput {
+  correctionId: ID
   displayName: String
   freshnessNote: String
   fullName: String!
@@ -1515,6 +1703,7 @@ input UpsertOfficialInput {
   photoUrl: String
   sourceId: ID!
   sourceRecordUrl: String
+  useOfficeAddress: Boolean
   website: String
 }
 
@@ -1527,7 +1716,9 @@ input UpsertServiceCategoryInput {
 
 input UpsertServiceInput {
   categoryId: ID!
+  correctionId: ID
   description: String!
+  email: String
   id: ID
   jurisdictionIds: [String!]
   lastValidatedAt: DateTime!
@@ -1543,11 +1734,17 @@ input UpsertSourceInput {
   collectorKey: String
   freshnessDays: Int!
   id: UUID
+  kind: SourceKind
   levels: [GovLevel!]!
   method: SourceMethod!
   name: String!
+  notes: String
   publisher: String!
   schedule: SourceSchedule!
   termsUrl: String!
   url: String!
+}
+
+type ValidatedService {
+  id: ID
 }

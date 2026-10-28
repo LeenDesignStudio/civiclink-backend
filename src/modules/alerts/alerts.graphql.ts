@@ -2,7 +2,7 @@ import { builder, rememberScope } from '../../graphql/builder.js';
 import type { Connection } from '../../lib/pagination.js';
 import { PageInfoType, withoutNulls } from '../follows/relay.graphql.js';
 import { NotificationChannelEnum } from '../notifications/notifications.graphql.js';
-import type { AlertDto, AlertPreview, ChannelStats } from './alerts.dto.js';
+import type { AlertDto, AlertPreview, AlertTiles, ChannelDelivery, ChannelStats, FailureReason } from './alerts.dto.js';
 import { AlertsService } from './alerts.service.js';
 
 const readScope = { permission: 'admin.alert:read' as const };
@@ -10,21 +10,29 @@ const writeScope = { permission: 'admin.alert:write' as const };
 const sendScope = { permission: 'admin.alert:send' as const };
 
 const AlertStatusEnum = builder.enumType('AlertStatus', {
-  values: ['DRAFT', 'SENDING', 'SENT'] as const,
+  values: ['DRAFT', 'SENDING', 'SENT', 'PARTLY_FAILED', 'FAILED'] as const,
+});
+
+const AlertTargetTypeEnum = builder.enumType('AlertTargetType', {
+  values: ['OFFICE', 'OFFICIAL'] as const,
 });
 
 const AlertType = builder.objectRef<AlertDto>('Alert').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
+    displayId: t.exposeString('displayId', { nullable: true }),
     targetOfficeId: t.exposeID('targetOfficeId', { nullable: true }),
     targetOfficialId: t.exposeID('targetOfficialId', { nullable: true }),
     title: t.exposeString('title'),
     body: t.exposeString('body'),
+    message: t.string({ resolve: (row) => row.body }),
     link: t.exposeString('link', { nullable: true }),
     channels: t.field({ type: [NotificationChannelEnum], resolve: (row) => row.channels }),
     status: t.field({ type: AlertStatusEnum, resolve: (row) => row.status }),
     recipientCount: t.exposeInt('recipientCount', { nullable: true }),
     sentAt: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.sentAt }),
+    sentBy: t.exposeID('sentBy', { nullable: true }),
+    sentByName: t.exposeString('sentByName', { nullable: true }),
     createdAt: t.field({ type: 'DateTime', resolve: (row) => row.createdAt }),
   }),
 });
@@ -42,10 +50,44 @@ const StatsType = builder.objectRef<ChannelStats>('AlertChannelStats').implement
   }),
 });
 
-const AlertDetail = builder.objectRef<AlertDto & { stats: ChannelStats[] }>('AdminAlert').implement({
+const DeliveryType = builder.objectRef<ChannelDelivery>('AlertChannelDelivery').implement({
   fields: (t) => ({
-    alert: t.field({ type: AlertType, resolve: (row) => row }),
-    stats: t.field({ type: [StatsType], resolve: (row) => row.stats }),
+    channel: t.field({ type: NotificationChannelEnum, resolve: (row) => row.channel }),
+    targeted: t.exposeInt('targeted'),
+    sent: t.exposeInt('sent'),
+    delivered: t.exposeInt('delivered'),
+    failed: t.exposeInt('failed'),
+    notEligible: t.exposeInt('notEligible'),
+    opens: t.exposeInt('opens'),
+    clicks: t.exposeInt('clicks'),
+  }),
+});
+
+const FailureType = builder.objectRef<FailureReason>('AlertFailureReason').implement({
+  fields: (t) => ({
+    reason: t.exposeString('reason'),
+    count: t.exposeInt('count'),
+  }),
+});
+
+const AlertDetail = builder
+  .objectRef<AlertDto & { stats: ChannelStats[]; delivery: ChannelDelivery[]; followerCount: number; failureReasons: FailureReason[] }>('AdminAlert')
+  .implement({
+    fields: (t) => ({
+      alert: t.field({ type: AlertType, resolve: (row) => row }),
+      stats: t.field({ type: [StatsType], resolve: (row) => row.stats }),
+      followerCount: t.exposeInt('followerCount'),
+      delivery: t.field({ type: [DeliveryType], resolve: (row) => row.delivery }),
+      failureReasons: t.field({ type: [FailureType], resolve: (row) => row.failureReasons }),
+    }),
+  });
+
+const AlertTilesType = builder.objectRef<AlertTiles>('AlertTiles').implement({
+  fields: (t) => ({
+    total: t.exposeInt('total'),
+    sent7d: t.exposeInt('sent7d'),
+    drafts: t.exposeInt('drafts'),
+    failedOrPartly: t.exposeInt('failedOrPartly'),
   }),
 });
 
@@ -103,7 +145,10 @@ const SaveInput = builder.inputType('SaveAlertDraftInput', {
     title: t.string({ required: true }),
     body: t.string({ required: true }),
     link: t.string({ required: false }),
-    channels: t.field({ type: [builder.enumType('AlertDraftChannel', { values: ['EMAIL', 'PUSH'] as const })], required: false }),
+    channels: t.field({
+      type: [builder.enumType('AlertDraftChannel', { values: ['IN_APP', 'EMAIL', 'PUSH'] as const })],
+      required: true,
+    }),
   }),
 });
 
@@ -122,6 +167,12 @@ const FilterInput = builder.inputType('AdminAlertFilter', {
   fields: (t) => ({
     status: t.field({ type: AlertStatusEnum, required: false }),
     targetOfficeId: t.field({ type: 'UUID', required: false }),
+    q: t.string({ required: false }),
+    channel: t.field({ type: NotificationChannelEnum, required: false }),
+    targetType: t.field({ type: AlertTargetTypeEnum, required: false }),
+    sentFrom: t.field({ type: 'DateTime', required: false }),
+    sentTo: t.field({ type: 'DateTime', required: false }),
+    sentBy: t.field({ type: 'UUID', required: false }),
   }),
 });
 
@@ -152,6 +203,15 @@ builder.queryField('adminAlert', (t) =>
   }),
 );
 rememberScope('Query', 'adminAlert', readScope);
+
+builder.queryField('adminAlertTiles', (t) =>
+  t.field({
+    type: AlertTilesType,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => alerts(ctx).adminAlertTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminAlertTiles', readScope);
 
 builder.queryField('previewAlert', (t) =>
   t.field({
@@ -202,3 +262,13 @@ builder.mutationField('sendAlert', (t) =>
   }),
 );
 rememberScope('Mutation', 'sendAlert', sendScope);
+
+builder.mutationField('duplicateAlertAsDraft', (t) =>
+  t.field({
+    type: AlertPayload,
+    authScopes: writeScope,
+    args: { input: t.arg({ type: IdInput, required: true }) },
+    resolve: (_root, args, ctx) => alerts(ctx).duplicateAlertAsDraft(ctx, withoutNulls(args.input)),
+  }),
+);
+rememberScope('Mutation', 'duplicateAlertAsDraft', writeScope);

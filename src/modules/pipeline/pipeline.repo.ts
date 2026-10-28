@@ -5,6 +5,7 @@ import { ValidationError } from '../../lib/errors.js';
 import type { PendingQuery, PipelineStore, SourceListQuery, SourceWrite } from './pipeline.ports.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
 import { sourceConfigFromJson } from './source-config.js';
+import { refreshWrite } from '../civic/record-rules.js';
 import { sameAttributes, type NormalisedRecord } from './types.js';
 
 const LEVELS = new Set<string>(Object.values(GovLevel));
@@ -23,10 +24,26 @@ function toSource(row: {
   collectorKey: string | null;
   active: boolean;
   lastRunAt: Date | null;
+  displayId?: string;
+  kind?: SourceRow['kind'];
+  notes?: string | null;
+  recordStatus?: SourceRow['recordStatus'];
+  lastSuccessAt?: Date | null;
+  lastAttemptAt?: Date | null;
   createdAt: Date;
   config: Prisma.JsonValue;
 }): SourceRow {
-  return { ...row, config: sourceConfigFromJson(row.config) };
+  const { kind, displayId, notes, recordStatus, lastSuccessAt, lastAttemptAt, ...rest } = row;
+  return {
+    ...rest,
+    config: sourceConfigFromJson(row.config),
+    ...(kind !== undefined ? { kind } : {}),
+    ...(displayId !== undefined ? { displayId } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+    ...(recordStatus !== undefined ? { recordStatus } : {}),
+    ...(lastSuccessAt !== undefined ? { lastSuccessAt } : {}),
+    ...(lastAttemptAt !== undefined ? { lastAttemptAt } : {}),
+  };
 }
 
 function toRun(row: {
@@ -63,12 +80,18 @@ export class PipelineRepo implements PipelineStore {
         this.db.source.count(),
       ]),
     );
-    return { rows: rows.map(toSource), total };
+    const counts = await this.recordsUsing(rows.map((row) => row.id));
+    return {
+      rows: rows.map((row) => ({ ...toSource(row), recordsUsingCount: counts.get(row.id) ?? 0 })),
+      total,
+    };
   }
 
   async findSource(id: string): Promise<SourceRow | null> {
     const row = await dbCall(() => this.db.source.findUnique({ where: { id } }));
-    return row ? toSource(row) : null;
+    if (!row) return null;
+    const counts = await this.recordsUsing([row.id]);
+    return { ...toSource(row), recordsUsingCount: counts.get(row.id) ?? 0 };
   }
 
   async nameTaken(name: string, excludeId?: string): Promise<boolean> {
@@ -82,6 +105,7 @@ export class PipelineRepo implements PipelineStore {
   }
 
   async saveSource(input: SourceWrite, _now: Date): Promise<SourceRow> {
+    const recordStatus: 'ACTIVE' | 'PAUSED' = input.active ? 'ACTIVE' : 'PAUSED';
     const data = {
       name: input.name,
       publisher: input.publisher,
@@ -93,6 +117,9 @@ export class PipelineRepo implements PipelineStore {
       levels: input.levels.filter((level): level is GovLevel => LEVELS.has(level)),
       collectorKey: input.collectorKey,
       active: input.active,
+      recordStatus,
+      kind: input.kind ?? kindForMethod(input.method),
+      ...(input.notes !== undefined ? { notes: input.notes } : {}),
       config: input.config as Prisma.InputJsonValue,
     };
     const id = input.id;
@@ -146,7 +173,7 @@ export class PipelineRepo implements PipelineStore {
     },
     now: Date,
   ): Promise<void> {
-    await dbCall(() =>
+    const run = await dbCall(() =>
       this.db.sourceRun.update({
         where: { id: runId },
         data: {
@@ -159,12 +186,24 @@ export class PipelineRepo implements PipelineStore {
           ...(patch.sha ? { snapshotSha: patch.sha } : {}),
           ...(patch.retired !== undefined ? { retired: patch.retired } : {}),
         },
+        select: { sourceId: true },
+      }),
+    );
+    await dbCall(() =>
+      this.db.source.update({
+        where: { id: run.sourceId },
+        data: {
+          lastAttemptAt: now,
+          ...(patch.status === 'SUCCEEDED' ? { lastSuccessAt: now } : {}),
+        },
       }),
     );
   }
 
   async listActiveSources(): Promise<SourceRow[]> {
-    const rows = await dbCall(() => this.db.source.findMany({ where: { active: true }, orderBy: { name: 'asc' } }));
+    const rows = await dbCall(() =>
+      this.db.source.findMany({ where: { active: true, recordStatus: 'ACTIVE' }, orderBy: { name: 'asc' } }),
+    );
     return rows.map(toSource);
   }
 
@@ -427,7 +466,7 @@ export class PipelineRepo implements PipelineStore {
   }
 
   async touchSource(sourceId: string, now: Date): Promise<void> {
-    await dbCall(() => this.db.source.update({ where: { id: sourceId }, data: { lastRunAt: now } }));
+    await dbCall(() => this.db.source.update({ where: { id: sourceId }, data: { lastRunAt: now, lastAttemptAt: now } }));
   }
 
   private async upsertJurisdiction(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
@@ -453,7 +492,13 @@ export class PipelineRepo implements PipelineStore {
       ...(parentId ? { parentId } : {}),
     };
     if (existing) {
-      await dbCall(() => this.db.jurisdiction.update({ where: { id: existing.id }, data }));
+      const write = refreshWrite(existing, data);
+      await dbCall(() =>
+        this.db.jurisdiction.update({
+          where: { id: existing.id },
+          data: { ...write.data, ...(write.sourceChangedSinceOverride ? { sourceChangedSinceOverride: true } : {}) },
+        }),
+      );
       return;
     }
     await dbCall(() => this.db.jurisdiction.create({ data }));
@@ -470,6 +515,26 @@ export class PipelineRepo implements PipelineStore {
       }),
     );
     return parent?.id ?? null;
+  }
+
+  private async recordsUsing(ids: string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const rows = await dbCall(() =>
+      this.db.$queryRaw<Array<{ source_id: string; n: number }>>`
+        SELECT source_id::text AS source_id, COUNT(*)::int AS n
+        FROM (
+          SELECT source_id FROM jurisdictions WHERE source_id::text IN (${Prisma.join(ids)})
+          UNION ALL
+          SELECT source_id FROM offices WHERE source_id::text IN (${Prisma.join(ids)})
+          UNION ALL
+          SELECT source_id FROM officials WHERE source_id::text IN (${Prisma.join(ids)})
+          UNION ALL
+          SELECT source_id FROM services WHERE source_id::text IN (${Prisma.join(ids)})
+        ) used
+        GROUP BY source_id
+      `,
+    );
+    return new Map(rows.map((row) => [row.source_id, row.n]));
   }
 
   private async writeBoundary(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
@@ -515,7 +580,6 @@ export class PipelineRepo implements PipelineStore {
           ${now}
         )
         ON CONFLICT (type, geoid) DO UPDATE SET
-          name = EXCLUDED.name,
           level = EXCLUDED.level,
           subtype = EXCLUDED.subtype,
           parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
@@ -523,9 +587,18 @@ export class PipelineRepo implements PipelineStore {
           state = EXCLUDED.state,
           boundary = EXCLUDED.boundary,
           boundary_vintage = EXCLUDED.boundary_vintage,
-          source_id = EXCLUDED.source_id,
-          source_record_url = EXCLUDED.source_record_url,
-          last_updated_at = EXCLUDED.last_updated_at,
+          source_id = CASE WHEN jurisdictions.override_active THEN jurisdictions.source_id ELSE EXCLUDED.source_id END,
+          source_record_url = CASE WHEN jurisdictions.override_active THEN jurisdictions.source_record_url ELSE EXCLUDED.source_record_url END,
+          last_updated_at = CASE WHEN jurisdictions.override_active THEN jurisdictions.last_updated_at ELSE EXCLUDED.last_updated_at END,
+          name = CASE WHEN jurisdictions.override_active THEN jurisdictions.name ELSE EXCLUDED.name END,
+          source_changed_since_override = CASE
+            WHEN jurisdictions.override_active AND (
+              jurisdictions.name IS DISTINCT FROM EXCLUDED.name
+              OR jurisdictions.source_id IS DISTINCT FROM EXCLUDED.source_id
+              OR jurisdictions.source_record_url IS DISTINCT FROM EXCLUDED.source_record_url
+            ) THEN true
+            ELSE jurisdictions.source_changed_since_override
+          END,
           status = 'ACTIVE'::"RecordStatus",
           updated_at = ${now}
       `,
@@ -548,7 +621,13 @@ export class PipelineRepo implements PipelineStore {
       externalIds: { matchKey: record.matchKey },
     };
     if (existing) {
-      await dbCall(() => this.db.official.update({ where: { id: existing.id }, data }));
+      const write = refreshWrite(existing, data);
+      await dbCall(() =>
+        this.db.official.update({
+          where: { id: existing.id },
+          data: { ...write.data, ...(write.sourceChangedSinceOverride ? { sourceChangedSinceOverride: true } : {}) },
+        }),
+      );
       return;
     }
     await dbCall(() =>
@@ -571,7 +650,13 @@ export class PipelineRepo implements PipelineStore {
       lastUpdatedAt: now,
     };
     if (existing) {
-      await dbCall(() => this.db.office.update({ where: { id: existing.id }, data }));
+      const write = refreshWrite(existing, data);
+      await dbCall(() =>
+        this.db.office.update({
+          where: { id: existing.id },
+          data: { ...write.data, ...(write.sourceChangedSinceOverride ? { sourceChangedSinceOverride: true } : {}) },
+        }),
+      );
       return;
     }
     await dbCall(() =>
@@ -585,6 +670,13 @@ export class PipelineRepo implements PipelineStore {
       }),
     );
   }
+}
+
+function kindForMethod(method: SourceRow['method']): NonNullable<SourceRow['kind']> {
+  if (method === 'BULK') return 'BULK_EXPORT';
+  if (method === 'PAGE_COLLECTION') return 'SCHEDULED_PAGE';
+  if (method === 'API') return 'API';
+  return 'MANUAL';
 }
 
 function toPending(row: {

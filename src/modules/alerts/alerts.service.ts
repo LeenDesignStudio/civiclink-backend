@@ -1,5 +1,4 @@
 import type { ServiceContext } from '../../graphql/context.js';
-import type { NotificationChannel } from '../../generated/prisma/enums.js';
 import { directTx, type RunTx } from '../../auth/tx.js';
 import type { ActorType } from '../../generated/prisma/enums.js';
 import { systemClock, type Clock } from '../../lib/clock.js';
@@ -17,7 +16,14 @@ import type { EmailSender } from '../notifications/email.js';
 import type { JobQueue } from '../notifications/notifications.service.js';
 import { MemoryRateGate, type RateGate } from '../notifications/rate-gate.js';
 import { renderNotificationEmail, renderPush } from '../notifications/templates.js';
-import type { AlertDto, AlertPreview, ChannelStats } from './alerts.dto.js';
+import type {
+  AlertDto,
+  AlertPreview,
+  AlertTiles,
+  ChannelDelivery,
+  ChannelStats,
+  FailureReason,
+} from './alerts.dto.js';
 import { adminAlertsSchema, alertIdSchema, saveAlertSchema, sendAlertSchema } from './alerts.inputs.js';
 import type { AlertPatch, AlertsRepo } from './alerts.ports.js';
 
@@ -75,30 +81,64 @@ export class AlertsService {
     if (parsed.after && !decoded) {
       throw new ValidationError('Invalid cursor.', [{ path: 'after', code: 'custom', message: 'Invalid cursor.' }]);
     }
+    const filter = parsed.filter;
+    const sentFrom = filter?.sentFrom;
+    const sentTo = filter?.sentTo;
     const page = await this.deps.repo.list({
       limit: first + 1,
-      ...(parsed.filter?.status ? { status: parsed.filter.status } : {}),
-      ...(parsed.filter?.targetOfficeId ? { targetOfficeId: parsed.filter.targetOfficeId } : {}),
+      ...(filter?.status ? { status: filter.status } : {}),
+      ...(filter?.targetOfficeId ? { targetOfficeId: filter.targetOfficeId } : {}),
+      ...(filter?.q ? { q: filter.q } : {}),
+      ...(filter?.channel ? { channel: filter.channel } : {}),
+      ...(filter?.targetType ? { targetType: filter.targetType } : {}),
+      ...(filter?.sentBy ? { sentBy: filter.sentBy } : {}),
+      ...(sentFrom ? { sentFrom: sentFrom instanceof Date ? sentFrom : new Date(sentFrom) } : {}),
+      ...(sentTo ? { sentTo: sentTo instanceof Date ? sentTo : new Date(sentTo) } : {}),
       ...(decoded ? { after: decoded } : {}),
     });
     const connection = buildConnection(page.rows, first, page.total);
     return { ...connection, totalCount: page.total };
   }
 
-  async adminAlert(ctx: ServiceContext, input: unknown): Promise<AlertDto & { stats: ChannelStats[] }> {
+  async adminAlert(
+    ctx: ServiceContext,
+    input: unknown,
+  ): Promise<AlertDto & { stats: ChannelStats[]; delivery: ChannelDelivery[]; followerCount: number; failureReasons: FailureReason[] }> {
     ctx.authz.require('admin.alert:read');
     const parsed = parse(alertIdSchema, input);
     const alert = await this.deps.repo.find(parsed.id);
     if (!alert) throw new NotFoundError();
-    const stats = await this.deps.repo.channelStats(alert.id);
-    return { ...alert, stats };
+    const [stats, followerCount, failureReasons] = await Promise.all([
+      this.deps.repo.channelStats(alert.id),
+      this.deps.repo.followerCount(alert),
+      this.deps.repo.failureReasons(alert.id),
+    ]);
+    const targeted = alert.recipientCount ?? followerCount;
+    const delivery = stats
+      .filter((stat) => alert.channels.includes(stat.channel) || stat.sent + stat.delivered + stat.failed + stat.skipped + stat.queued > 0)
+      .map((stat) => ({
+        channel: stat.channel,
+        targeted,
+        sent: stat.sent,
+        delivered: stat.delivered,
+        failed: stat.failed,
+        notEligible: stat.skipped,
+        opens: stat.opens,
+        clicks: stat.clicks,
+      }));
+    return { ...alert, stats, delivery, followerCount, failureReasons };
+  }
+
+  async adminAlertTiles(ctx: ServiceContext): Promise<AlertTiles> {
+    ctx.authz.require('admin.alert:read');
+    return this.deps.repo.alertTiles(this.clock.now());
   }
 
   async saveAlertDraft(ctx: ServiceContext, input: unknown): Promise<{ alert: AlertDto }> {
     ctx.authz.require('admin.alert:write');
     const admin = ctx.authz.requireAdmin();
     const parsed = parse(saveAlertSchema, input);
-    const channels = withInApp(parsed.channels ?? ['EMAIL', 'PUSH']);
+    const channels = parsed.channels;
     const link =
       parsed.link ??
       (parsed.targetOfficeId
@@ -264,12 +304,38 @@ export class AlertsService {
     });
     return { alert };
   }
-}
 
-function withInApp(channels: ('EMAIL' | 'PUSH')[]): NotificationChannel[] {
-  const set = new Set<NotificationChannel>(['IN_APP']);
-  for (const channel of channels) set.add(channel);
-  return [...set];
+  async duplicateAlertAsDraft(ctx: ServiceContext, input: unknown): Promise<{ alert: AlertDto }> {
+    ctx.authz.require('admin.alert:write');
+    const admin = ctx.authz.requireAdmin();
+    const parsed = parse(alertIdSchema, input);
+    const source = await this.deps.repo.find(parsed.id);
+    if (!source) throw new NotFoundError();
+    const alert = await this.withTx(async (tx) => {
+      const created = await this.deps.repo.insert({
+        targetOfficeId: source.targetOfficeId,
+        targetOfficialId: source.targetOfficialId,
+        title: source.title,
+        body: source.body,
+        link: source.link,
+        channels: source.channels,
+        createdBy: admin.adminId,
+        createdAt: this.clock.now(),
+      });
+      await this.deps.audit.record(tx, {
+        actorType: 'ADMIN',
+        actorId: admin.adminId,
+        entityType: 'alert',
+        entityId: created.id,
+        action: 'alert.draft',
+        before: null,
+        after: { ...snapshot(created), duplicatedFrom: source.id },
+        requestId: ctx.requestId,
+      });
+      return created;
+    });
+    return { alert };
+  }
 }
 
 function snapshot(alert: AlertDto): Record<string, unknown> {

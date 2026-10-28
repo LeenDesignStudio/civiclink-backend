@@ -8,6 +8,7 @@ import {
   HasActiveChildrenError,
   HasCurrentTermError,
   isAppError,
+  OfficeHasActiveOfficialError,
   JurisdictionCycleError,
   LookupNotFoundError,
   NotFoundError,
@@ -16,6 +17,7 @@ import {
 } from '../../lib/errors.js';
 import { buildConnection, clampFirst, decodeCursor, encodeCursor, type Connection } from '../../lib/pagination.js';
 import { slugify } from '../../lib/slug.js';
+import { nestJurisdictions, parentLevelAllowed, parentRequired } from './record-rules.js';
 import type {
   AdminJurisdictionNode,
   AdminOfficeRecord,
@@ -419,10 +421,14 @@ export class CivicService {
       this.repo.listAdminJurisdictions({
         ...query,
         freshnessCutoff: this.freshnessCutoff(),
+        asOf: this.clock.now(),
         ...(filter.level ? { level: filter.level } : {}),
         ...(filter.type ? { type: filter.type } : {}),
         ...(filter.state ? { state: filter.state } : {}),
         ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.parentId ? { parentId: filter.parentId } : {}),
+        ...(filter.isPilot !== undefined ? { isPilot: filter.isPilot } : {}),
+        ...(filter.boundary ? { boundary: filter.boundary } : {}),
         ...(filter.freshness ? { freshness: filter.freshness } : {}),
         ...(filter.q ? { q: filter.q } : {}),
       }),
@@ -437,8 +443,12 @@ export class CivicService {
       this.repo.listAdminOffices({
         ...query,
         freshnessCutoff: this.freshnessCutoff(),
+        asOf: this.clock.now(),
         ...(filter.level ? { level: filter.level } : {}),
         ...(filter.jurisdictionId ? { jurisdictionId: filter.jurisdictionId } : {}),
+        ...(filter.officeType ? { officeType: filter.officeType } : {}),
+        ...(filter.hasOfficial !== undefined ? { hasOfficial: filter.hasOfficial } : {}),
+        ...(filter.missingContact ? { missingContact: filter.missingContact } : {}),
         ...(filter.vacantOnly ? { vacantOnly: filter.vacantOnly } : {}),
         ...(filter.staleOnly ? { staleOnly: filter.staleOnly } : {}),
         ...(filter.status ? { status: filter.status } : {}),
@@ -454,8 +464,14 @@ export class CivicService {
     return this.page(parsed.first, parsed.after, parsed.sort, (query) =>
       this.repo.listAdminOfficials({
         ...query,
+        freshnessCutoff: this.freshnessCutoff(),
+        asOf: this.clock.now(),
         ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.level ? { level: filter.level } : {}),
+        ...(filter.jurisdictionId ? { jurisdictionId: filter.jurisdictionId } : {}),
+        ...(filter.officeType ? { officeType: filter.officeType } : {}),
         ...(filter.officeId ? { officeId: filter.officeId } : {}),
+        ...(filter.freshness ? { freshness: filter.freshness } : {}),
         ...(filter.q ? { q: filter.q } : {}),
       }),
     );
@@ -470,6 +486,7 @@ export class CivicService {
         ...query,
         ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
         ...(filter.status ? { status: filter.status } : {}),
+        ...(filter.needsValidation ? { needsValidation: true, validatedBefore: this.validationCutoff() } : {}),
         ...(filter.linkBroken !== undefined ? { linkBroken: filter.linkBroken } : {}),
         ...(filter.q ? { q: filter.q } : {}),
       }),
@@ -481,16 +498,19 @@ export class CivicService {
     const parsed = parseUpsertJurisdiction(input);
     return this.repo.transaction(async (store, tx) => {
       if (!(await store.sourceExists(parsed.sourceId))) throw new NotFoundError();
-      await this.assertParent(store, parsed.id, parsed.parentId, parsed.type);
+      await this.assertParent(store, parsed.id, parsed.parentId, parsed.level, parsed.type);
+      if (await store.jurisdictionNameTaken(parsed.parentId, parsed.name, parsed.id)) throw new ConflictError();
       if (parsed.id) {
         const before = await store.findJurisdiction(parsed.id);
         if (!before) throw new NotFoundError();
         const after = await store.updateJurisdiction(parsed.id, parsed);
         await this.record(tx, ctx, 'JURISDICTION', after.id, 'UPDATE', snapshot(before), snapshot(after));
+        await this.finishCorrection(store, tx, ctx, parsed.correctionId, 'JURISDICTION', after.id);
         return after;
       }
       const created = await store.createJurisdiction(parsed);
       await this.record(tx, ctx, 'JURISDICTION', created.id, 'CREATE', null, snapshot(created));
+      await this.finishCorrection(store, tx, ctx, parsed.correctionId, 'JURISDICTION', created.id);
       return created;
     }, 'ReadCommitted');
   }
@@ -506,6 +526,7 @@ export class CivicService {
       if (active > 0 && !parsed.retireActiveOffices) throw new HasActiveChildrenError();
       const retiredOffices = parsed.retireActiveOffices ? await store.retireActiveOffices(parsed.id) : [];
       await store.setJurisdictionStatus(parsed.id, 'RETIRED');
+      await store.flagParentRetired(parsed.id, true);
       for (const officeId of retiredOffices) {
         await this.record(tx, ctx, 'OFFICE', officeId, 'RETIRE', { status: 'ACTIVE' }, { status: 'RETIRED' });
       }
@@ -530,6 +551,7 @@ export class CivicService {
       const current = await store.findJurisdiction(id);
       if (!current) throw new NotFoundError();
       await store.setJurisdictionStatus(id, 'ACTIVE');
+      await store.flagParentRetired(id, false);
       await this.record(tx, ctx, 'JURISDICTION', id, 'RESTORE', { status: current.status }, { status: 'ACTIVE' });
       return { id, status: 'ACTIVE' };
     }, 'ReadCommitted');
@@ -541,6 +563,7 @@ export class CivicService {
     return this.repo.transaction(async (store, tx) => {
       if (!(await store.sourceExists(parsed.sourceId))) throw new NotFoundError();
       if (!(await store.findJurisdiction(parsed.jurisdictionId))) throw new NotFoundError();
+      if (await store.officeNameTaken(parsed.jurisdictionId, parsed.name, parsed.id)) throw new ConflictError();
       const before = parsed.id ? await store.findAdminOffice(parsed.id) : null;
       if (parsed.id && !before) throw new NotFoundError();
       const slug = await this.allocateSlug(store, 'office', parsed.name, parsed.id);
@@ -562,6 +585,7 @@ export class CivicService {
           office.id,
         );
       }
+      await this.finishCorrection(store, tx, ctx, parsed.correctionId, 'OFFICE', office.id);
       return office;
     }, 'ReadCommitted');
   }
@@ -600,6 +624,7 @@ export class CivicService {
           official.id,
         );
       }
+      await this.finishCorrection(store, tx, ctx, parsed.correctionId, 'OFFICIAL', official.id);
       return official;
     }, 'ReadCommitted');
   }
@@ -638,6 +663,8 @@ export class CivicService {
       const official = await store.findAdminOfficial(parsed.officialId);
       if (!official) throw new NotFoundError();
       if (parsed.makeCurrent) {
+        const currentOfficial = await store.currentOfficialId(parsed.officeId);
+        if (currentOfficial && currentOfficial !== parsed.officialId) throw new OfficeHasActiveOfficialError();
         await store.endCurrentTerm(parsed.officeId, this.utcDay(this.clock.now()));
         await store.setHolderUnknown(parsed.officeId, false);
       }
@@ -716,12 +743,42 @@ export class CivicService {
         before ? snapshot(before) : null,
         snapshot(service),
       );
+      await this.finishCorrection(store, tx, ctx, parsed.correctionId, 'SERVICE', service.id);
       return service;
     }, 'ReadCommitted');
   }
 
-  retireService(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'RETIRED' }> {
-    return this.setServiceStatus(ctx, input, 'RETIRED');
+  retireService(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'INACTIVE' }> {
+    return this.setServiceStatus(ctx, input, 'INACTIVE');
+  }
+
+  markServiceValidated(ctx: ServiceContext, input: unknown): Promise<{ id: string }> {
+    ctx.authz.require('admin.civic:write');
+    const id = parseId(input);
+    return this.repo.transaction(async (store, tx) => {
+      const service = await store.findAdminService(id);
+      if (!service) throw new NotFoundError();
+      const at = this.clock.now();
+      await store.markServiceValidated(id, at);
+      await this.record(tx, ctx, 'SERVICE', id, 'UPDATE', { lastValidatedAt: service.lastValidatedAt }, { lastValidatedAt: at });
+      return { id };
+    }, 'ReadCommitted');
+  }
+
+  async adminJurisdictionTree(ctx: ServiceContext, rootId?: string | null) {
+    ctx.authz.require('admin.civic:read');
+    const rows = await this.repo.listJurisdictionNodes();
+    return nestJurisdictions(rows, rootId ?? null);
+  }
+
+  async adminOfficeTiles(ctx: ServiceContext) {
+    ctx.authz.require('admin.civic:read');
+    return this.repo.officeTiles(this.clock.now());
+  }
+
+  async adminOfficialTiles(ctx: ServiceContext) {
+    ctx.authz.require('admin.civic:read');
+    return this.repo.officialTiles(this.clock.now());
   }
 
   restoreService(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'ACTIVE' }> {
@@ -756,6 +813,10 @@ export class CivicService {
     return new Date(this.clock.now().getTime() - 90 * MS_PER_DAY);
   }
 
+  private validationCutoff(): Date {
+    return new Date(this.clock.now().getTime() - 180 * MS_PER_DAY);
+  }
+
   private async page<T extends { createdAt: Date; id: string; name?: string; fullName?: string; title?: string }>(
     first: number,
     after: string | undefined,
@@ -788,7 +849,7 @@ export class CivicService {
     }, 'ReadCommitted');
   }
 
-  private setServiceStatus<S extends 'ACTIVE' | 'RETIRED'>(
+  private setServiceStatus<S extends 'ACTIVE' | 'INACTIVE'>(
     ctx: ServiceContext,
     input: unknown,
     status: S,
@@ -804,7 +865,7 @@ export class CivicService {
         ctx,
         'SERVICE',
         id,
-        status === 'RETIRED' ? 'RETIRE' : 'RESTORE',
+        status === 'INACTIVE' ? 'RETIRE' : 'RESTORE',
         { status: service.status },
         { status },
       );
@@ -816,9 +877,10 @@ export class CivicService {
     store: CivicStore,
     id: string | undefined,
     parentId: string | null,
+    level: GovLevel,
     type: JurisdictionType,
   ): Promise<void> {
-    if (type !== 'NATION' && !parentId) {
+    if (parentRequired(level) && type !== 'NATION' && !parentId) {
       throw new ValidationError('A parent jurisdiction is required.', [
         { path: 'input.parentId', code: 'custom', message: 'A parent jurisdiction is required.' },
       ]);
@@ -827,11 +889,18 @@ export class CivicService {
     if (id && parentId === id) throw new JurisdictionCycleError();
     const seen = new Set<string>();
     let cursor: string | null = parentId;
+    let first = true;
     while (cursor) {
       if (seen.has(cursor) || (id !== undefined && cursor === id)) throw new JurisdictionCycleError();
       seen.add(cursor);
       const parent = await store.findJurisdiction(cursor);
       if (!parent) throw new NotFoundError();
+      if (first && !parentLevelAllowed(level, parent.level)) {
+        throw new ValidationError('That parent level is not allowed for this jurisdiction.', [
+          { path: 'input.parentId', code: 'custom', message: 'That parent level is not allowed for this jurisdiction.' },
+        ]);
+      }
+      first = false;
       cursor = parent.parentId;
     }
   }
@@ -865,6 +934,26 @@ export class CivicService {
       if (isAppError(error)) throw error;
       throw new UpstreamError(undefined, { cause: error });
     }
+  }
+
+  private async finishCorrection(
+    store: CivicStore,
+    tx: unknown,
+    ctx: ServiceContext,
+    correctionId: string | undefined,
+    entityType: 'JURISDICTION' | 'OFFICE' | 'OFFICIAL' | 'SERVICE',
+    entityId: string,
+  ): Promise<void> {
+    if (!correctionId) return;
+    const admin = ctx.authz.requireAdmin();
+    await store.completeCorrection({
+      correctionId,
+      entityType,
+      entityId,
+      adminId: admin.adminId,
+      now: this.clock.now(),
+    });
+    await this.record(tx, ctx, 'CORRECTION', correctionId, 'APPLY', { status: 'OPEN' }, { status: 'APPLIED' });
   }
 
   private async record(

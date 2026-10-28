@@ -14,6 +14,7 @@ import type {
   AdminListQuery,
   ApplyTargetInput,
   AuditEntry,
+  RecordFlags,
   AuditRecorder,
   CorrectionPatch,
   CorrectionsRepo as CorrectionsStore,
@@ -30,6 +31,7 @@ type NoteRow = { id: string; adminId: string; body: string; createdAt: Date };
 
 type CorrectionRow = {
   id: string;
+  displayId?: string;
   userId: string | null;
   entityType: CivicEntityType;
   entityId: string;
@@ -61,6 +63,7 @@ function snapshotOf(value: unknown): { value: string | null } | null {
 function toStored(row: CorrectionRow, level: GovLevel | null): StoredCorrection {
   return {
     id: row.id,
+    ...(row.displayId ? { displayId: row.displayId } : {}),
     userId: row.userId,
     entityType: row.entityType,
     entityId: row.entityId,
@@ -262,7 +265,7 @@ export class CorrectionsRepo implements CorrectionsStore {
     const rows = await dbCall(() =>
       this.db.correction.findMany({
         where: adminWhere(query),
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        orderBy: [{ status: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         take: query.level ? Math.min(query.limit * 5, 200) : query.limit,
         include: detailInclude,
       }),
@@ -271,7 +274,8 @@ export class CorrectionsRepo implements CorrectionsStore {
       rows.map(async (row) => toStored(row, await this.levelFor(row.entityType, row.entityId))),
     );
     const filtered = query.level ? mapped.filter((row) => row.level === query.level) : mapped;
-    return filtered.slice(0, query.limit);
+    const page = filtered.slice(0, query.limit);
+    return Promise.all(page.map((row) => this.withRecord(row)));
   }
 
   async countAdmin(query: Omit<AdminListQuery, 'limit' | 'after'>): Promise<number> {
@@ -376,7 +380,11 @@ export class CorrectionsRepo implements CorrectionsStore {
       name?: string;
       sourceId?: string;
       sourceRecordUrl?: string;
-    } = { lastUpdatedAt: input.lastUpdatedAt };
+      overrideActive: boolean;
+      overrideReason: string;
+      overriddenBy: string;
+      overriddenAt: Date;
+    } = { lastUpdatedAt: input.lastUpdatedAt, ...appliedOverride(input) };
     if (input.field === 'PHONE') {
       before = row.phone;
       if (input.value) data.phone = input.value;
@@ -419,7 +427,11 @@ export class CorrectionsRepo implements CorrectionsStore {
       website?: string;
       sourceId?: string;
       sourceRecordUrl?: string;
-    } = { lastUpdatedAt: input.lastUpdatedAt };
+      overrideActive: boolean;
+      overrideReason: string;
+      overriddenBy: string;
+      overriddenAt: Date;
+    } = { lastUpdatedAt: input.lastUpdatedAt, ...appliedOverride(input) };
     if (input.field === 'OFFICEHOLDER_NAME' && input.value) {
       before = row.fullName;
       data.fullName = input.value;
@@ -454,7 +466,11 @@ export class CorrectionsRepo implements CorrectionsStore {
       phoneContact?: string;
       url?: string;
       sourceId?: string;
-    } = { lastValidatedAt: input.lastUpdatedAt };
+      overrideActive: boolean;
+      overrideReason: string;
+      overriddenBy: string;
+      overriddenAt: Date;
+    } = { lastValidatedAt: input.lastUpdatedAt, ...appliedOverride(input) };
     if (input.field === 'SERVICE_DETAILS' && input.value) {
       before = row.description;
       data.description = input.value;
@@ -480,7 +496,11 @@ export class CorrectionsRepo implements CorrectionsStore {
       districtCode?: string;
       sourceId?: string;
       sourceRecordUrl?: string;
-    } = { lastUpdatedAt: input.lastUpdatedAt };
+      overrideActive: boolean;
+      overrideReason: string;
+      overriddenBy: string;
+      overriddenAt: Date;
+    } = { lastUpdatedAt: input.lastUpdatedAt, ...appliedOverride(input) };
     if (input.field === 'DISTRICT' && input.value) data.districtCode = input.value;
     if (input.sourceId) data.sourceId = input.sourceId;
     if (input.sourceUrl) data.sourceRecordUrl = input.sourceUrl;
@@ -520,28 +540,137 @@ export class CorrectionsRepo implements CorrectionsStore {
     );
     return link?.jurisdiction?.level ?? link?.office?.jurisdiction.level ?? null;
   }
+
+  async recordFlags(entityType: CivicEntityType, entityId: string, tx?: unknown): Promise<RecordFlags> {
+    const db = bind(this.db, tx);
+    if (entityType === 'JURISDICTION') {
+      const row = await dbCall(() =>
+        db.jurisdiction.findUnique({ where: { id: entityId }, select: { status: true, displayId: true, name: true, lastUpdatedAt: true } }),
+      );
+      return {
+        retired: !row || row.status === 'RETIRED',
+        lastUpdatedAt: row?.lastUpdatedAt ?? null,
+        displayId: row?.displayId ?? null,
+        name: row?.name ?? null,
+      };
+    }
+    if (entityType === 'OFFICE') {
+      const row = await dbCall(() =>
+        db.office.findUnique({ where: { id: entityId }, select: { status: true, displayId: true, name: true, lastUpdatedAt: true } }),
+      );
+      return {
+        retired: !row || row.status === 'RETIRED',
+        lastUpdatedAt: row?.lastUpdatedAt ?? null,
+        displayId: row?.displayId ?? null,
+        name: row?.name ?? null,
+      };
+    }
+    if (entityType === 'OFFICIAL') {
+      const row = await dbCall(() =>
+        db.official.findUnique({ where: { id: entityId }, select: { status: true, displayId: true, fullName: true, lastUpdatedAt: true } }),
+      );
+      return {
+        retired: !row || row.status === 'RETIRED',
+        lastUpdatedAt: row?.lastUpdatedAt ?? null,
+        displayId: row?.displayId ?? null,
+        name: row?.fullName ?? null,
+      };
+    }
+    const row = await dbCall(() =>
+      db.service.findUnique({ where: { id: entityId }, select: { status: true, displayId: true, title: true, lastValidatedAt: true } }),
+    );
+    return {
+      retired: !row || row.status === 'INACTIVE',
+      lastUpdatedAt: row?.lastValidatedAt ?? null,
+      displayId: row?.displayId ?? null,
+      name: row?.title ?? null,
+    };
+  }
+
+  async listOpenOnRecord(entityType: CivicEntityType, entityId: string, excludeId: string) {
+    const rows = await dbCall(() =>
+      this.db.correction.findMany({
+        where: { entityType, entityId, id: { not: excludeId }, status: { in: ['SUBMITTED', 'IN_REVIEW'] } },
+        select: { id: true, displayId: true, status: true },
+        orderBy: { createdAt: 'asc' },
+        take: 20,
+      }),
+    );
+    return rows.map((row) => ({ id: row.id, displayId: row.displayId, status: row.status }));
+  }
+
+  async correctionTiles(now: Date) {
+    const since = new Date(now.getTime() - 30 * 86_400_000);
+    const [pending, inReview, applied30d, dismissed30d] = await dbCall(() =>
+      Promise.all([
+        this.db.correction.count({ where: { status: 'SUBMITTED' } }),
+        this.db.correction.count({ where: { status: 'IN_REVIEW' } }),
+        this.db.correction.count({ where: { status: 'APPLIED', resolvedAt: { gte: since } } }),
+        this.db.correction.count({ where: { status: 'DISMISSED', resolvedAt: { gte: since } } }),
+      ]),
+    );
+    return { pending, inReview, applied30d, dismissed30d };
+  }
+
+  async adminName(adminId: string): Promise<string | null> {
+    const row = await dbCall(() => this.db.adminUser.findUnique({ where: { id: adminId }, select: { name: true } }));
+    return row?.name ?? null;
+  }
+
+  private async withRecord(row: StoredCorrection): Promise<StoredCorrection> {
+    const flags = await this.recordFlags(row.entityType, row.entityId);
+    const decidedByName = row.resolvedBy ? await this.adminName(row.resolvedBy) : null;
+    return {
+      ...row,
+      recordName: flags.name,
+      recordDisplayId: flags.displayId,
+      recordRetired: flags.retired,
+      recordLastUpdatedAt: flags.lastUpdatedAt,
+      decidedByName,
+    };
+  }
 }
 
-function adminWhere(query: Omit<AdminListQuery, 'limit'>): {
-  status?: CorrectionStatus;
-  entityType?: CivicEntityType;
-  assigneeId?: string;
-  createdAt?: { lt: Date } | { gt: Date } | { lt: Date; gt?: Date };
-  OR?: ({ createdAt: { gt: Date } } | { createdAt: Date; id: { gt: string } })[];
+function appliedOverride(input: ApplyTargetInput): {
+  overrideActive: true;
+  overrideReason: string;
+  overriddenBy: string;
+  overriddenAt: Date;
 } {
+  return {
+    overrideActive: true,
+    overrideReason: 'Applied from a resident correction',
+    overriddenBy: input.adminId,
+    overriddenAt: input.lastUpdatedAt,
+  };
+}
+
+function createdRange(query: Omit<AdminListQuery, 'limit'>): { createdAt: { lt?: Date; gte?: Date; lte?: Date } } | Record<string, never> {
+  const createdAt: { lt?: Date; gte?: Date; lte?: Date } = {};
+  if (query.olderThan) createdAt.lt = query.olderThan;
+  if (query.submittedFrom) createdAt.gte = query.submittedFrom;
+  if (query.submittedTo) createdAt.lte = query.submittedTo;
+  return Object.keys(createdAt).length > 0 ? { createdAt } : {};
+}
+
+function adminWhere(query: Omit<AdminListQuery, 'limit'>): Prisma.CorrectionWhereInput {
+  const and: Prisma.CorrectionWhereInput[] = [];
+  if (query.q) and.push({ displayId: { contains: query.q, mode: 'insensitive' } });
+  if (query.after) {
+    and.push({
+      OR: [
+        { createdAt: { gt: query.after.createdAt } },
+        { createdAt: query.after.createdAt, id: { gt: query.after.id } },
+      ],
+    });
+  }
   return {
     ...(query.status ? { status: query.status } : {}),
     ...(query.entityType ? { entityType: query.entityType } : {}),
     ...(query.assigneeId ? { assigneeId: query.assigneeId } : {}),
-    ...(query.olderThan ? { createdAt: { lt: query.olderThan } } : {}),
-    ...(query.after
-      ? {
-          OR: [
-            { createdAt: { gt: query.after.createdAt } },
-            { createdAt: query.after.createdAt, id: { gt: query.after.id } },
-          ],
-        }
-      : {}),
+    ...(query.field ? { field: query.field } : {}),
+    ...createdRange(query),
+    ...(and.length > 0 ? { AND: and } : {}),
   };
 }
 

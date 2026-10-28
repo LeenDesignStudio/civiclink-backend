@@ -4,8 +4,10 @@ import type {
   CorrectionField,
   CorrectionNoteDto,
   CorrectionStatus,
+  CorrectionTiles,
   DismissReason,
   GovLevel,
+  OpenCorrectionBrief,
   ResidentCorrection,
 } from './corrections.dto.js';
 
@@ -23,6 +25,7 @@ export interface ActiveEntity {
 
 export interface StoredCorrection {
   id: string;
+  displayId?: string;
   userId: string | null;
   entityType: CivicEntityType;
   entityId: string;
@@ -43,6 +46,12 @@ export interface StoredCorrection {
   createdAt: Date;
   updatedAt: Date;
   notes: CorrectionNoteDto[];
+  recordName?: string | null;
+  recordDisplayId?: string | null;
+  recordRetired?: boolean;
+  recordLastUpdatedAt?: Date | null;
+  decidedByName?: string | null;
+  otherOpenCorrections?: OpenCorrectionBrief[];
 }
 
 export interface NewCorrection {
@@ -78,6 +87,14 @@ export interface ApplyTargetInput {
   lastUpdatedAt: Date;
   sourceId?: string;
   sourceUrl?: string;
+  adminId: string;
+}
+
+export interface RecordFlags {
+  retired: boolean;
+  lastUpdatedAt: Date | null;
+  displayId: string | null;
+  name: string | null;
 }
 
 export interface AdminListQuery {
@@ -86,6 +103,10 @@ export interface AdminListQuery {
   entityType?: CivicEntityType;
   olderThan?: Date;
   assigneeId?: string;
+  q?: string;
+  field?: CorrectionField;
+  submittedFrom?: Date;
+  submittedTo?: Date;
   limit: number;
   after?: { createdAt: Date; id: string };
 }
@@ -115,6 +136,10 @@ export interface CorrectionsRepo {
   addNote(correctionId: string, adminId: string, body: string, createdAt: Date, tx?: unknown): Promise<CorrectionNoteDto>;
   assigneeCanResolve(adminId: string): Promise<boolean>;
   submitterDisplayName(userId: string): Promise<string | null>;
+  recordFlags(entityType: CivicEntityType, entityId: string, tx?: unknown): Promise<RecordFlags>;
+  listOpenOnRecord(entityType: CivicEntityType, entityId: string, excludeId: string): Promise<OpenCorrectionBrief[]>;
+  correctionTiles(now: Date): Promise<CorrectionTiles>;
+  adminName(adminId: string): Promise<string | null>;
 }
 
 export interface AuditEntry {
@@ -156,11 +181,23 @@ export function toResident(row: StoredCorrection): ResidentCorrection {
 export function toAdmin(row: StoredCorrection): AdminCorrection {
   return {
     ...toResident(row),
+    ...(row.displayId ? { displayId: row.displayId } : {}),
+    userId: row.userId,
     currentValueSnapshot: row.currentValueSnapshot,
     assigneeId: row.assigneeId,
     submitterDisplayName: row.submitterDisplayName,
     lookupToken: row.lookupToken,
     resolvedAt: row.resolvedAt,
+    resolvedBy: row.resolvedBy,
+    decidedByName: row.decidedByName ?? null,
+    recordName: row.recordName ?? null,
+    recordDisplayId: row.recordDisplayId ?? null,
+    recordRetired: row.recordRetired ?? false,
+    recordChangedSinceSubmission:
+      row.recordLastUpdatedAt !== undefined && row.recordLastUpdatedAt !== null
+        ? row.recordLastUpdatedAt.getTime() > row.createdAt.getTime()
+        : false,
+    otherOpenCorrections: row.otherOpenCorrections ?? [],
     notes: row.notes.map((note) => ({
       id: note.id,
       adminId: note.adminId,

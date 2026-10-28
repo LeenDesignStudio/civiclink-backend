@@ -31,7 +31,6 @@ export async function start(): Promise<void> {
     services: container.services,
     resolvePrincipal: createRequestPrincipal({ adminAuth: container.adminAuth }),
     rateGate: createPostgresRateGate(pool),
-    ...(container.devExports ? { devExports: container.devExports } : {}),
     readiness: {
       isShuttingDown: () => shuttingDown,
       pingDb: async () => {

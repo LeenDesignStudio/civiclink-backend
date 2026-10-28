@@ -218,7 +218,7 @@ export interface ServiceRecord {
   phoneContact: string | null;
   category: ServiceCategoryDto;
   createdAt: Date;
-  status: RecordStatus;
+  status: 'ACTIVE' | 'INACTIVE';
 }
 
 export interface JurisdictionRecord {
@@ -244,13 +244,27 @@ export interface JurisdictionRecord {
 export interface AdminJurisdictionNode extends JurisdictionRecord {
   createdAt: Date;
   hasBoundary: boolean;
+  displayId?: string;
+  aliases?: string[];
+  description?: string | null;
+  isPilot?: boolean;
+  parentRetired?: boolean;
+  boundaryStatus?: 'OK' | 'MISSING';
+  childCount?: number;
+  officeCount?: number;
+  officialCount?: number;
+  freshness?: Freshness;
 }
 
 export interface AdminOfficeRecord {
   id: string;
+  displayId?: string;
   slug: string;
   jurisdictionId: string;
   name: string;
+  officeType?: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION';
+  parentRetired?: boolean;
+  freshness?: Freshness;
   seatLabel: string | null;
   selectionMethod: SelectionMethod;
   displayOrder: number;
@@ -297,8 +311,11 @@ export interface AdminOfficialTerm {
 
 export interface AdminOfficialRecord {
   id: string;
+  displayId?: string;
   slug: string;
   fullName: string;
+  useOfficeAddress?: boolean;
+  freshness?: Freshness;
   displayName: string | null;
   party: string | null;
   photoUrl: string | null;
@@ -320,14 +337,16 @@ export interface AdminServiceLink {
 
 export interface AdminServiceRecord {
   id: string;
+  displayId?: string;
   title: string;
   categoryId: string;
   description: string;
   url: string | null;
   phoneContact: string | null;
+  email: string | null;
   lastValidatedAt: Date;
   sourceId: string;
-  status: RecordStatus;
+  status: 'ACTIVE' | 'INACTIVE';
   links: AdminServiceLink[];
   jurisdictionIds: string[];
   officeIds: string[];

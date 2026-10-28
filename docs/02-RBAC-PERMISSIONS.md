@@ -74,7 +74,6 @@ QubaLink staff who want resident features use a normal resident account.
 | `admin.alert:write` | Create/edit/delete **draft** alerts, preview, send a test to self |
 | `admin.alert:send` | Send an alert to followers (irreversible) |
 | `admin.changelog:read` | Read change history of any civic record / correction / alert / admin user |
-| `admin.export:csv` | Export the current admin list view as CSV (civic data, corrections, alerts — never resident PII) |
 | `admin.users:read` | List admin users |
 | `admin.users:manage` | Invite admin, change role, deactivate/reactivate admin |
 
@@ -118,7 +117,6 @@ QubaLink staff who want resident features use a normal resident account.
 | `admin.alert:write` | | ● | ● | |
 | `admin.alert:send` | | ● | ● | |
 | `admin.changelog:read` | | ● | ● | |
-| `admin.export:csv` | | | ● | |
 | `admin.users:read` | | | ● | |
 | `admin.users:manage` | | | ● | |
 | `system.pipeline:run` | | | | ● |

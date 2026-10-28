@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Authz, anonymousPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { FakeClock } from '../../lib/clock.js';
-import { ForbiddenError, NotFoundError, UnauthenticatedError, UpstreamError } from '../../lib/errors.js';
+import { ForbiddenError, NotFoundError, OfficeHasActiveOfficialError, UnauthenticatedError, UpstreamError } from '../../lib/errors.js';
 import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminServiceRecord } from './civic.dto.js';
 import type { LookupContext } from '../lookup/lookup.dto.js';
 import type { OfficeRecord, OfficialRecord, OfficialTermLink } from './civic.dto.js';
@@ -427,6 +427,7 @@ describe('CivicService public reads', () => {
       description: 'Weekly collection for households in the city.',
       url: null,
       phoneContact: null,
+      email: null,
       lastValidatedAt: NOW,
       sourceId: '22222222-2222-4222-8222-222222222222',
       status: 'ACTIVE',
@@ -481,6 +482,7 @@ describe('CivicService public reads', () => {
       },
       findAdminOffice: () => Promise.resolve(office),
       findAdminOfficial: () => Promise.resolve(official),
+      currentOfficialId: () => Promise.resolve(null),
       endCurrentTerm: () => Promise.resolve(null),
       setHolderUnknown: () => Promise.resolve(),
       createTerm: () => Promise.resolve(term),
@@ -534,5 +536,28 @@ describe('CivicService public reads', () => {
     });
     await expect(service.retireJurisdiction(viewerContext(), { id: JURISDICTION_ID })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(service.restoreJurisdiction(viewerContext(), { id: JURISDICTION_ID })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('refuses a second active official on the same office', async () => {
+    const officeId = '22222222-2222-4222-8222-222222222222';
+    const officialId = '33333333-3333-4333-8333-333333333333';
+    const store = {
+      transaction: async (fn: (inner: CivicStore, tx: unknown) => Promise<unknown>) => fn(store, {}),
+      findAdminOffice: () => Promise.resolve({ id: officeId, name: 'Mayor' }),
+      findAdminOfficial: () => Promise.resolve({ id: officialId, fullName: 'Ada' }),
+      currentOfficialId: () => Promise.resolve('44444444-4444-4444-8444-444444444444'),
+    } as unknown as CivicStore;
+    const service = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    const editor = new Authz({ kind: 'admin', adminId: 'admin-1', role: 'ADMIN_STAFF', sessionId: 'session-1' });
+    await expect(
+      service.setOfficeTerm(
+        { requestId: 'req-1', principal: { kind: 'admin', adminId: 'admin-1', role: 'ADMIN_STAFF', sessionId: 'session-1' }, authz: editor, ipHash: 'hash' },
+        { officeId, officialId, status: 'ELECTED', makeCurrent: true },
+      ),
+    ).rejects.toBeInstanceOf(OfficeHasActiveOfficialError);
   });
 });

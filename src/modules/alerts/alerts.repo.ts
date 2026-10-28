@@ -1,3 +1,4 @@
+import { Prisma } from '../../generated/prisma/client.js';
 import type { NotificationChannel } from '../../generated/prisma/enums.js';
 import { dbCall, prisma, type Db } from '../../db/prisma.js';
 import type { AlertDto, ChannelStats } from './alerts.dto.js';
@@ -7,6 +8,7 @@ const CHANNELS: NotificationChannel[] = ['IN_APP', 'EMAIL', 'PUSH'];
 
 function toAlert(row: {
   id: string;
+  displayId: string;
   targetOfficeId: string | null;
   targetOfficialId: string | null;
   title: string;
@@ -19,46 +21,36 @@ function toAlert(row: {
   sentAt: Date | null;
   recipientCount: number | null;
   createdAt: Date;
+  sender?: { name: string | null } | null;
 }): AlertDto {
-  return { ...row, channels: [...row.channels] };
+  const { sender, ...alert } = row;
+  return { ...alert, channels: [...alert.channels], sentByName: sender?.name ?? null };
 }
 
 export class AlertsRepo implements AlertsStore {
   constructor(private readonly db: Db = prisma) {}
 
   async list(query: AlertListQuery): Promise<{ rows: AlertDto[]; total: number }> {
-    const where = {
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.targetOfficeId ? { targetOfficeId: query.targetOfficeId } : {}),
-      ...(query.after
-        ? {
-            OR: [
-              { createdAt: { lt: query.after.createdAt } },
-              { createdAt: query.after.createdAt, id: { lt: query.after.id } },
-            ],
-          }
-        : {}),
-    };
+    const where = alertWhere(query, true);
+    const counted = alertWhere(query, false);
     const [rows, total] = await dbCall(() =>
       Promise.all([
         this.db.alert.findMany({
           where,
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: query.limit,
+          include: { sender: { select: { name: true } } },
         }),
-        this.db.alert.count({
-          where: {
-            ...(query.status ? { status: query.status } : {}),
-            ...(query.targetOfficeId ? { targetOfficeId: query.targetOfficeId } : {}),
-          },
-        }),
+        this.db.alert.count({ where: counted }),
       ]),
     );
     return { rows: rows.map(toAlert), total };
   }
 
   async find(id: string): Promise<AlertDto | null> {
-    const row = await dbCall(() => this.db.alert.findUnique({ where: { id } }));
+    const row = await dbCall(() =>
+      this.db.alert.findUnique({ where: { id }, include: { sender: { select: { name: true } } } }),
+    );
     return row ? toAlert(row) : null;
   }
 
@@ -157,10 +149,11 @@ export class AlertsRepo implements AlertsStore {
   }
 
   async markSent(id: string, recipientCount: number, sentAt: Date): Promise<void> {
+    const status = await this.deliveryStatus(id);
     await dbCall(() =>
       this.db.alert.updateMany({
         where: { id, status: { in: ['SENDING', 'DRAFT'] } },
-        data: { status: 'SENT', recipientCount, sentAt },
+        data: { status, recipientCount, sentAt },
       }),
     );
   }
@@ -187,6 +180,51 @@ export class AlertsRepo implements AlertsStore {
     });
   }
 
+  async failureReasons(alertId: string): Promise<{ reason: string; count: number }[]> {
+    const rows = await dbCall(() =>
+      this.db.notificationDelivery.findMany({
+        where: { notification: { sourceRef: `alert:${alertId}` }, status: 'FAILED' },
+        select: { error: true },
+      }),
+    );
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const reason = row.error?.slice(0, 120) || 'Unknown';
+      counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 5);
+  }
+
+  async alertTiles(now: Date): Promise<{ total: number; sent7d: number; drafts: number; failedOrPartly: number }> {
+    const since = new Date(now.getTime() - 7 * 86_400_000);
+    const [total, sent7d, drafts, failedOrPartly] = await dbCall(() =>
+      Promise.all([
+        this.db.alert.count(),
+        this.db.alert.count({ where: { status: 'SENT', sentAt: { gte: since } } }),
+        this.db.alert.count({ where: { status: 'DRAFT' } }),
+        this.db.alert.count({ where: { status: { in: ['FAILED', 'PARTLY_FAILED'] } } }),
+      ]),
+    );
+    return { total, sent7d, drafts, failedOrPartly };
+  }
+
+  private async deliveryStatus(alertId: string): Promise<'SENT' | 'PARTLY_FAILED' | 'FAILED'> {
+    const rows = await dbCall(() =>
+      this.db.notificationDelivery.findMany({
+        where: { notification: { sourceRef: `alert:${alertId}` } },
+        select: { status: true },
+      }),
+    );
+    const failed = rows.filter((row) => row.status === 'FAILED').length;
+    const ok = rows.filter((row) => row.status === 'SENT' || row.status === 'DELIVERED').length;
+    if (failed === 0) return 'SENT';
+    if (ok === 0) return 'FAILED';
+    return 'PARTLY_FAILED';
+  }
+
   async adminEmail(adminId: string): Promise<string | null> {
     const row = await dbCall(() => this.db.adminUser.findUnique({ where: { id: adminId }, select: { email: true } }));
     return row?.email ?? null;
@@ -207,5 +245,40 @@ export class AlertsRepo implements AlertsStore {
     }
     return false;
   }
+}
+
+function alertWhere(query: AlertListQuery, withCursor: boolean): Prisma.AlertWhereInput {
+  const and: Prisma.AlertWhereInput[] = [];
+  if (query.status) and.push({ status: query.status });
+  if (query.targetOfficeId) and.push({ targetOfficeId: query.targetOfficeId });
+  if (query.channel) and.push({ channels: { has: query.channel } });
+  if (query.targetType === 'OFFICE') and.push({ targetOfficeId: { not: null } });
+  if (query.targetType === 'OFFICIAL') and.push({ targetOfficialId: { not: null } });
+  if (query.sentBy) and.push({ sentBy: query.sentBy });
+  if (query.sentFrom || query.sentTo) {
+    and.push({
+      sentAt: {
+        ...(query.sentFrom ? { gte: query.sentFrom } : {}),
+        ...(query.sentTo ? { lte: query.sentTo } : {}),
+      },
+    });
+  }
+  if (query.q) {
+    and.push({
+      OR: [
+        { displayId: { contains: query.q, mode: 'insensitive' as const } },
+        { title: { contains: query.q, mode: 'insensitive' as const } },
+      ],
+    });
+  }
+  if (withCursor && query.after) {
+    and.push({
+      OR: [
+        { createdAt: { lt: query.after.createdAt } },
+        { createdAt: query.after.createdAt, id: { lt: query.after.id } },
+      ],
+    });
+  }
+  return and.length > 0 ? { AND: and } : {};
 }
 

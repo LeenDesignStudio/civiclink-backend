@@ -10,7 +10,6 @@ import type { LocationsService } from '../modules/locations/locations.service.js
 import type { LookupService } from '../modules/lookup/lookup.service.js';
 import type { NotificationsService } from '../modules/notifications/notifications.service.js';
 import type { ResidentsService } from '../modules/residents/residents.service.js';
-import type { ExportService } from '../modules/sources/export.js';
 import type { SourcesService } from '../modules/sources/sources.service.js';
 
 export interface AppServices {
@@ -27,5 +26,4 @@ export interface AppServices {
   audit: AuditService;
   contact: ContactService;
   sources: SourcesService;
-  exports: ExportService;
 }

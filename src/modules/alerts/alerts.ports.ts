@@ -1,10 +1,16 @@
 import type { Tx } from '../../auth/tx.js';
 import type { AlertStatus, NotificationChannel } from '../../generated/prisma/enums.js';
-import type { AlertDto, ChannelStats } from './alerts.dto.js';
+import type { AlertDto, AlertTiles, ChannelStats, FailureReason } from './alerts.dto.js';
 
 export interface AlertListQuery {
   status?: AlertStatus;
   targetOfficeId?: string;
+  q?: string;
+  channel?: NotificationChannel;
+  targetType?: 'OFFICE' | 'OFFICIAL';
+  sentFrom?: Date;
+  sentTo?: Date;
+  sentBy?: string;
   limit: number;
   after?: { createdAt: Date; id: string };
 }
@@ -40,6 +46,8 @@ export interface AlertsRepo {
   claimDraft(id: string, senderId: string, tx?: Tx): Promise<boolean>;
   markSent(id: string, recipientCount: number, sentAt: Date): Promise<void>;
   channelStats(alertId: string): Promise<ChannelStats[]>;
+  failureReasons(alertId: string): Promise<FailureReason[]>;
+  alertTiles(now: Date): Promise<AlertTiles>;
   adminEmail(adminId: string): Promise<string | null>;
   targetExists(alert: Pick<AlertDto, 'targetOfficeId' | 'targetOfficialId'>): Promise<boolean>;
 }

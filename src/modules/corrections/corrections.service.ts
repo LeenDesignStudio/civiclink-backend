@@ -5,11 +5,12 @@ import {
   DuplicateCorrectionError,
   NotFoundError,
   PreconditionError,
+  RecordRetiredError,
   ValidationError,
 } from '../../lib/errors.js';
 import { buildConnection, clampFirst, decodeCursor, type Connection } from '../../lib/pagination.js';
 import { parseInput } from '../locations/locations.service.js';
-import type { AdminCorrection, CorrectionStatus, ResidentCorrection } from './corrections.dto.js';
+import type { AdminCorrection, CorrectionStatus, CorrectionTiles, ResidentCorrection } from './corrections.dto.js';
 import {
   addCorrectionNoteSchema,
   adminCorrectionsSchema,
@@ -128,12 +129,20 @@ export class CorrectionsService {
       filter?.olderThanDays !== undefined
         ? new Date(this.deps.clock.now().getTime() - filter.olderThanDays * 86_400_000)
         : undefined;
+    const entityType = filter?.recordType ?? filter?.entityType;
+    const field = filter?.field;
+    const submittedFrom = filter?.submittedFrom;
+    const submittedTo = filter?.submittedTo;
     const query = {
       ...(filter?.status ? { status: filter.status } : {}),
       ...(filter?.level ? { level: filter.level } : {}),
-      ...(filter?.entityType ? { entityType: filter.entityType } : {}),
+      ...(entityType ? { entityType } : {}),
       ...(olderThan ? { olderThan } : {}),
       ...(filter?.assignedToMe ? { assigneeId: admin.adminId } : {}),
+      ...(filter?.q ? { q: filter.q } : {}),
+      ...(field ? { field } : {}),
+      ...(submittedFrom ? { submittedFrom: asDate(submittedFrom) } : {}),
+      ...(submittedTo ? { submittedTo: asDate(submittedTo) } : {}),
     };
     const [rows, totalCount] = await Promise.all([
       this.deps.repo.listAdmin({ ...query, limit: first + 1, ...(after ? { after } : {}) }),
@@ -153,7 +162,26 @@ export class CorrectionsService {
     const parsed = parseInput(correctionIdSchema, input);
     const row = await this.deps.repo.findById(parsed.id);
     if (!row) throw new NotFoundError();
-    return toAdmin(row);
+    const flags = await this.deps.repo.recordFlags(row.entityType, row.entityId);
+    const others = await this.deps.repo.listOpenOnRecord(row.entityType, row.entityId, row.id);
+    const decidedByName = row.resolvedBy ? await this.deps.repo.adminName(row.resolvedBy) : null;
+    return {
+      ...toAdmin({
+        ...row,
+        recordName: flags.name,
+        recordDisplayId: flags.displayId,
+        recordRetired: flags.retired,
+        recordLastUpdatedAt: flags.lastUpdatedAt,
+        otherOpenCorrections: others,
+        decidedByName,
+      }),
+    };
+  }
+
+  async adminCorrectionTiles(ctx: ServiceContext): Promise<CorrectionTiles> {
+    ctx.authz.require('admin.correction:read');
+    ctx.authz.requireAdmin();
+    return this.deps.repo.correctionTiles(this.deps.clock.now());
   }
 
   async assignCorrection(ctx: ServiceContext, input: unknown): Promise<{ correction: AdminCorrection }> {
@@ -195,6 +223,8 @@ export class CorrectionsService {
         const current = await this.deps.repo.findById(parsed.id, tx);
         if (!current) throw new NotFoundError();
         assertOpen(current.status);
+        const flags = await this.deps.repo.recordFlags(current.entityType, current.entityId, tx);
+        if (flags.retired) throw new RecordRetiredError();
         const value = normalizeProposed(current.entityType, current.field, parsed.value, 'value');
         const applied = await this.deps.repo.applyTarget(
           {
@@ -203,6 +233,7 @@ export class CorrectionsService {
             field: current.field,
             value,
             lastUpdatedAt: now,
+            adminId: admin.adminId,
             ...(parsed.sourceId ? { sourceId: parsed.sourceId } : {}),
             ...(sourceUrl ? { sourceUrl } : {}),
           },
@@ -362,6 +393,10 @@ function cursor(after: string | undefined): { createdAt: Date; id: string } | un
     ]);
   }
   return decoded;
+}
+
+function asDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
 }
 
 function startOfUtcDay(now: Date): Date {

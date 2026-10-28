@@ -10,6 +10,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminAlert`
 - Scope: `{"permission":"admin.alert:read"}`
 
+### `adminAlertTiles`
+
+- Arguments: `none`
+- Returns: `AlertTiles`
+- Scope: `{"permission":"admin.alert:read"}`
+
 ### `adminAlerts`
 
 - Arguments: `after: String, filter: AdminAlertFilter, first: Int`
@@ -20,6 +26,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 
 - Arguments: `id: UUID!`
 - Returns: `AdminCorrection`
+- Scope: `{"permission":"admin.correction:read"}`
+
+### `adminCorrectionTiles`
+
+- Arguments: `none`
+- Returns: `CorrectionTiles`
 - Scope: `{"permission":"admin.correction:read"}`
 
 ### `adminCorrections`
@@ -40,6 +52,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminJurisdiction`
 - Scope: `{"permission":"admin.civic:read"}`
 
+### `adminJurisdictionTree`
+
+- Arguments: `rootId: ID`
+- Returns: `[AdminJurisdictionTreeNode!]`
+- Scope: `{"permission":"admin.civic:read"}`
+
 ### `adminJurisdictions`
 
 - Arguments: `after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort`
@@ -58,6 +76,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminOffice`
 - Scope: `{"permission":"admin.civic:read"}`
 
+### `adminOfficeTiles`
+
+- Arguments: `none`
+- Returns: `AdminOfficeTiles`
+- Scope: `{"permission":"admin.civic:read"}`
+
 ### `adminOffices`
 
 - Arguments: `after: String, filter: AdminOfficeFilter, first: Int, sort: AdminCivicSort`
@@ -68,6 +92,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 
 - Arguments: `id: ID!`
 - Returns: `AdminOfficial`
+- Scope: `{"permission":"admin.civic:read"}`
+
+### `adminOfficialTiles`
+
+- Arguments: `none`
+- Returns: `AdminOfficialTiles`
 - Scope: `{"permission":"admin.civic:read"}`
 
 ### `adminOfficials`
@@ -99,6 +129,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Arguments: `after: String, first: Int`
 - Returns: `SourceConnection`
 - Scope: `{"permission":"admin.civic:read"}`
+
+### `adminUserTiles`
+
+- Arguments: `none`
+- Returns: `AdminUserTiles`
+- Scope: `{"permission":"admin.users:read"}`
 
 ### `adminUsers`
 
@@ -153,6 +189,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Arguments: `none`
 - Returns: `Me`
 - Scope: `{"resident":true,"permission":"self.profile:read"}`
+
+### `myAdminProfile`
+
+- Arguments: `none`
+- Returns: `AdminMe`
+- Scope: `{"permission":"admin.dashboard:read"}`
 
 ### `myCorrections`
 
@@ -276,6 +318,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminCorrectionPayload`
 - Scope: `{"permission":"admin.correction:resolve"}`
 
+### `changeMyPassword`
+
+- Arguments: `input: ChangeMyPasswordInput!`
+- Returns: `ChangeMyPasswordPayload`
+- Scope: `{"permission":"admin.dashboard:read"}`
+
 ### `createCheckoutSession`
 
 - Arguments: `input: CreateCheckoutSessionInput!`
@@ -318,17 +366,17 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminCorrectionPayload`
 - Scope: `{"permission":"admin.correction:resolve"}`
 
+### `duplicateAlertAsDraft`
+
+- Arguments: `input: AlertIdInput!`
+- Returns: `AlertPayload`
+- Scope: `{"permission":"admin.alert:write"}`
+
 ### `endOfficeTerm`
 
 - Arguments: `input: EndOfficeTermInput!`
 - Returns: `OfficeTermPayload`
 - Scope: `{"permission":"admin.civic:write"}`
-
-### `exportCsv`
-
-- Arguments: `input: ExportCsvInput!`
-- Returns: `ExportCsvPayload`
-- Scope: `{"permission":"admin.export:csv"}`
 
 ### `follow`
 
@@ -354,6 +402,18 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `MarkNotificationsReadPayload`
 - Scope: `{"residentActive":true}`
 
+### `markServiceValidated`
+
+- Arguments: `id: ID!`
+- Returns: `ValidatedService`
+- Scope: `{"permission":"admin.civic:write"}`
+
+### `pauseSource`
+
+- Arguments: `input: TriggerSourceRefreshInput!`
+- Returns: `SourcePayload`
+- Scope: `{"permission":"admin.source:write"}`
+
 ### `registerPushSubscription`
 
 - Arguments: `input: RegisterPushSubscriptionInput!`
@@ -371,6 +431,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Arguments: `input: RequestAccountDeletionInput!`
 - Returns: `RequestAccountDeletionPayload`
 - Scope: `{"residentActive":true,"permission":"self.account:delete"}`
+
+### `resendInvite`
+
+- Arguments: `input: AdminUserIdInput!`
+- Returns: `AdminUserPayload`
+- Scope: `{"permission":"admin.users:manage"}`
 
 ### `restoreAccount`
 
@@ -401,6 +467,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Arguments: `id: ID!, retireActiveOffices: Boolean`
 - Returns: `RecordStatusPayload`
 - Scope: `{"permission":"admin.civic:retire"}`
+
+### `resumeSource`
+
+- Arguments: `input: TriggerSourceRefreshInput!`
+- Returns: `SourcePayload`
+- Scope: `{"permission":"admin.source:write"}`
 
 ### `retireJurisdiction`
 
@@ -443,6 +515,12 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Arguments: `input: SendAlertInput!`
 - Returns: `AlertPayload`
 - Scope: `{"permission":"admin.alert:send"}`
+
+### `sendPasswordReset`
+
+- Arguments: `input: AdminUserIdInput!`
+- Returns: `AdminPasswordResetPayload`
+- Scope: `{"permission":"admin.users:manage"}`
 
 ### `sendTestAlert`
 
@@ -509,6 +587,18 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Arguments: `input: UpdateAdminRoleInput!`
 - Returns: `AdminUserPayload`
 - Scope: `{"permission":"admin.users:manage"}`
+
+### `updateAdminUser`
+
+- Arguments: `input: UpdateAdminUserInput!`
+- Returns: `AdminUserPayload`
+- Scope: `{"permission":"admin.users:manage"}`
+
+### `updateMyProfile`
+
+- Arguments: `input: UpdateMyProfileInput!`
+- Returns: `AdminUserPayload`
+- Scope: `{"permission":"admin.dashboard:read"}`
 
 ### `updateNotificationPreference`
 

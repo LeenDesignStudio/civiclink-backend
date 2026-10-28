@@ -194,7 +194,11 @@ export interface OfficeAddressInput {
 export const upsertJurisdictionSchema = z
   .object({
     id: z.uuid().optional(),
+    correctionId: z.uuid().optional(),
     name: requiredText(2, 150),
+    aliases: z.array(z.string().trim().min(1).max(150)).max(20).default([]),
+    description: optionalText(300),
+    isPilot: z.boolean().default(false),
     level: z.enum(GOV_LEVELS),
     type: z.enum(JURISDICTION_TYPES),
     subtype: optionalText(80),
@@ -221,6 +225,9 @@ export const upsertJurisdictionSchema = z
 export interface UpsertJurisdictionInput {
   id?: string;
   name: string;
+  aliases: string[];
+  description: string | null;
+  isPilot: boolean;
   level: GovLevel;
   type: JurisdictionType;
   subtype: string | null;
@@ -234,12 +241,16 @@ export interface UpsertJurisdictionInput {
   lastUpdatedAt: Date;
   freshnessOverride: FreshnessOverride;
   freshnessNote: string | null;
+  correctionId?: string;
 }
 
 export function parseUpsertJurisdiction(input: unknown): UpsertJurisdictionInput {
   const value = parse(upsertJurisdictionSchema, input);
   const result: UpsertJurisdictionInput = {
     name: value.name,
+    aliases: value.aliases,
+    description: value.description,
+    isPilot: value.isPilot,
     level: value.level,
     type: value.type,
     subtype: value.subtype,
@@ -255,6 +266,7 @@ export function parseUpsertJurisdiction(input: unknown): UpsertJurisdictionInput
     freshnessNote: value.freshnessNote,
   };
   if (value.id !== undefined) result.id = value.id;
+  if (value.correctionId !== undefined) result.correctionId = value.correctionId;
   return result;
 }
 
@@ -279,10 +291,12 @@ export function parseId(input: unknown): string {
 export const upsertOfficeSchema = z
   .object({
     id: z.uuid().optional(),
+    correctionId: z.uuid().optional(),
     jurisdictionId: z.uuid(),
     name: requiredText(2, 150),
     seatLabel: optionalText(60),
     selectionMethod: z.enum(SELECTION_METHODS),
+    officeType: z.enum(['ELECTED', 'APPOINTED', 'DEPARTMENT', 'COMMISSION']).default('ELECTED'),
     displayOrder: z.number().int().min(0).max(10_000).default(100),
     whyTemplate: optionalText(300),
     phone: optionalPhone,
@@ -308,6 +322,7 @@ export interface UpsertOfficeInput {
   name: string;
   seatLabel: string | null;
   selectionMethod: SelectionMethod;
+  officeType: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION';
   displayOrder: number;
   whyTemplate: string | null;
   phone: string | null;
@@ -322,6 +337,7 @@ export interface UpsertOfficeInput {
   freshnessOverride: FreshnessOverride;
   freshnessNote: string | null;
   notifyFollowers: boolean;
+  correctionId?: string;
 }
 
 export function parseUpsertOffice(input: unknown): UpsertOfficeInput {
@@ -331,6 +347,7 @@ export function parseUpsertOffice(input: unknown): UpsertOfficeInput {
     name: value.name,
     seatLabel: value.seatLabel,
     selectionMethod: value.selectionMethod,
+    officeType: value.officeType,
     displayOrder: value.displayOrder,
     whyTemplate: value.whyTemplate,
     phone: value.phone,
@@ -350,17 +367,20 @@ export function parseUpsertOffice(input: unknown): UpsertOfficeInput {
     notifyFollowers: value.notifyFollowers ?? false,
   };
   if (value.id !== undefined) result.id = value.id;
+  if (value.correctionId !== undefined) result.correctionId = value.correctionId;
   return result;
 }
 
 export const upsertOfficialSchema = z
   .object({
     id: z.uuid().optional(),
+    correctionId: z.uuid().optional(),
     fullName: requiredText(2, 120),
     displayName: optionalText(120),
     party: optionalText(60),
     photoUrl: optionalHttps,
     website: optionalUrl,
+    useOfficeAddress: z.boolean().default(false),
     sourceId: z.uuid(),
     sourceRecordUrl: optionalUrl,
     lastUpdatedAt: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).transform(
@@ -379,12 +399,14 @@ export interface UpsertOfficialInput {
   party: string | null;
   photoUrl: string | null;
   website: string | null;
+  useOfficeAddress: boolean;
   sourceId: string;
   sourceRecordUrl: string | null;
   lastUpdatedAt: Date;
   freshnessOverride: FreshnessOverride;
   freshnessNote: string | null;
   notifyFollowers: boolean;
+  correctionId?: string;
 }
 
 export function parseUpsertOfficial(input: unknown): UpsertOfficialInput {
@@ -395,6 +417,7 @@ export function parseUpsertOfficial(input: unknown): UpsertOfficialInput {
     party: value.party,
     photoUrl: value.photoUrl,
     website: value.website,
+    useOfficeAddress: value.useOfficeAddress,
     sourceId: value.sourceId,
     sourceRecordUrl: value.sourceRecordUrl,
     lastUpdatedAt: value.lastUpdatedAt,
@@ -403,6 +426,7 @@ export function parseUpsertOfficial(input: unknown): UpsertOfficialInput {
     notifyFollowers: value.notifyFollowers ?? false,
   };
   if (value.id !== undefined) result.id = value.id;
+  if (value.correctionId !== undefined) result.correctionId = value.correctionId;
   return result;
 }
 
@@ -473,11 +497,13 @@ export function parseEndOfficeTerm(input: unknown): { termId: string; termEnd: D
 export const upsertServiceSchema = z
   .object({
     id: z.uuid().optional(),
+    correctionId: z.uuid().optional(),
     title: requiredText(3, 120),
     categoryId: z.uuid(),
-    description: requiredText(20, 400),
+    description: requiredText(20, 300),
     url: optionalHttps,
     phoneContact: optionalText(120),
+    email: z.email().nullish().transform((value) => value ?? null),
     jurisdictionIds: z.array(z.uuid()).max(50).default([]),
     officeIds: z.array(z.uuid()).max(50).default([]),
     lastValidatedAt: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).transform(
@@ -487,11 +513,11 @@ export const upsertServiceSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (!value.url && !value.phoneContact) {
+    if (!value.url && !value.phoneContact && !value.email) {
       ctx.addIssue({
         code: 'custom',
         path: ['url'],
-        message: 'Add a website or a phone contact.',
+        message: 'Add a website, a phone number, or an email.',
       });
     }
     if (value.jurisdictionIds.length + value.officeIds.length < 1) {
@@ -510,10 +536,12 @@ export interface UpsertServiceInput {
   description: string;
   url: string | null;
   phoneContact: string | null;
+  email: string | null;
   jurisdictionIds: string[];
   officeIds: string[];
   lastValidatedAt: Date;
   sourceId: string;
+  correctionId?: string;
 }
 
 export function parseUpsertService(input: unknown): UpsertServiceInput {
@@ -524,12 +552,14 @@ export function parseUpsertService(input: unknown): UpsertServiceInput {
     description: value.description,
     url: value.url,
     phoneContact: value.phoneContact,
+    email: value.email,
     jurisdictionIds: value.jurisdictionIds,
     officeIds: value.officeIds,
     lastValidatedAt: value.lastValidatedAt,
     sourceId: value.sourceId,
   };
   if (value.id !== undefined) result.id = value.id;
+  if (value.correctionId !== undefined) result.correctionId = value.correctionId;
   return result;
 }
 
@@ -563,6 +593,9 @@ export const adminJurisdictionListSchema = z
         type: z.enum(JURISDICTION_TYPES).optional(),
         state: z.string().regex(/^[A-Z]{2}$/).optional(),
         status: recordStatus.optional(),
+        parentId: z.uuid().optional(),
+        isPilot: z.boolean().optional(),
+        boundary: z.enum(['OK', 'MISSING']).optional(),
         freshness: freshness.optional(),
         q: searchText.optional(),
       })
@@ -580,6 +613,9 @@ export const adminOfficeListSchema = z
       .object({
         level: z.enum(GOV_LEVELS).optional(),
         jurisdictionId: z.uuid().optional(),
+        officeType: z.enum(['ELECTED', 'APPOINTED', 'DEPARTMENT', 'COMMISSION']).optional(),
+        hasOfficial: z.boolean().optional(),
+        missingContact: z.boolean().optional(),
         vacantOnly: z.boolean().optional(),
         staleOnly: z.boolean().optional(),
         status: recordStatus.optional(),
@@ -598,7 +634,11 @@ export const adminOfficialListSchema = z
     filter: z
       .object({
         status: recordStatus.optional(),
+        level: z.enum(GOV_LEVELS).optional(),
+        jurisdictionId: z.uuid().optional(),
+        officeType: z.enum(['ELECTED', 'APPOINTED', 'DEPARTMENT', 'COMMISSION']).optional(),
         officeId: z.uuid().optional(),
+        freshness: freshness.optional(),
         q: searchText.optional(),
       })
       .strict()
@@ -614,7 +654,8 @@ export const adminServiceListSchema = z
     filter: z
       .object({
         categoryId: z.uuid().optional(),
-        status: recordStatus.optional(),
+        status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+        needsValidation: z.boolean().optional(),
         linkBroken: z.boolean().optional(),
         q: searchText.optional(),
       })

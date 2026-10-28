@@ -21,7 +21,8 @@ import {
   DatabaseUnavailableError,
   DuplicateCorrectionError,
   ERROR_CODES,
-  ExportTooLargeError,
+  OfficeHasActiveOfficialError,
+  RecordRetiredError,
   FollowLimitError,
   ForbiddenError,
   fromZod,
@@ -120,7 +121,8 @@ function samples(): AppError[] {
     new AlertAlreadySentError(),
     new RecipientsChangedError(),
     new NoRecipientsError(),
-    new ExportTooLargeError(),
+    new OfficeHasActiveOfficialError(),
+    new RecordRetiredError(),
   ];
 }
 

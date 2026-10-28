@@ -11,9 +11,9 @@ export const saveAlertSchema = z
     targetOfficeId: z.uuid().optional(),
     targetOfficialId: z.uuid().optional(),
     title: z.string().trim().min(5).max(80),
-    body: z.string().trim().min(10).max(1000),
+    body: z.string().trim().min(10).max(500),
     link: httpsUrl.optional(),
-    channels: z.array(z.enum(['EMAIL', 'PUSH'])).max(2).optional(),
+    channels: z.array(z.enum(['IN_APP', 'EMAIL', 'PUSH'])).min(1).max(3),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -37,8 +37,14 @@ export const adminAlertsSchema = z
   .object({
     filter: z
       .object({
-        status: z.enum(['DRAFT', 'SENDING', 'SENT']).optional(),
+        status: z.enum(['DRAFT', 'SENDING', 'SENT', 'PARTLY_FAILED', 'FAILED']).optional(),
         targetOfficeId: z.uuid().optional(),
+        q: z.string().trim().min(1).max(100).optional(),
+        channel: z.enum(['IN_APP', 'EMAIL', 'PUSH']).optional(),
+        targetType: z.enum(['OFFICE', 'OFFICIAL']).optional(),
+        sentFrom: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).optional(),
+        sentTo: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).optional(),
+        sentBy: z.uuid().optional(),
       })
       .strict()
       .optional(),

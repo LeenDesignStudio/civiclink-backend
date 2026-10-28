@@ -90,7 +90,8 @@ REST routes return `{ "error": { "code", "message", "requestId" } }` with the HT
 | `ALERT_ALREADY_SENT` | ConflictError | 409 | "This alert was already sent and can't be changed." | |
 | `RECIPIENTS_CHANGED` | ConflictError | 409 | "The number of recipients changed. Review and confirm again." | sendAlert count mismatch |
 | `NO_RECIPIENTS` | ConflictError | 409 | "Nobody follows this office yet." | |
-| `EXPORT_TOO_LARGE` | ValidationError | 413 | "Narrow your filters — exports are limited to 50,000 rows." | |
+| `OFFICE_HAS_ACTIVE_OFFICIAL` | ConflictError | 409 | "This office already has an active official." | setOfficeTerm when another official is current |
+| `RECORD_RETIRED` | ConflictError | 409 | "This record is retired, so the correction can't be applied." | applyCorrection, or an edit that applies a correction, when the record is retired or a service is inactive |
 
 ## 6. Mapping rules (summary — implementation in src/lib/errors.ts and src/db/prisma.ts)
 

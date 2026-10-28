@@ -6,6 +6,7 @@ import {
   ForbiddenError,
   NoRecipientsError,
   RecipientsChangedError,
+  ValidationError,
 } from '../../lib/errors.js';
 import { directTx } from '../../auth/tx.js';
 import { FakeClock } from '../../lib/clock.js';
@@ -105,6 +106,20 @@ class MemoryAlerts implements AlertsRepo {
     return Promise.resolve(emptyStats());
   }
 
+  failureReasons(): Promise<{ reason: string; count: number }[]> {
+    return Promise.resolve([]);
+  }
+
+  alertTiles(now: Date) {
+    const since = now.getTime() - 7 * 86_400_000;
+    return Promise.resolve({
+      total: this.rows.length,
+      sent7d: this.rows.filter((row) => row.status === 'SENT' && (row.sentAt?.getTime() ?? 0) >= since).length,
+      drafts: this.rows.filter((row) => row.status === 'DRAFT').length,
+      failedOrPartly: this.rows.filter((row) => row.status === 'FAILED' || row.status === 'PARTLY_FAILED').length,
+    });
+  }
+
   adminEmail(adminId: string): Promise<string | null> {
     return Promise.resolve(this.emails.get(adminId) ?? null);
   }
@@ -189,5 +204,25 @@ describe('AlertsService', () => {
     };
     const ctx: ServiceContext = { requestId: 'req', principal: resident, authz: new Authz(resident), ipHash: 'ip' };
     await expect(alerts.sendAlert(ctx, { id: alert.id, confirmRecipientCount: 4 })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('copies an alert into a new draft and rejects a missing channel or a long message', async () => {
+    const repo = new MemoryAlerts();
+    const alerts = service(repo);
+    const { alert } = await alerts.saveAlertDraft(admin('ADMIN_STAFF'), draftInput);
+    const copy = await alerts.duplicateAlertAsDraft(admin('ADMIN_STAFF'), { id: alert.id });
+    expect(copy.alert.id).not.toBe(alert.id);
+    expect(copy.alert.status).toBe('DRAFT');
+    expect(copy.alert.channels).toEqual(['EMAIL']);
+    expect(copy.alert.link).toBe(`https://civiclink.example/offices/${OFFICE}`);
+    await expect(
+      alerts.saveAlertDraft(admin('ADMIN_STAFF'), { ...draftInput, channels: [] }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      alerts.saveAlertDraft(admin('ADMIN_STAFF'), { ...draftInput, body: 'x'.repeat(501) }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    const tiles = await alerts.adminAlertTiles(admin('ADMIN_STAFF'));
+    expect(tiles.total).toBe(2);
+    expect(tiles.drafts).toBe(2);
   });
 });

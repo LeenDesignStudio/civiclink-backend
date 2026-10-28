@@ -47,6 +47,13 @@ export interface SourceRow {
   collectorKey: string | null;
   active: boolean;
   lastRunAt: Date | null;
+  displayId?: string;
+  kind?: 'API' | 'BULK_EXPORT' | 'SCHEDULED_PAGE' | 'MANUAL';
+  notes?: string | null;
+  recordStatus?: 'ACTIVE' | 'PAUSED' | 'RETIRED';
+  lastSuccessAt?: Date | null;
+  lastAttemptAt?: Date | null;
+  recordsUsingCount?: number;
   config: SourceConfig;
   createdAt: Date;
 }

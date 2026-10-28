@@ -1,6 +1,12 @@
 import { builder, rememberScope } from '../../graphql/builder.js';
 import type { Connection } from '../../lib/pagination.js';
-import type { AdminCorrection, CorrectionNoteDto, ResidentCorrection } from './corrections.dto.js';
+import type {
+  AdminCorrection,
+  CorrectionNoteDto,
+  CorrectionTiles,
+  OpenCorrectionBrief,
+  ResidentCorrection,
+} from './corrections.dto.js';
 import { CorrectionsService } from './corrections.service.js';
 import { GovLevelEnum, PageInfoType, withoutNulls } from '../follows/relay.graphql.js';
 
@@ -33,7 +39,52 @@ const CorrectionStatusEnum = builder.enumType('CorrectionStatus', {
 });
 
 const DismissReasonEnum = builder.enumType('DismissReason', {
-  values: ['ALREADY_CORRECT', 'INSUFFICIENT_EVIDENCE', 'OUT_OF_SCOPE', 'DUPLICATE', 'OTHER'] as const,
+  values: ['CANT_VERIFY', 'SOURCE_CORRECT', 'DUPLICATE', 'OUT_OF_SCOPE', 'OTHER'] as const,
+});
+
+const RecordBriefType = builder
+  .objectRef<{ id: string; displayId: string | null; name: string | null }>('CorrectionRecordBrief')
+  .implement({
+    fields: (t) => ({
+      id: t.exposeID('id'),
+      displayId: t.exposeString('displayId', { nullable: true }),
+      name: t.exposeString('name', { nullable: true }),
+    }),
+  });
+
+const SubmitterType = builder
+  .objectRef<{ displayName: string | null; accountId: string }>('CorrectionSubmitter')
+  .implement({
+    fields: (t) => ({
+      displayName: t.exposeString('displayName', { nullable: true }),
+      accountId: t.exposeID('accountId'),
+    }),
+  });
+
+const DecidedByType = builder
+  .objectRef<{ id: string; name: string | null }>('CorrectionDecidedBy')
+  .implement({
+    fields: (t) => ({
+      id: t.exposeID('id'),
+      name: t.exposeString('name', { nullable: true }),
+    }),
+  });
+
+const OpenCorrectionType = builder.objectRef<OpenCorrectionBrief>('OpenCorrectionBrief').implement({
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    displayId: t.exposeString('displayId', { nullable: true }),
+    status: t.expose('status', { type: CorrectionStatusEnum }),
+  }),
+});
+
+const CorrectionTilesType = builder.objectRef<CorrectionTiles>('CorrectionTiles').implement({
+  fields: (t) => ({
+    pending: t.exposeInt('pending'),
+    inReview: t.exposeInt('inReview'),
+    applied30d: t.exposeInt('applied30d'),
+    dismissed30d: t.exposeInt('dismissed30d'),
+  }),
 });
 
 const ResidentCorrectionType = builder.objectRef<ResidentCorrection>('Correction').implement({
@@ -65,11 +116,23 @@ const CorrectionNoteType = builder.objectRef<CorrectionNoteDto>('CorrectionNote'
 const AdminCorrectionType = builder.objectRef<AdminCorrection>('AdminCorrection').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
+    displayId: t.exposeString('displayId', { nullable: true }),
     entityType: t.expose('entityType', { type: CivicEntityTypeEnum }),
+    recordType: t.expose('entityType', { type: CivicEntityTypeEnum }),
     entityId: t.exposeID('entityId'),
+    record: t.field({
+      type: RecordBriefType,
+      resolve: (row) => ({
+        id: row.entityId,
+        displayId: row.recordDisplayId ?? null,
+        name: row.recordName ?? null,
+      }),
+    }),
     field: t.expose('field', { type: CorrectionFieldEnum }),
+    currentValue: t.string({ nullable: true, resolve: (row) => row.currentValueSnapshot?.value ?? null }),
     proposedValue: t.exposeString('proposedValue', { nullable: true }),
     details: t.exposeString('details', { nullable: true }),
+    description: t.string({ nullable: true, resolve: (row) => row.details }),
     evidenceUrl: t.exposeString('evidenceUrl', { nullable: true }),
     status: t.expose('status', { type: CorrectionStatusEnum }),
     dismissReason: t.expose('dismissReason', { type: DismissReasonEnum, nullable: true }),
@@ -80,6 +143,23 @@ const AdminCorrectionType = builder.objectRef<AdminCorrection>('AdminCorrection'
     }),
     assigneeId: t.exposeID('assigneeId', { nullable: true }),
     submitterDisplayName: t.exposeString('submitterDisplayName', { nullable: true }),
+    submittedBy: t.field({
+      type: SubmitterType,
+      nullable: true,
+      resolve: (row) => (row.userId ? { displayName: row.submitterDisplayName, accountId: row.userId } : null),
+    }),
+    decidedAt: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.resolvedAt }),
+    decidedBy: t.field({
+      type: DecidedByType,
+      nullable: true,
+      resolve: (row) => (row.resolvedBy ? { id: row.resolvedBy, name: row.decidedByName ?? null } : null),
+    }),
+    recordChangedSinceSubmission: t.boolean({ resolve: (row) => row.recordChangedSinceSubmission ?? false }),
+    recordRetired: t.boolean({ resolve: (row) => row.recordRetired ?? false }),
+    otherOpenCorrections: t.field({
+      type: [OpenCorrectionType],
+      resolve: (row) => row.otherOpenCorrections ?? [],
+    }),
     notes: t.field({ type: [CorrectionNoteType], resolve: (row) => row.notes }),
     createdAt: t.field({ type: 'DateTime', resolve: (row) => row.createdAt }),
     updatedAt: t.field({ type: 'DateTime', resolve: (row) => row.updatedAt }),
@@ -150,6 +230,11 @@ const AdminFilter = builder.inputType('AdminCorrectionFilter', {
     entityType: t.field({ type: CivicEntityTypeEnum, required: false }),
     olderThanDays: t.int({ required: false }),
     assignedToMe: t.boolean({ required: false }),
+    q: t.string({ required: false }),
+    field: t.field({ type: CorrectionFieldEnum, required: false }),
+    recordType: t.field({ type: CivicEntityTypeEnum, required: false }),
+    submittedFrom: t.field({ type: 'DateTime', required: false }),
+    submittedTo: t.field({ type: 'DateTime', required: false }),
   }),
 });
 
@@ -241,6 +326,15 @@ builder.queryField('adminCorrection', (t) =>
   }),
 );
 rememberScope('Query', 'adminCorrection', readScope);
+
+builder.queryField('adminCorrectionTiles', (t) =>
+  t.field({
+    type: CorrectionTilesType,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => corrections(ctx).adminCorrectionTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminCorrectionTiles', readScope);
 
 builder.mutationField('assignCorrection', (t) =>
   t.field({
