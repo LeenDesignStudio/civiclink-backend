@@ -458,7 +458,7 @@ model Follow {
 
 model Source {
   id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId     String         @unique @default(dbgenerated("('SRC-' || lpad(nextval('display_id_src')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId     String         @unique @default(dbgenerated("('SRC-' || lpad(nextval('display_id_src')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   name          String         @unique @db.VarChar(150)
   publisher     String         @db.VarChar(150)
   url           String         @db.VarChar(2048)
@@ -537,7 +537,7 @@ model PendingSourceChange {
 
 model Jurisdiction {
   id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId         String            @unique @default(dbgenerated("('JUR-' || lpad(nextval('display_id_jur')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId         String            @unique @default(dbgenerated("('JUR-' || lpad(nextval('display_id_jur')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   name              String            @db.VarChar(150)
   aliases           String[]          @default([])
   description       String?           @db.VarChar(300)
@@ -583,7 +583,7 @@ model Jurisdiction {
 
 model Office {
   id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId         String            @unique @default(dbgenerated("('OFF-' || lpad(nextval('display_id_off')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId         String            @unique @default(dbgenerated("('OFF-' || lpad(nextval('display_id_off')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   slug              String            @unique @db.VarChar(160)
   jurisdictionId    String            @map("jurisdiction_id") @db.Uuid
   name              String            @db.VarChar(150)
@@ -647,7 +647,7 @@ model OfficeAddress {
 
 model Official {
   id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId         String            @unique @default(dbgenerated("('PER-' || lpad(nextval('display_id_per')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId         String            @unique @default(dbgenerated("('PER-' || lpad(nextval('display_id_per')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   slug              String            @unique @db.VarChar(160)
   fullName          String            @map("full_name") @db.VarChar(120)
   displayName       String?           @map("display_name") @db.VarChar(120)
@@ -714,7 +714,7 @@ model ServiceCategory {
 
 model Service {
   id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId       String        @unique @default(dbgenerated("('SVC-' || lpad(nextval('display_id_svc')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId       String        @unique @default(dbgenerated("('SVC-' || lpad(nextval('display_id_svc')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   title           String        @db.VarChar(120)
   categoryId      String        @map("category_id") @db.Uuid
   description     String        @db.VarChar(300)
@@ -764,7 +764,7 @@ model ServiceLink {
 
 model Correction {
   id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId            String           @unique @default(dbgenerated("('COR-' || lpad(nextval('display_id_cor')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId            String           @unique @default(dbgenerated("('COR-' || lpad(nextval('display_id_cor')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   /// Nullable so the record survives account purge (de-identified).
   userId               String?          @map("user_id") @db.Uuid
   entityType           CivicEntityType  @map("entity_type")
@@ -833,7 +833,7 @@ model ChangeLog {
 
 model Alert {
   id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayId        String      @unique @default(dbgenerated("('ALT-' || lpad(nextval('display_id_alt')::text, 4, '0'))")) @map("display_id") @db.VarChar(16)
+  displayId        String      @unique @default(dbgenerated("('ALT-' || lpad(nextval('display_id_alt')::text, 8, '0'))")) @map("display_id") @db.VarChar(16)
   targetOfficeId   String?     @map("target_office_id") @db.Uuid
   targetOfficialId String?     @map("target_official_id") @db.Uuid
   title            String      @db.VarChar(80)

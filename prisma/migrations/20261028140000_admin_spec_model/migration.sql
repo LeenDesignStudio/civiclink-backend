@@ -80,13 +80,13 @@ ALTER TABLE "services" RENAME COLUMN "status_new" TO "status";
 ALTER TABLE "services" ALTER COLUMN "status" SET DEFAULT 'ACTIVE';
 ALTER TABLE "services" ALTER COLUMN "status" SET NOT NULL;
 
-UPDATE "jurisdictions" SET "display_id" = 'JUR-' || lpad(nextval('display_id_jur')::text, 4, '0') WHERE "display_id" IS NULL;
-UPDATE "offices" SET "display_id" = 'OFF-' || lpad(nextval('display_id_off')::text, 4, '0') WHERE "display_id" IS NULL;
-UPDATE "officials" SET "display_id" = 'PER-' || lpad(nextval('display_id_per')::text, 4, '0') WHERE "display_id" IS NULL;
-UPDATE "services" SET "display_id" = 'SVC-' || lpad(nextval('display_id_svc')::text, 4, '0') WHERE "display_id" IS NULL;
-UPDATE "corrections" SET "display_id" = 'COR-' || lpad(nextval('display_id_cor')::text, 4, '0') WHERE "display_id" IS NULL;
-UPDATE "sources" SET "display_id" = 'SRC-' || lpad(nextval('display_id_src')::text, 4, '0') WHERE "display_id" IS NULL;
-UPDATE "alerts" SET "display_id" = 'ALT-' || lpad(nextval('display_id_alt')::text, 4, '0') WHERE "display_id" IS NULL;
+UPDATE "jurisdictions" SET "display_id" = 'JUR-' || lpad(nextval('display_id_jur')::text, 8, '0') WHERE "display_id" IS NULL;
+UPDATE "offices" SET "display_id" = 'OFF-' || lpad(nextval('display_id_off')::text, 8, '0') WHERE "display_id" IS NULL;
+UPDATE "officials" SET "display_id" = 'PER-' || lpad(nextval('display_id_per')::text, 8, '0') WHERE "display_id" IS NULL;
+UPDATE "services" SET "display_id" = 'SVC-' || lpad(nextval('display_id_svc')::text, 8, '0') WHERE "display_id" IS NULL;
+UPDATE "corrections" SET "display_id" = 'COR-' || lpad(nextval('display_id_cor')::text, 8, '0') WHERE "display_id" IS NULL;
+UPDATE "sources" SET "display_id" = 'SRC-' || lpad(nextval('display_id_src')::text, 8, '0') WHERE "display_id" IS NULL;
+UPDATE "alerts" SET "display_id" = 'ALT-' || lpad(nextval('display_id_alt')::text, 8, '0') WHERE "display_id" IS NULL;
 
 ALTER TABLE "jurisdictions" ALTER COLUMN "display_id" SET NOT NULL;
 ALTER TABLE "offices" ALTER COLUMN "display_id" SET NOT NULL;
@@ -96,13 +96,13 @@ ALTER TABLE "corrections" ALTER COLUMN "display_id" SET NOT NULL;
 ALTER TABLE "sources" ALTER COLUMN "display_id" SET NOT NULL;
 ALTER TABLE "alerts" ALTER COLUMN "display_id" SET NOT NULL;
 
-ALTER TABLE "jurisdictions" ALTER COLUMN "display_id" SET DEFAULT ('JUR-' || lpad(nextval('display_id_jur')::text, 4, '0'));
-ALTER TABLE "offices" ALTER COLUMN "display_id" SET DEFAULT ('OFF-' || lpad(nextval('display_id_off')::text, 4, '0'));
-ALTER TABLE "officials" ALTER COLUMN "display_id" SET DEFAULT ('PER-' || lpad(nextval('display_id_per')::text, 4, '0'));
-ALTER TABLE "services" ALTER COLUMN "display_id" SET DEFAULT ('SVC-' || lpad(nextval('display_id_svc')::text, 4, '0'));
-ALTER TABLE "corrections" ALTER COLUMN "display_id" SET DEFAULT ('COR-' || lpad(nextval('display_id_cor')::text, 4, '0'));
-ALTER TABLE "sources" ALTER COLUMN "display_id" SET DEFAULT ('SRC-' || lpad(nextval('display_id_src')::text, 4, '0'));
-ALTER TABLE "alerts" ALTER COLUMN "display_id" SET DEFAULT ('ALT-' || lpad(nextval('display_id_alt')::text, 4, '0'));
+ALTER TABLE "jurisdictions" ALTER COLUMN "display_id" SET DEFAULT ('JUR-' || lpad(nextval('display_id_jur')::text, 8, '0'));
+ALTER TABLE "offices" ALTER COLUMN "display_id" SET DEFAULT ('OFF-' || lpad(nextval('display_id_off')::text, 8, '0'));
+ALTER TABLE "officials" ALTER COLUMN "display_id" SET DEFAULT ('PER-' || lpad(nextval('display_id_per')::text, 8, '0'));
+ALTER TABLE "services" ALTER COLUMN "display_id" SET DEFAULT ('SVC-' || lpad(nextval('display_id_svc')::text, 8, '0'));
+ALTER TABLE "corrections" ALTER COLUMN "display_id" SET DEFAULT ('COR-' || lpad(nextval('display_id_cor')::text, 8, '0'));
+ALTER TABLE "sources" ALTER COLUMN "display_id" SET DEFAULT ('SRC-' || lpad(nextval('display_id_src')::text, 8, '0'));
+ALTER TABLE "alerts" ALTER COLUMN "display_id" SET DEFAULT ('ALT-' || lpad(nextval('display_id_alt')::text, 8, '0'));
 
 CREATE UNIQUE INDEX "jurisdictions_display_id_key" ON "jurisdictions" ("display_id");
 CREATE UNIQUE INDEX "offices_display_id_key" ON "offices" ("display_id");
