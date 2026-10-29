@@ -343,3 +343,5 @@ packages (apexcharts if gone), dead routes. Lint/typecheck/build clean.
    resident told when a correction is decided, proposed password/lock/session numbers).
 5. Address suggestions on the home page use Photon (photon.komoot.io), which sends typed addresses to a third
    party. Keep it, or use only Google Maps geocoding under QubaLink's account (SOW A13)?
+6. Accept or reject pending source changes (`decideSourceChange`) is Super Admin only. Admin / Staff
+   see Sources as view only. The 23 Oct spec does not list this action. Confirm.

@@ -1174,6 +1174,7 @@ now match this section.
 4. Service categories: a fixed list, or editable by the Super Admin?
 5. Resident notice on corrections: should a resident be told when their correction is applied or dismissed? The SOW doesn't say.
 6. Proposed items: pilot flag, coverage note, boundary overlap note, source refresh history and Refresh now, alert drafts, notification preferences, preset dismissal reasons, and the password, lock and session rules (12 characters, 5 attempts, 15-minute lock, 30-minute idle timeout, 60-minute reset link, 7-day invite).
+7. Accept or reject pending source changes: Super Admin only. The 23 Oct spec does not list this action. It follows from Admin / Staff seeing Sources as view only (`admin.source:decide`). Confirm.
 
 Added after checking every screen against the SOW and the Service Agreement:
 

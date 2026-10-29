@@ -132,7 +132,7 @@ QubaLink staff who want resident features use a normal resident account.
 ### Anonymous visitor
 **Can**
 - Search by full address, ZIP, city+state, or device coordinates and get a lookup token (rate limited 30 / 10 min / IP).
-- View the Civic Card for any lookup token, office and official profiles, services and resources.
+- View the Civic Card for any lookup token, office and official profiles, services and resources. Each office and official shows the source name, last-updated date, and freshness. The source record URL is admin-only.
 - Read pricing plans and current legal document versions; submit the contact form (Turnstile, 5 / hour / IP).
 - Start Google/Apple sign-in with an intent (save / follow / report / subscribe / notifications).
 
@@ -162,10 +162,10 @@ QubaLink staff who want resident features use a normal resident account.
 
 ### Admin — Admin / Staff
 **Can**: open admin home; read every civic record (incl. retired) and sources; create and edit jurisdictions, offices, officials, and services; retire and reactivate offices, officials, and services; review corrections; create and send alerts; read change history; open My Profile and change their own password.
-**Cannot**: retire or restore a jurisdiction (`FORBIDDEN`); add, edit, pause, or retire sources; open Admin Users; export CSV; change their own role or status; hard-delete anything; draw or upload boundary geometry.
+**Cannot**: retire or restore a jurisdiction (`FORBIDDEN`); add, edit, pause, or retire sources; accept or reject pending source changes (`admin.source:decide`, pending QubaLink confirmation — docs/08 section 28 item 7); open Admin Users; export CSV; change their own role or status; hard-delete anything; draw or upload boundary geometry.
 
 ### Admin — Super Admin
-**Can**: everything Admin / Staff can, plus retire and restore jurisdictions; add, edit, pause, and retire sources; export CSV; invite admins (any unique email, name, and role) and resend the invite; change another admin's name or role; send a password reset; deactivate and reactivate admins. Deactivation revokes that admin's sessions. Admin users are never deleted.
+**Can**: everything Admin / Staff can, plus retire and restore jurisdictions; add, edit, pause, and retire sources; accept or reject pending source changes (pending QubaLink confirmation — docs/08 section 28 item 7); export CSV; invite admins (any unique email, name, and role) and resend the invite; change another admin's name or role; send a password reset; deactivate and reactivate admins. Deactivation revokes that admin's sessions. Admin users are never deleted.
 **Cannot**: demote or deactivate the last active Super Admin (`LAST_SUPER_ADMIN`); change their own role or deactivate themselves (`SELF_ROLE_CHANGE`); read resident PII (see section 5); impersonate residents; edit or delete the change log; hard-delete civic records or admin users.
 
 ### System
