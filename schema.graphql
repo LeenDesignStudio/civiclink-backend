@@ -1639,6 +1639,7 @@ type SignOutPayload {
 
 type SiteConfig {
   turnstileSiteKey: String
+  vapidPublicKey: String
 }
 
 type Source {

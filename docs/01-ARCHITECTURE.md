@@ -112,6 +112,7 @@ A Super Admin can replace the provider keys (site URL, Google, Apple, Maps, Stri
 | `EMAIL_FROM` / `CONTACT_INBOX` | | `CivicLink <no-reply@civiclink.com>` / `hello@qubalink.com` |
 | `PUSH_PROVIDER` | | `fcm` \| `console` |
 | `FCM_SERVICE_ACCOUNT_JSON` | S | base64 JSON |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | S | Browser push. Generate with `pnpm vapid:keys`. The public key is returned by `siteConfig`. Subject defaults to `mailto:hello@qubalink.com` |
 | `TURNSTILE_SECRET_KEY` | S | |
 | `TURNSTILE_SITE_KEY` | | Public site key. The contact form reads it from `siteConfig`. A Super Admin can change it from Admin → Settings → Integrations |
 | `POSTHOG_API_KEY` / `POSTHOG_HOST` | S / | |

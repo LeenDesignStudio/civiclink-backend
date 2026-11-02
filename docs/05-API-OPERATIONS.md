@@ -119,7 +119,7 @@ REST: `GET /u/unsub?t=<signed>` (turn off one category's email), `GET /u/o?t=` (
 | `setAdminStatus` | Mutation | `admin.users:manage` | admin | `{ adminId, status: ACTIVE\|DEACTIVATED }` | Not self; not last Super Admin; deactivation revokes sessions; audit. Reactivate does not delete history | same |
 | `integrationSettings` | Query | `admin.users:manage` | admin | — | Current provider keys for the Integrations settings tab. Database, JWT, and cookie keys are not included | `FORBIDDEN` |
 | `updateIntegrationSettings` | Mutation | `admin.users:manage` | admin | `{ settings: [{ key, value }] }` | Validates with the same rules as boot, writes `.env`, updates the running API, and rebinds Stripe when that secret changes. Audit `integration.keys_updated` lists key names only | `VALIDATION`, `FORBIDDEN` |
-| `siteConfig` | Query | public | public | — | `{ turnstileSiteKey }` for the contact form. No secrets | — |
+| `siteConfig` | Query | public | public | — | `{ turnstileSiteKey, vapidPublicKey }` for the contact form and browser push. No secrets | — |
 
 ## H. Admin — dashboard, civic data, sources, services
 

@@ -29,7 +29,7 @@ import { PostHogAnalytics } from '../modules/analytics/analytics.js';
 import { NotificationsRepo } from '../modules/notifications/notifications.repo.js';
 import { NotificationsService } from '../modules/notifications/notifications.service.js';
 import { ConsoleEmailSender, SesEmailSender } from '../modules/notifications/email.js';
-import { ConsolePushSender, FcmPushSender } from '../modules/notifications/push.js';
+import { BrowserPushSender, ConsolePushSender, FcmPushSender } from '../modules/notifications/push.js';
 import { AlertsRepo } from '../modules/alerts/alerts.repo.js';
 import { AlertsService } from '../modules/alerts/alerts.service.js';
 import { ResidentsRepo } from '../modules/residents/residents.repo.js';
@@ -101,14 +101,15 @@ export function buildContainer(): AppContainer {
           from: env.EMAIL_FROM,
         })
       : new ConsoleEmailSender();
-  const push =
+  const push = new BrowserPushSender(
     env.PUSH_PROVIDER === 'fcm'
       ? new FcmPushSender({
           fetchFn: fetch,
           endpoint: 'https://fcm.googleapis.com/v1/projects/civiclink/messages:send',
           authorization: `Bearer ${env.FCM_SERVICE_ACCOUNT_JSON ?? ''}`,
         })
-      : new ConsolePushSender();
+      : new ConsolePushSender(),
+  );
   const notifications = new NotificationsService({
     repo: new NotificationsRepo(prisma),
     email,

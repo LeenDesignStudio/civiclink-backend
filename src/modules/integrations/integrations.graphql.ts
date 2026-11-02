@@ -25,10 +25,11 @@ const IntegrationSettingInput = builder.inputType('IntegrationSettingInput', {
 });
 
 const SiteConfigRef = builder
-  .objectRef<{ turnstileSiteKey: string | null }>('SiteConfig')
+  .objectRef<{ turnstileSiteKey: string | null; vapidPublicKey: string | null }>('SiteConfig')
   .implement({
     fields: (t) => ({
       turnstileSiteKey: t.exposeString('turnstileSiteKey', { nullable: true }),
+      vapidPublicKey: t.exposeString('vapidPublicKey', { nullable: true }),
     }),
   });
 
@@ -45,7 +46,10 @@ builder.queryField('siteConfig', (t) =>
   t.field({
     type: SiteConfigRef,
     authScopes: publicScope,
-    resolve: () => ({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null }),
+    resolve: () => ({
+      turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
+      vapidPublicKey: env.VAPID_PUBLIC_KEY ?? null,
+    }),
   }),
 );
 rememberScope('Query', 'siteConfig', publicScope);

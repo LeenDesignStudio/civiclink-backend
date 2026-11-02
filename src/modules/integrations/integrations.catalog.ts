@@ -26,6 +26,9 @@ export const INTEGRATION_FIELDS = [
   { key: 'POSTHOG_HOST', label: 'PostHog host', group: 'Analytics', secret: false, multiline: false },
   { key: 'SENTRY_DSN', label: 'Sentry DSN', group: 'Errors', secret: true, multiline: false },
   { key: 'FCM_SERVICE_ACCOUNT_JSON', label: 'Firebase service account JSON', group: 'Push', secret: true, multiline: true },
+  { key: 'VAPID_PUBLIC_KEY', label: 'Browser push public key', group: 'Push', secret: false, multiline: false },
+  { key: 'VAPID_PRIVATE_KEY', label: 'Browser push private key', group: 'Push', secret: true, multiline: false },
+  { key: 'VAPID_SUBJECT', label: 'Browser push contact', group: 'Push', secret: false, multiline: false },
 ] as const satisfies readonly IntegrationField[];
 
 export type IntegrationKey = (typeof INTEGRATION_FIELDS)[number]['key'];
@@ -54,6 +57,9 @@ export function integrationValues(source: Env): Record<IntegrationKey, string> {
     POSTHOG_HOST: source.POSTHOG_HOST,
     SENTRY_DSN: source.SENTRY_DSN ?? '',
     FCM_SERVICE_ACCOUNT_JSON: source.FCM_SERVICE_ACCOUNT_JSON ?? '',
+    VAPID_PUBLIC_KEY: source.VAPID_PUBLIC_KEY ?? '',
+    VAPID_PRIVATE_KEY: source.VAPID_PRIVATE_KEY ?? '',
+    VAPID_SUBJECT: source.VAPID_SUBJECT,
   };
 }
 
