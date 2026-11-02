@@ -17,6 +17,7 @@ export interface AttentionCandidate {
   id: string;
   label: string;
   since: Date;
+  entityType?: string;
   correctionStatus?: 'SUBMITTED' | 'IN_REVIEW';
   failedDeliveries?: number;
   sourceIssue?: 'FAILED' | 'OVERDUE';

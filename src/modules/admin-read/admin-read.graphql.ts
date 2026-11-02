@@ -25,6 +25,7 @@ const AttentionRef = builder.objectRef<AttentionItem>('AdminAttentionItem').impl
   fields: (t) => ({
     kind: t.field({ type: AttentionKind, resolve: (row) => row.kind }),
     id: t.exposeID('id'),
+    entityType: t.exposeString('entityType'),
     label: t.exposeString('label'),
     reason: t.exposeString('reason'),
     ageDays: t.exposeInt('ageDays'),

@@ -43,6 +43,7 @@ const markSchema = z
 export interface AttentionItem {
   kind: AttentionCandidate['kind'];
   id: string;
+  entityType: string;
   label: string;
   reason: string;
   ageDays: number;
@@ -251,5 +252,12 @@ function toAttention(row: AttentionCandidate, now: Date): AttentionItem {
   if (row.kind === 'CORRECTION' && row.correctionStatus) reason = pendingReason(row.correctionStatus, days);
   else if (row.kind === 'SOURCE') reason = row.sourceIssue === 'OVERDUE' ? 'Overdue' : 'Refresh failed';
   else if (row.kind === 'ALERT') reason = alertReason(row.failedDeliveries ?? 0);
-  return { kind: row.kind, id: row.id, label: row.label, reason, ageDays: days };
+  return {
+    kind: row.kind,
+    id: row.id,
+    entityType: row.entityType ?? row.kind,
+    label: row.label,
+    reason,
+    ageDays: days,
+  };
 }

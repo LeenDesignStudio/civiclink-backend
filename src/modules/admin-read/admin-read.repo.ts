@@ -260,17 +260,17 @@ export class AdminReadRepo implements AdminReadStore {
         `,
       ),
       dbCall(() =>
-        this.db.$queryRaw<Array<{ id: string; label: string; since: Date }>>(Prisma.sql`
-          SELECT id, label, since FROM (
-            SELECT o.id::text AS id, o.name AS label, ${ATTENTION_SINCE} AS since
+        this.db.$queryRaw<Array<{ id: string; entity_type: string; label: string; since: Date }>>(Prisma.sql`
+          SELECT id, entity_type, label, since FROM (
+            SELECT o.id::text AS id, 'OFFICE' AS entity_type, o.name AS label, ${ATTENTION_SINCE} AS since
             FROM offices o JOIN sources s ON s.id = o.source_id
             WHERE o.status = 'ACTIVE' AND ${OUTDATED}
             UNION ALL
-            SELECT o.id::text, o.full_name, ${ATTENTION_SINCE}
+            SELECT o.id::text, 'OFFICIAL', o.full_name, ${ATTENTION_SINCE}
             FROM officials o JOIN sources s ON s.id = o.source_id
             WHERE o.status = 'ACTIVE' AND ${OUTDATED}
             UNION ALL
-            SELECT o.id::text, o.name, ${ATTENTION_SINCE}
+            SELECT o.id::text, 'JURISDICTION', o.name, ${ATTENTION_SINCE}
             FROM jurisdictions o JOIN sources s ON s.id = o.source_id
             WHERE o.status = 'ACTIVE' AND ${OUTDATED}
           ) records
@@ -317,14 +317,22 @@ export class AdminReadRepo implements AdminReadStore {
       ...corrections.map((row) => ({
         kind: 'CORRECTION' as const,
         id: row.id,
+        entityType: 'CORRECTION',
         label: row.label,
         since: row.since,
         correctionStatus: row.status,
       })),
-      ...records.map((row) => ({ kind: 'RECORD' as const, id: row.id, label: row.label, since: row.since })),
+      ...records.map((row) => ({
+        kind: 'RECORD' as const,
+        id: row.id,
+        entityType: row.entity_type,
+        label: row.label,
+        since: row.since,
+      })),
       ...sources.map((row) => ({
         kind: 'SOURCE' as const,
         id: row.id,
+        entityType: 'SOURCE',
         label: row.label,
         since: row.since,
         sourceIssue: row.issue,
@@ -332,6 +340,7 @@ export class AdminReadRepo implements AdminReadStore {
       ...alerts.map((row) => ({
         kind: 'ALERT' as const,
         id: row.id,
+        entityType: 'ALERT',
         label: row.label,
         since: row.since,
         failedDeliveries: Number(row.failed),

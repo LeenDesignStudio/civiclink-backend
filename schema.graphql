@@ -60,6 +60,7 @@ input AdminAlertFilter {
 
 type AdminAttentionItem {
   ageDays: Int
+  entityType: String
   id: ID
   kind: AdminAttentionKind
   label: String
