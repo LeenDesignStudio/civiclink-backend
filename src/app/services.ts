@@ -1,3 +1,4 @@
+import type { AdminReadService } from '../modules/admin-read/admin-read.service.js';
 import type { AlertsService } from '../modules/alerts/alerts.service.js';
 import type { AdminUsersService } from '../modules/admin-users/admin-users.service.js';
 import type { AuditService } from '../modules/audit/audit.service.js';
@@ -26,4 +27,5 @@ export interface AppServices {
   audit: AuditService;
   contact: ContactService;
   sources: SourcesService;
+  adminRead: AdminReadService;
 }

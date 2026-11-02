@@ -33,7 +33,7 @@ class MemoryStore implements PipelineStore {
   saveSource(input: SourceWrite, now: Date): Promise<SourceRow> {
     const existing = input.id ? this.sources.find((row) => row.id === input.id) : undefined;
     if (existing) {
-      Object.assign(existing, input, { config: input.config });
+      Object.assign(existing, input, { config: input.config ?? existing.config });
       return Promise.resolve(existing);
     }
     this.n += 1;
@@ -50,7 +50,7 @@ class MemoryStore implements PipelineStore {
       collectorKey: input.collectorKey,
       active: input.active,
       lastRunAt: null,
-      config: input.config,
+      config: input.config ?? {},
       createdAt: now,
     };
     this.sources.push(row);

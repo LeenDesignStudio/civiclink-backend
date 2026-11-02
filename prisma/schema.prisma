@@ -227,6 +227,18 @@ enum AlertStatus {
   FAILED
 }
 
+enum AdminActivityKind {
+  CORRECTION_SUBMITTED
+  SOURCE_REFRESH_FAILED
+  ALERT_DELIVERY_FAILED
+  INVITE_ACCEPTED
+}
+
+enum AdminActivityAudience {
+  ALL
+  SUPER_ADMIN
+}
+
 enum SubscriptionStatus {
   INCOMPLETE
   INCOMPLETE_EXPIRED
@@ -578,6 +590,7 @@ model Jurisdiction {
   @@index([level, status])
   @@index([parentId])
   @@index([state])
+  @@index([isPilot, status], map: "jurisdictions_is_pilot_status_idx")
   @@map("jurisdictions")
 }
 
@@ -622,6 +635,7 @@ model Office {
 
   @@unique([jurisdictionId, name])
   @@index([jurisdictionId, status])
+  @@index([status, lastUpdatedAt], map: "offices_status_last_updated_at_idx")
   @@map("offices")
 }
 
@@ -676,6 +690,7 @@ model Official {
   alerts  Alert[]
 
   @@index([status])
+  @@index([status, lastUpdatedAt], map: "officials_status_last_updated_at_idx")
   @@map("officials")
 }
 
@@ -824,6 +839,7 @@ model ChangeLog {
 
   @@index([entityType, entityId, createdAt(sort: Desc)])
   @@index([actorType, actorId])
+  @@index([createdAt(sort: Desc)], map: "change_log_created_at_idx")
   @@map("change_log")
 }
 
@@ -854,6 +870,7 @@ model Alert {
   sender         AdminUser? @relation("AlertSender", fields: [sentBy], references: [id], onDelete: Restrict)
 
   @@index([status, createdAt(sort: Desc)])
+  @@index([status, sentAt], map: "alerts_status_sent_at_idx")
   @@map("alerts")
 }
 
@@ -1050,8 +1067,39 @@ model AdminUser {
   alertsCreated       Alert[]               @relation("AlertCreator")
   alertsSent          Alert[]               @relation("AlertSender")
   sourceDecisions     PendingSourceChange[]
+  activityReads       AdminActivityRead[]
 
   @@map("admin_users")
+}
+
+/// Bell items. Reads are per admin. Rows older than 30 days are purged.
+model AdminActivity {
+  id         String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind       AdminActivityKind
+  audience   AdminActivityAudience @default(ALL)
+  title      String                @db.VarChar(120)
+  preview    String                @db.VarChar(200)
+  entityType String                @map("entity_type") @db.VarChar(40)
+  entityId   String                @map("entity_id") @db.Uuid
+  createdAt  DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  reads AdminActivityRead[]
+
+  @@index([createdAt(sort: Desc)], map: "admin_activity_created_at_idx")
+  @@index([audience, createdAt(sort: Desc)], map: "admin_activity_audience_created_at_idx")
+  @@map("admin_activity")
+}
+
+model AdminActivityRead {
+  activityId String   @map("activity_id") @db.Uuid
+  adminId    String   @map("admin_id") @db.Uuid
+  readAt     DateTime @default(now()) @map("read_at") @db.Timestamptz(3)
+
+  activity AdminActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  admin    AdminUser     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@id([activityId, adminId])
+  @@map("admin_activity_reads")
 }
 
 model AdminSession {

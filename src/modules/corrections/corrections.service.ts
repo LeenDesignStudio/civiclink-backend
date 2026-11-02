@@ -30,6 +30,7 @@ import {
   type StoredCorrection,
   type TxRunner,
 } from './corrections.ports.js';
+import { recordActivity, type ActivityRecorder } from '../admin-read/activity.js';
 import { httpUrl, normalizeProposed } from './corrections.values.js';
 
 const DAILY_LIMIT = 10;
@@ -40,6 +41,7 @@ export interface CorrectionsDeps {
   withTx: TxRunner;
   clock: Clock;
   queue?: CorrectionQueue;
+  activity?: ActivityRecorder;
 }
 
 export class CorrectionsService {
@@ -101,6 +103,14 @@ export class CorrectionsService {
       },
       { isolation: 'Serializable' },
     );
+    await recordActivity(this.deps.activity, {
+      kind: 'CORRECTION_SUBMITTED',
+      audience: 'ALL',
+      title: 'New correction',
+      preview: `${stored.displayId ?? 'Correction'} · ${stored.field}`.slice(0, 200),
+      entityType: 'CORRECTION',
+      entityId: stored.id,
+    });
     return { correction: toResident(stored) };
   }
 

@@ -20,6 +20,7 @@ export interface WorkerServices {
     ctx: ServiceContext,
     input: { adminUserId: string; purpose: 'INVITE' | 'RESET'; url: string },
   ) => Promise<void>;
+  adminRead: { purge(ctx: ServiceContext): Promise<{ deleted: number }> };
 }
 
 export function isPermanent(err: unknown): boolean {
@@ -40,6 +41,7 @@ const JOB_PERMISSION: Record<QueueName, Permission> = {
   [QUEUES.retentionSessions]: 'system.retention:run',
   [QUEUES.retentionStripeEvents]: 'system.retention:run',
   [QUEUES.accountsPurge]: 'system.retention:run',
+  [QUEUES.adminActivityPurge]: 'system.retention:run',
   [QUEUES.emailContact]: 'system.notifications:deliver',
   [QUEUES.emailAccountDeletion]: 'system.notifications:deliver',
   [QUEUES.emailAdminPasswordReset]: 'system.notifications:deliver',
@@ -85,6 +87,9 @@ export async function registerHandlers(boss: Boss, services: WorkerServices): Pr
   );
   await work(boss, QUEUES.accountsPurge, () =>
     services.retention.purge(jobContext('accounts.purge', QUEUES.accountsPurge)),
+  );
+  await work(boss, QUEUES.adminActivityPurge, () =>
+    services.adminRead.purge(jobContext('admin.activity.purge', QUEUES.adminActivityPurge)),
   );
   await work(boss, QUEUES.retentionLookups, () =>
     services.retention.lookups(jobContext('retention.lookups', QUEUES.retentionLookups)),

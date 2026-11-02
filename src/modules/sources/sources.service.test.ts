@@ -11,7 +11,7 @@ import {
 import { FakeClock } from '../../lib/clock.js';
 import { DashboardService, type DashboardRepo } from './dashboard.js';
 import { SourcesService } from './sources.service.js';
-import type { PipelineStore } from '../pipeline/pipeline.ports.js';
+import type { PipelineStore, SourceWrite } from '../pipeline/pipeline.ports.js';
 import type { PendingRow, SourceRow } from '../pipeline/records.js';
 
 const ADMIN = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -59,6 +59,7 @@ class Store implements Pick<
   };
   running = false;
   pending: PendingRow | null = null;
+  lastWrite: SourceWrite | null = null;
   applied: string | null = null;
 
   listSources(): Promise<{ rows: SourceRow[]; total: number }> {
@@ -70,7 +71,8 @@ class Store implements Pick<
   nameTaken(): Promise<boolean> {
     return Promise.resolve(false);
   }
-  saveSource(): Promise<SourceRow> {
+  saveSource(input: SourceWrite): Promise<SourceRow> {
+    this.lastWrite = input;
     return Promise.resolve(this.source);
   }
   activeRun(): Promise<null> {
@@ -181,6 +183,26 @@ describe('SourcesService', () => {
         active: true,
       }),
     ).rejects.toBeInstanceOf(UnknownCollectorError);
+  });
+
+  it('keeps collector settings when an edit omits config', async () => {
+    const store = new Store();
+    store.source.config = { tigerYear: 2024 };
+    await service(store).upsertSource(editor(), {
+      id: SOURCE,
+      name: 'Census',
+      publisher: 'Census',
+      url: 'https://example.com/data',
+      termsUrl: 'https://example.com/terms',
+      method: 'BULK',
+      schedule: 'WEEKLY',
+      freshnessDays: 90,
+      levels: ['COUNTY'],
+      collectorKey: 'tiger.boundaries',
+      active: true,
+    });
+    expect(store.lastWrite?.config).toBeUndefined();
+    expect(store.lastWrite?.collectorKey).toBe('tiger.boundaries');
   });
 
   it('rejects refresh while a run is active or the source is inactive', async () => {

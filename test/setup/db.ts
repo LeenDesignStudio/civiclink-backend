@@ -44,6 +44,8 @@ export async function truncateAll(owner: PrismaClient): Promise<void> {
       auth_identities,
       users,
       admin_sessions,
+      admin_activity_reads,
+      admin_activity,
       admin_users,
       jurisdictions,
       sources

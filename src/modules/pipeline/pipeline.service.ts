@@ -4,6 +4,7 @@ import type { ActorType } from '../../generated/prisma/enums.js';
 import { directTx, type RunTx } from '../../auth/tx.js';
 import { postgresMessage } from '../../db/prisma.js';
 import { systemClock, type Clock } from '../../lib/clock.js';
+import { recordActivity, type ActivityRecorder } from '../admin-read/activity.js';
 import {
   fromZod,
   NotFoundError,
@@ -71,6 +72,7 @@ export interface PipelineDeps {
   userAgent?: string;
   pace?: { wait(): Promise<void> };
   convertZip?: (request: ZipConvertRequest) => Promise<Uint8Array>;
+  activity?: ActivityRecorder;
 }
 
 export class PipelineService {
@@ -149,6 +151,14 @@ export class PipelineService {
       const message = (err instanceof ValidationError ? err.message : (postgresMessage(err) ?? 'Source run failed.')).slice(0, 500);
       try {
         await this.fail(run.id, message);
+        await recordActivity(this.deps.activity, {
+          kind: 'SOURCE_REFRESH_FAILED',
+          audience: 'ALL',
+          title: 'Source refresh failed',
+          preview: source.name.slice(0, 200),
+          entityType: 'SOURCE',
+          entityId: source.id,
+        });
       } catch {
         // Report the original failure. A second database error would hide it.
       }

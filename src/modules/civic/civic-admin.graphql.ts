@@ -293,6 +293,18 @@ idMutation('restoreOfficial', retireScope);
 idMutation('retireService', retireScope);
 idMutation('restoreService', retireScope);
 
+const OfficeAddressInput = builder.inputType('OfficeAddressInput', {
+  fields: (i) => ({
+    label: i.string({ required: true }),
+    street: i.string({ required: true }),
+    city: i.string({ required: true }),
+    state: i.string({ required: true }),
+    zip: i.string({ required: true }),
+    phone: i.string({ required: false }),
+    hours: i.string({ required: false }),
+  }),
+});
+
 builder.mutationField('upsertOffice', (t) =>
   t.field({
     type: OfficeAdmin,
@@ -314,10 +326,12 @@ builder.mutationField('upsertOffice', (t) =>
             email: i.string({ required: false }),
             website: i.string({ required: false }),
             contactUrl: i.string({ required: false }),
+            addresses: i.field({ type: [OfficeAddressInput], required: false }),
             holderUnknown: i.boolean({ required: false }),
             sourceId: i.id({ required: true }),
             sourceRecordUrl: i.string({ required: false }),
             lastUpdatedAt: i.field({ type: 'DateTime', required: true }),
+            freshnessOverride: i.field({ type: FreshnessOverrideEnum, required: false }),
             freshnessNote: i.string({ required: false }),
             notifyFollowers: i.boolean({ required: false }),
           }),
@@ -349,6 +363,7 @@ builder.mutationField('upsertOfficial', (t) =>
             sourceId: i.id({ required: true }),
             sourceRecordUrl: i.string({ required: false }),
             lastUpdatedAt: i.field({ type: 'DateTime', required: true }),
+            freshnessOverride: i.field({ type: FreshnessOverrideEnum, required: false }),
             freshnessNote: i.string({ required: false }),
             notifyFollowers: i.boolean({ required: false }),
           }),

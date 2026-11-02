@@ -120,13 +120,13 @@ export class PipelineRepo implements PipelineStore {
       recordStatus,
       kind: input.kind ?? kindForMethod(input.method),
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
-      config: input.config as Prisma.InputJsonValue,
+      ...(input.config !== undefined ? { config: input.config as Prisma.InputJsonValue } : {}),
     };
     const id = input.id;
     const row = id
       ? await dbCall(() => this.db.source.update({ where: { id }, data }))
       : await dbCall(() => this.db.source.create({ data }));
-    return { ...toSource(row), config: input.config };
+    return toSource(row);
   }
 
   async activeRun(sourceId: string): Promise<RunRow | null> {

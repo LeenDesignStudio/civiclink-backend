@@ -141,7 +141,7 @@ export class SourcesService {
           levels: parsed.levels,
           collectorKey: parsed.collectorKey ?? null,
           active: parsed.active,
-          config: configOf(parsed.config),
+          ...(parsed.config !== undefined ? { config: configOf(parsed.config) } : {}),
         },
         this.clock.now(),
       );

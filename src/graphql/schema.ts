@@ -9,6 +9,7 @@ import '../modules/lookup/lookup.graphql.js';
 import '../modules/residents/residents.graphql.js';
 import '../modules/admin-users/admin-users.graphql.js';
 import '../modules/audit/audit.graphql.js';
+import '../modules/admin-read/admin-read.graphql.js';
 import '../modules/billing/billing.graphql.js';
 import '../modules/contact/contact.graphql.js';
 import '../modules/corrections/corrections.graphql.js';

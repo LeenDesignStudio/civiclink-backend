@@ -10,6 +10,35 @@ input AddCorrectionNoteInput {
   id: UUID!
 }
 
+type AdminActivity {
+  createdAt: DateTime
+  entityId: ID
+  entityType: String
+  id: ID
+  kind: AdminActivityKind
+  preview: String
+  title: String
+  unread: Boolean
+}
+
+type AdminActivityConnection {
+  edges: [AdminActivityEdge!]
+  pageInfo: PageInfo
+  totalCount: Int
+}
+
+type AdminActivityEdge {
+  cursor: String
+  node: AdminActivity
+}
+
+enum AdminActivityKind {
+  ALERT_DELIVERY_FAILED
+  CORRECTION_SUBMITTED
+  INVITE_ACCEPTED
+  SOURCE_REFRESH_FAILED
+}
+
 type AdminAlert {
   alert: Alert
   delivery: [AlertChannelDelivery!]
@@ -27,6 +56,26 @@ input AdminAlertFilter {
   status: AlertStatus
   targetOfficeId: UUID
   targetType: AlertTargetType
+}
+
+type AdminAttentionItem {
+  ageDays: Int
+  id: ID
+  kind: AdminAttentionKind
+  label: String
+  reason: String
+}
+
+enum AdminAttentionKind {
+  ALERT
+  CORRECTION
+  RECORD
+  SOURCE
+}
+
+enum AdminBoundaryStatus {
+  MISSING
+  OK
 }
 
 enum AdminCivicSort {
@@ -90,6 +139,21 @@ input AdminCorrectionFilter {
 
 type AdminCorrectionPayload {
   correction: AdminCorrection
+}
+
+type AdminDashboard {
+  alertsNeedingAttention: Int
+  jurisdictions: Int
+  needsAttention: [AdminAttentionItem!]
+  offices: Int
+  officials: Int
+  oldestPendingDays: Int
+  outdatedRecords: Int
+  pendingCorrections: Int
+  pilotCoverage: AdminPilotCoverage
+  recentlyEdited: [AdminRecentEdit!]
+  services: Int
+  sourceIssues: Int
 }
 
 type AdminDashboardCounts {
@@ -314,9 +378,56 @@ type AdminPasswordResetPayload {
   sent: Boolean
 }
 
+type AdminPilotCoverage {
+  covered: Int
+  rows: [AdminPilotRow!]
+  summary: String
+  total: Int
+}
+
+type AdminPilotRow {
+  boundary: AdminBoundaryStatus
+  displayId: String
+  freshness: Freshness
+  id: ID
+  name: String
+  officeCount: Int
+}
+
+type AdminRecentEdit {
+  actionLabel: String
+  actorName: String
+  createdAt: DateTime
+  entityId: ID
+  entityType: String
+  id: ID
+  label: String
+  typeLabel: String
+}
+
 enum AdminRole {
   ADMIN_STAFF
   SUPER_ADMIN
+}
+
+type AdminSearch {
+  corrections: AdminSearchGroup
+  jurisdictions: AdminSearchGroup
+  offices: AdminSearchGroup
+  officials: AdminSearchGroup
+  services: AdminSearchGroup
+  sources: AdminSearchGroup
+}
+
+type AdminSearchGroup {
+  items: [AdminSearchHit!]
+  total: Int
+}
+
+type AdminSearchHit {
+  displayId: String
+  id: ID
+  label: String
 }
 
 type AdminService {
@@ -923,6 +1034,15 @@ enum LookupMethod {
   ZIP
 }
 
+input MarkAdminActivityReadInput {
+  all: Boolean
+  ids: [UUID!]
+}
+
+type MarkAdminActivityReadPayload {
+  updated: Int
+}
+
 input MarkNotificationsReadInput {
   all: Boolean
   ids: [UUID!]
@@ -969,6 +1089,7 @@ type Mutation {
   endOfficeTerm(input: EndOfficeTermInput!): OfficeTermPayload
   follow(input: FollowInput!): FollowPayload
   inviteAdmin(input: InviteAdminInput!): AdminUserPayload
+  markAdminActivityRead(input: MarkAdminActivityReadInput!): MarkAdminActivityReadPayload
   markCorrectionInReview(input: CorrectionIdInput!): AdminCorrectionPayload
   markNotificationsRead(input: MarkNotificationsReadInput!): MarkNotificationsReadPayload
   markServiceValidated(id: ID!): ValidatedService
@@ -1110,6 +1231,16 @@ type OfficeAddress {
   zip: String
 }
 
+input OfficeAddressInput {
+  city: String!
+  hours: String
+  label: String!
+  phone: String
+  state: String!
+  street: String!
+  zip: String!
+}
+
 type OfficeHolder {
   displayName: String
   fullName: String
@@ -1199,12 +1330,14 @@ type PortalSessionPayload {
 }
 
 type Query {
+  adminActivity(after: String, first: Int): AdminActivityConnection
   adminAlert(id: UUID!): AdminAlert
   adminAlertTiles: AlertTiles
   adminAlerts(after: String, filter: AdminAlertFilter, first: Int): AlertConnection
   adminCorrection(id: UUID!): AdminCorrection
   adminCorrectionTiles: CorrectionTiles
   adminCorrections(after: String, filter: AdminCorrectionFilter, first: Int): AdminCorrectionConnection
+  adminDashboard: AdminDashboard
   adminDashboardCounts: AdminDashboardCounts
   adminJurisdiction(id: ID!): AdminJurisdiction
   adminJurisdictionTree(rootId: ID): [AdminJurisdictionTreeNode!]
@@ -1216,10 +1349,12 @@ type Query {
   adminOfficial(id: ID!): AdminOfficial
   adminOfficialTiles: AdminOfficialTiles
   adminOfficials(after: String, filter: AdminOfficialFilter, first: Int, sort: AdminCivicSort): AdminOfficialConnection
+  adminSearch(q: String!): AdminSearch
   adminService(id: ID!): AdminService
   adminServices(after: String, filter: AdminServiceFilter, first: Int, sort: AdminCivicSort): AdminServiceConnection
   adminSource(id: UUID!): AdminSource
   adminSources(after: String, first: Int): SourceConnection
+  adminUnreadActivityCount: Int
   adminUserTiles: AdminUserTiles
   adminUsers(after: String, filter: AdminUserFilter, first: Int): AdminUserConnection
   changeLog(after: String, entityId: UUID!, entityType: String!, first: Int): ChangeLogConnection
@@ -1670,11 +1805,13 @@ input UpsertJurisdictionInput {
 }
 
 input UpsertOfficeInput {
+  addresses: [OfficeAddressInput!]
   contactUrl: String
   correctionId: ID
   displayOrder: Int
   email: String
   freshnessNote: String
+  freshnessOverride: FreshnessOverride
   holderUnknown: Boolean
   id: ID
   jurisdictionId: ID!
@@ -1695,6 +1832,7 @@ input UpsertOfficialInput {
   correctionId: ID
   displayName: String
   freshnessNote: String
+  freshnessOverride: FreshnessOverride
   fullName: String!
   id: ID
   lastUpdatedAt: DateTime!

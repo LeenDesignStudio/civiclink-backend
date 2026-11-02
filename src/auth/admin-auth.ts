@@ -15,6 +15,7 @@ import type { AdminPrincipalCache } from './admin-principal-cache.js';
 import type { AdminAuthStore, AdminLoginRecord, AdminPrincipal, AdminTokenView } from './admin-auth.types.js';
 import type { PasswordHasher } from './passwords.js';
 import { passwordRejection } from './passwords.js';
+import { recordActivity, type ActivityRecorder } from '../modules/admin-read/activity.js';
 import type { Tx } from './tx.js';
 
 export const ADMIN_IDLE_MS = 30 * 60 * 1000;
@@ -32,6 +33,7 @@ export interface AdminAuthServiceDeps {
   passwords: PasswordHasher;
   webUrl: string;
   cache?: AdminPrincipalCache;
+  activity?: ActivityRecorder;
 }
 
 export interface AdminPasswordMail {
@@ -89,6 +91,16 @@ export class AdminAuthService {
     const consumed = await this.deps.store.consumeToken(sha256Hex(token), passwordHash, now);
     if (!consumed) throw new AdminTokenExpiredError();
     this.deps.cache?.invalidate(consumed.adminId);
+    if (view.purpose === 'INVITE') {
+      await recordActivity(this.deps.activity, {
+        kind: 'INVITE_ACCEPTED',
+        audience: 'SUPER_ADMIN',
+        title: 'Invite accepted',
+        preview: 'A new admin set their password.',
+        entityType: 'ADMIN_USER',
+        entityId: view.adminId,
+      });
+    }
   }
 
   async issueInvite(adminId: string): Promise<string> {

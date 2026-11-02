@@ -8,6 +8,7 @@ export const SCHEDULES = [
   { queue: QUEUES.retentionSessions, cron: '15 4 * * *' },
   { queue: QUEUES.retentionStripeEvents, cron: '30 4 * * *' },
   { queue: QUEUES.accountsPurge, cron: '45 4 * * *' },
+  { queue: QUEUES.adminActivityPurge, cron: '5 4 * * *' },
   { queue: QUEUES.billingSync, cron: '0 5 * * *' },
   { queue: QUEUES.sourceRun, cron: '0 * * * *' },
 ] as const;

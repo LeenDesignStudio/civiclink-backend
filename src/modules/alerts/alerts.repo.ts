@@ -148,14 +148,19 @@ export class AlertsRepo implements AlertsStore {
     return result.count === 1;
   }
 
-  async markSent(id: string, recipientCount: number, sentAt: Date): Promise<void> {
-    const status = await this.deliveryStatus(id);
+  async markSent(
+    id: string,
+    recipientCount: number,
+    sentAt: Date,
+  ): Promise<{ status: 'SENT' | 'PARTLY_FAILED' | 'FAILED'; failed: number }> {
+    const outcome = await this.deliveryOutcome(id);
     await dbCall(() =>
       this.db.alert.updateMany({
         where: { id, status: { in: ['SENDING', 'DRAFT'] } },
-        data: { status, recipientCount, sentAt },
+        data: { status: outcome.status, recipientCount, sentAt },
       }),
     );
+    return outcome;
   }
 
   async channelStats(alertId: string): Promise<ChannelStats[]> {
@@ -211,7 +216,9 @@ export class AlertsRepo implements AlertsStore {
     return { total, sent7d, drafts, failedOrPartly };
   }
 
-  private async deliveryStatus(alertId: string): Promise<'SENT' | 'PARTLY_FAILED' | 'FAILED'> {
+  private async deliveryOutcome(
+    alertId: string,
+  ): Promise<{ status: 'SENT' | 'PARTLY_FAILED' | 'FAILED'; failed: number }> {
     const rows = await dbCall(() =>
       this.db.notificationDelivery.findMany({
         where: { notification: { sourceRef: `alert:${alertId}` } },
@@ -220,9 +227,9 @@ export class AlertsRepo implements AlertsStore {
     );
     const failed = rows.filter((row) => row.status === 'FAILED').length;
     const ok = rows.filter((row) => row.status === 'SENT' || row.status === 'DELIVERED').length;
-    if (failed === 0) return 'SENT';
-    if (ok === 0) return 'FAILED';
-    return 'PARTLY_FAILED';
+    if (failed === 0) return { status: 'SENT', failed };
+    if (ok === 0) return { status: 'FAILED', failed };
+    return { status: 'PARTLY_FAILED', failed };
   }
 
   async adminEmail(adminId: string): Promise<string | null> {

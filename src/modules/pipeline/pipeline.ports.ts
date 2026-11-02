@@ -28,7 +28,8 @@ export interface SourceWrite {
   active: boolean;
   kind?: SourceRow['kind'];
   notes?: string | null;
-  config: SourceRow['config'];
+  /** Omitted on update so an admin edit does not clear collector settings. */
+  config?: SourceRow['config'];
 }
 
 export interface PipelineStore {

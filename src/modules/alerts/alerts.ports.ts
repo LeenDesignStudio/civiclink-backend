@@ -44,7 +44,11 @@ export interface AlertsRepo {
   followerCount(alert: Pick<AlertDto, 'targetOfficeId' | 'targetOfficialId'>): Promise<number>;
   previewCounts(alert: AlertDto): Promise<{ inApp: number; email: number; push: number; followers: number }>;
   claimDraft(id: string, senderId: string, tx?: Tx): Promise<boolean>;
-  markSent(id: string, recipientCount: number, sentAt: Date): Promise<void>;
+  markSent(
+    id: string,
+    recipientCount: number,
+    sentAt: Date,
+  ): Promise<{ status: 'SENT' | 'PARTLY_FAILED' | 'FAILED'; failed: number }>;
   channelStats(alertId: string): Promise<ChannelStats[]>;
   failureReasons(alertId: string): Promise<FailureReason[]>;
   alertTiles(now: Date): Promise<AlertTiles>;

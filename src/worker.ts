@@ -28,6 +28,9 @@ import { StripeBillingProvider } from './modules/billing/stripe.provider.js';
 import { ContactRepo } from './modules/contact/contact.repo.js';
 import { ResidentsRepo } from './modules/residents/residents.repo.js';
 import { OutboundMail } from './jobs/outbound-mail.js';
+import { recordActivity } from './modules/admin-read/activity.js';
+import { AdminReadRepo } from './modules/admin-read/admin-read.repo.js';
+import { AdminReadService } from './modules/admin-read/admin-read.service.js';
 
 export function isWorkerMain(metaUrl: string, argv1: string | undefined): boolean {
   if (!argv1) return false;
@@ -54,6 +57,13 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
           authorization: `Bearer ${env.FCM_SERVICE_ACCOUNT_JSON ?? ''}`,
         })
       : new ConsolePushSender();
+  const audit = new AuditService(new AuditRepo(prisma));
+  const adminRead = new AdminReadService({
+    store: new AdminReadRepo(prisma),
+    audit,
+    clock: systemClock,
+    runTx: (fn) => withTx((tx) => fn(tx)),
+  });
   const notifications = new NotificationsService({
     repo: notificationsRepo,
     email,
@@ -65,9 +75,20 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
         await boss.send(name, data, options?.singletonKey ? { singletonKey: options.singletonKey } : {});
       },
     },
-    markAlertSent: (alertId, recipientCount, sentAt) => alertsRepo.markSent(alertId, recipientCount, sentAt),
+    markAlertSent: async (alertId, recipientCount, sentAt) => {
+      const result = await alertsRepo.markSent(alertId, recipientCount, sentAt);
+      if (result.status !== 'SENT' && result.failed > 0) {
+        await recordActivity(adminRead, {
+          kind: 'ALERT_DELIVERY_FAILED',
+          audience: 'ALL',
+          title: 'Alert delivery failed',
+          preview: `${result.failed} deliveries failed`,
+          entityType: 'ALERT',
+          entityId: alertId,
+        });
+      }
+    },
   });
-  const audit = new AuditService(new AuditRepo(prisma));
   const store = new PipelineRepo(prisma);
   const pipeline = new PipelineService({
     store,
@@ -78,6 +99,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     pace: createRequestPacer(1000),
     convertZip: convertTigerZip,
     withTx: (fn) => withTx((tx) => fn(tx)),
+    activity: adminRead,
   });
   const retention = new RetentionService(new RetentionRepo(prisma), systemClock);
   const billing = new BillingService({
@@ -108,6 +130,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     sendContact: (ctx, id) => mail.sendContact(ctx, id),
     sendAccountDeletion: (ctx, id) => mail.sendAccountDeletion(ctx, id),
     sendAdminPasswordLink: (ctx, input) => mail.sendAdminPasswordLink(ctx, input),
+    adminRead,
   };
   await registerHandlers(boss, services);
   await registerSchedules(boss);

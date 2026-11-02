@@ -35,6 +35,8 @@ import { ResidentsService } from '../modules/residents/residents.service.js';
 import { defaultNotificationPreferences } from '../modules/residents/residents.prefs.js';
 import { AdminUsersRepo } from '../modules/admin-users/admin-users.repo.js';
 import { AdminUsersService } from '../modules/admin-users/admin-users.service.js';
+import { AdminReadRepo } from '../modules/admin-read/admin-read.repo.js';
+import { AdminReadService } from '../modules/admin-read/admin-read.service.js';
 import { SourcesService } from '../modules/sources/sources.service.js';
 import { DashboardRepo } from '../modules/sources/dashboard.repo.js';
 import { DashboardService } from '../modules/sources/dashboard.js';
@@ -225,11 +227,18 @@ export function buildContainer(): AppContainer {
     clock: systemClock,
   });
   const follows = new FollowsService({ repo: new FollowsRepo(prisma), entitlements, withTx: runTx });
+  const adminRead = new AdminReadService({
+    store: new AdminReadRepo(prisma),
+    audit,
+    runTx,
+    clock: systemClock,
+  });
   const corrections = new CorrectionsService({
     repo: new CorrectionsRepo(prisma),
     audit,
     withTx: runTx,
     clock: systemClock,
+    activity: adminRead,
     queue: {
       enqueue: (name, payload) => jobs.send(name, payload, payload.entityId),
     },
@@ -282,6 +291,7 @@ export function buildContainer(): AppContainer {
     passwords: new Argon2Hasher(),
     webUrl: env.PUBLIC_WEB_URL,
     cache: adminCache,
+    activity: adminRead,
   });
   const adminUsers = new AdminUsersService({
     store: new AdminUsersRepo(prisma),
@@ -321,6 +331,7 @@ export function buildContainer(): AppContainer {
       audit,
       contact,
       sources,
+      adminRead,
     },
     stopJobs: () => jobs.stop(),
   };

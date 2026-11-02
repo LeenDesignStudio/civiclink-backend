@@ -92,14 +92,14 @@ class MemoryAlerts implements AlertsRepo {
     return Promise.resolve(true);
   }
 
-  markSent(id: string, recipientCount: number, sentAt: Date): Promise<void> {
+  markSent(id: string, recipientCount: number, sentAt: Date): Promise<{ status: 'SENT'; failed: number }> {
     const row = this.rows.find((item) => item.id === id);
     if (row) {
       row.status = 'SENT';
       row.recipientCount = recipientCount;
       row.sentAt = sentAt;
     }
-    return Promise.resolve();
+    return Promise.resolve({ status: 'SENT', failed: 0 });
   }
 
   channelStats(): Promise<ChannelStats[]> {

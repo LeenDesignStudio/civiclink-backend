@@ -69,6 +69,7 @@ Repositories hold all SQL. External providers are behind interfaces with fakes f
 | `alerts` | drafts, preview, send | alerts |
 | `billing` | plans sync, checkout, portal, webhooks, entitlements | plans, stripe_customers, subscriptions, invoices, stripe_events |
 | `admin-users` | invite, roles, status, admin dashboard counts | admin_users |
+| `admin-read` | dashboard, search, activity bell. Name search uses `pg_trgm` indexes that exist only in SQL | admin_activity, admin_activity_reads |
 | `sources` + `pipeline` | sources, runs, collectors, pending changes, link checks | sources, source_runs, pending_source_changes |
 | `audit` | change log writer/reader, CSV export | change_log |
 | `contact` | contact form | contact_messages |
