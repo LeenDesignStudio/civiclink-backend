@@ -107,7 +107,8 @@ export class PipelineService {
     try {
       const { snapshot, records } = await this.fetchRecords(source, collector);
       const previous = await this.deps.store.lastSucceededSha(source.id);
-      if (previous && previous === snapshot.sha256 && snapshot.skipped !== 'robots') {
+      const relinkPeople = collector.key === 'congress.legislators' || collector.key === 'openstates.people';
+      if (previous && previous === snapshot.sha256 && snapshot.skipped !== 'robots' && !relinkPeople) {
         await this.finish(run.id, { sha: snapshot.sha256, added: 0, changed: 0, retired: 0, pending: 0 });
         return withNotice({ skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 }, snapshot);
       }

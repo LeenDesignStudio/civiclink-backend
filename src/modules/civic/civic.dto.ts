@@ -282,6 +282,8 @@ export interface AdminOfficeRecord {
   status: RecordStatus;
   followerCount: number;
   addresses: OfficeAddressDto[];
+  jurisdiction?: { id: string; name: string; level: GovLevel } | null;
+  currentOfficial?: { id: string; fullName: string } | null;
 }
 
 export interface OfficeTermRecord {
@@ -306,7 +308,17 @@ export interface AdminOfficialTerm {
   termStart: Date | null;
   termEnd: Date | null;
   isCurrent: boolean;
-  office: { id: string; slug: string; name: string; status: RecordStatus };
+  office: {
+    id: string;
+    slug: string;
+    name: string;
+    status: RecordStatus;
+    seatLabel?: string | null;
+    officeType?: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION' | null;
+    email?: string | null;
+    phone?: string | null;
+    jurisdiction?: { id: string; name: string; level: GovLevel } | null;
+  };
 }
 
 export interface AdminOfficialRecord {

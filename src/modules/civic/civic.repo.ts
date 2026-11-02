@@ -171,6 +171,8 @@ export interface CivicStore {
   setServiceStatus(id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<void>;
   officeTiles(now: Date): Promise<{ active: number; vacant: number; outdated: number; missingContact: number }>;
   officialTiles(now: Date): Promise<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number }>;
+  jurisdictionTiles(): Promise<{ active: number; missingBoundary: number; noOffices: number; outdated: number }>;
+  serviceTiles(now: Date): Promise<{ total: number; active: number; inactive: number; needsValidation: number }>;
   createCategory(input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
   updateCategory(id: string, input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
   completeCorrection(input: {
@@ -874,6 +876,12 @@ export class CivicRepo implements CivicStore {
             select: { id: true, label: true, street: true, city: true, state: true, zip: true, phone: true, hours: true },
           },
           _count: { select: { follows: true } },
+          jurisdiction: { select: { id: true, name: true, level: true } },
+          terms: {
+            where: { isCurrent: true },
+            take: 1,
+            select: { official: { select: { id: true, fullName: true } } },
+          },
         },
       });
       return {
@@ -909,6 +917,8 @@ export class CivicRepo implements CivicStore {
           status: row.status,
           followerCount: row._count.follows,
           addresses: row.addresses.map(mapAddress),
+          jurisdiction: row.jurisdiction,
+          currentOfficial: row.terms[0]?.official ?? null,
           createdAt: row.createdAt,
         })),
       };
@@ -1089,6 +1099,12 @@ export class CivicRepo implements CivicStore {
           },
         },
         _count: { select: { follows: true } },
+        jurisdiction: { select: { id: true, name: true, level: true } },
+        terms: {
+          where: { isCurrent: true },
+          take: 1,
+          select: { official: { select: { id: true, fullName: true } } },
+        },
       },
     });
     if (!row) return null;
@@ -1114,6 +1130,8 @@ export class CivicRepo implements CivicStore {
       status: row.status,
       followerCount: row._count.follows,
       addresses: row.addresses.map(mapAddress),
+      jurisdiction: row.jurisdiction,
+      currentOfficial: row.terms[0]?.official ?? null,
     };
   }
 
@@ -1455,6 +1473,54 @@ export class CivicRepo implements CivicStore {
     });
   }
 
+  jurisdictionTiles() {
+    return this.run(async () => {
+      const rows = await this.db.$queryRaw<
+        Array<{ active: number; missing_boundary: number; no_offices: number; outdated: number }>
+      >`
+        SELECT
+          count(*) FILTER (WHERE j.status = 'ACTIVE')::int AS active,
+          count(*) FILTER (WHERE j.status = 'ACTIVE' AND j.boundary IS NULL)::int AS missing_boundary,
+          count(*) FILTER (
+            WHERE j.status = 'ACTIVE' AND NOT EXISTS (
+              SELECT 1 FROM offices o WHERE o.jurisdiction_id = j.id AND o.status = 'ACTIVE'
+            )
+          )::int AS no_offices,
+          count(*) FILTER (
+            WHERE j.status = 'ACTIVE' AND (
+              j.freshness_override = 'FORCE_OUTDATED'
+              OR (
+                j.freshness_override = 'NONE'
+                AND j.last_updated_at < CURRENT_TIMESTAMP - (s.freshness_days * INTERVAL '1 day')
+              )
+            )
+          )::int AS outdated
+        FROM jurisdictions j
+        JOIN sources s ON s.id = j.source_id
+      `;
+      const row = rows[0];
+      return {
+        active: row?.active ?? 0,
+        missingBoundary: row?.missing_boundary ?? 0,
+        noOffices: row?.no_offices ?? 0,
+        outdated: row?.outdated ?? 0,
+      };
+    });
+  }
+
+  serviceTiles(now: Date) {
+    const validatedBefore = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+    return this.run(async () => {
+      const [total, active, inactive, needsValidation] = await Promise.all([
+        this.db.service.count(),
+        this.db.service.count({ where: { status: 'ACTIVE' } }),
+        this.db.service.count({ where: { status: 'INACTIVE' } }),
+        this.db.service.count({ where: { status: 'ACTIVE', lastValidatedAt: { lt: validatedBefore } } }),
+      ]);
+      return { total, active, inactive, needsValidation };
+    });
+  }
+
   createCategory(input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord> {
     return this.run(() =>
       this.db.serviceCategory.create({
@@ -1640,7 +1706,19 @@ const adminTermSelect = {
     termStart: true,
     termEnd: true,
     isCurrent: true,
-    office: { select: { id: true, slug: true, name: true, status: true } },
+    office: {
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        status: true,
+        seatLabel: true,
+        officeType: true,
+        email: true,
+        phone: true,
+        jurisdiction: { select: { id: true, name: true, level: true } },
+      },
+    },
   },
 };
 

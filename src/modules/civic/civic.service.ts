@@ -781,6 +781,16 @@ export class CivicService {
     return this.repo.officialTiles(this.clock.now());
   }
 
+  async adminJurisdictionTiles(ctx: ServiceContext) {
+    ctx.authz.require('admin.civic:read');
+    return this.repo.jurisdictionTiles();
+  }
+
+  async adminServiceTiles(ctx: ServiceContext) {
+    ctx.authz.require('admin.civic:read');
+    return this.repo.serviceTiles(this.clock.now());
+  }
+
   restoreService(ctx: ServiceContext, input: unknown): Promise<{ id: string; status: 'ACTIVE' }> {
     return this.setServiceStatus(ctx, input, 'ACTIVE');
   }

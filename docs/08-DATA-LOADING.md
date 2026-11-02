@@ -73,6 +73,15 @@ Order: `tiger.boundaries`, `congress.legislators`, `openstates.people`, then eac
 `page.directory` source whose config state and county match. Runs use the System principal
 and store a checksum on `source_runs.snapshot_sha`.
 
+Congress and Open States write the person, the seat, and the current term. A U.S. representative
+is attached to the Census congressional district (`24` plus the two-digit district, so Maryland 8
+is `2408`). A U.S. senator is attached to the state, one office per class. A state legislator is
+attached to the Census upper or lower district (`24` plus the three-character district). The office
+name, district, term dates, email, and photo come from the file when it has them. If that district
+is not loaded yet, the person is saved and the seat is added on the next people run. Re-running
+those two sources links existing people even when the file has not changed. Census does not need
+to run again.
+
 One collector:
 
 ```bash

@@ -34,6 +34,7 @@ export interface SourceWrite {
 
 export interface PipelineStore {
   listSources(query: SourceListQuery): Promise<{ rows: SourceRow[]; total: number }>;
+  sourceTiles(now: Date): Promise<{ total: number; healthy: number; overdueOrFailed: number; paused: number }>;
   findSource(id: string): Promise<SourceRow | null>;
   nameTaken(name: string, excludeId?: string): Promise<boolean>;
   saveSource(input: SourceWrite, now: Date): Promise<SourceRow>;

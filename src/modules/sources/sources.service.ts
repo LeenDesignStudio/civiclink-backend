@@ -110,6 +110,11 @@ export class SourcesService {
     return { ...buildConnection(page.rows, first, page.total), totalCount: page.total };
   }
 
+  async adminSourceTiles(ctx: ServiceContext) {
+    ctx.authz.require('admin.civic:read');
+    return this.deps.store.sourceTiles(this.clock.now());
+  }
+
   async adminSource(ctx: ServiceContext, input: unknown): Promise<{ source: SourceRow; runs: RunRow[] }> {
     ctx.authz.require('admin.civic:read');
     const parsed = parse(idSchema, input);

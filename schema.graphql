@@ -142,6 +142,11 @@ type AdminCorrectionPayload {
   correction: AdminCorrection
 }
 
+type AdminCurrentOfficial {
+  fullName: String
+  id: ID
+}
+
 type AdminDashboard {
   alertsNeedingAttention: Int
   jurisdictions: Int
@@ -221,6 +226,13 @@ input AdminJurisdictionFilter {
   type: JurisdictionType
 }
 
+type AdminJurisdictionTiles {
+  active: Int
+  missingBoundary: Int
+  noOffices: Int
+  outdated: Int
+}
+
 type AdminJurisdictionTreeNode {
   children: [AdminJurisdictionTreeNode!]
   displayId: String
@@ -244,6 +256,7 @@ type AdminMe {
 type AdminOffice {
   addresses: [AdminOfficeAddress!]
   contactUrl: String
+  currentOfficial: AdminCurrentOfficial
   displayId: String
   displayOrder: Int
   email: String
@@ -253,6 +266,7 @@ type AdminOffice {
   freshnessOverride: FreshnessOverride
   holderUnknown: Boolean
   id: ID
+  jurisdiction: AdminOfficePlace
   jurisdictionId: ID
   lastUpdatedAt: DateTime
   name: String
@@ -301,6 +315,12 @@ input AdminOfficeFilter {
   staleOnly: Boolean
   status: RecordStatus
   vacantOnly: Boolean
+}
+
+type AdminOfficePlace {
+  id: ID
+  level: GovLevel
+  name: String
 }
 
 type AdminOfficeTiles {
@@ -362,8 +382,13 @@ type AdminOfficialTerm {
 }
 
 type AdminOfficialTermOffice {
+  email: String
   id: ID
+  jurisdiction: AdminOfficePlace
   name: String
+  officeType: OfficeType
+  phone: String
+  seatLabel: String
   slug: String
   status: RecordStatus
 }
@@ -480,6 +505,13 @@ type AdminServiceLink {
   officeId: ID
 }
 
+type AdminServiceTiles {
+  active: Int
+  inactive: Int
+  needsValidation: Int
+  total: Int
+}
+
 type AdminSignOutPayload {
   signedOut: Boolean
 }
@@ -487,6 +519,13 @@ type AdminSignOutPayload {
 type AdminSource {
   runs: [SourceRun!]
   source: Source
+}
+
+type AdminSourceTiles {
+  healthy: Int
+  overdueOrFailed: Int
+  paused: Int
+  total: Int
 }
 
 enum AdminStatus {
@@ -1341,6 +1380,7 @@ type Query {
   adminDashboard: AdminDashboard
   adminDashboardCounts: AdminDashboardCounts
   adminJurisdiction(id: ID!): AdminJurisdiction
+  adminJurisdictionTiles: AdminJurisdictionTiles
   adminJurisdictionTree(rootId: ID): [AdminJurisdictionTreeNode!]
   adminJurisdictions(after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort): AdminJurisdictionConnection
   adminMe: AdminMe
@@ -1352,8 +1392,10 @@ type Query {
   adminOfficials(after: String, filter: AdminOfficialFilter, first: Int, sort: AdminCivicSort): AdminOfficialConnection
   adminSearch(q: String!): AdminSearch
   adminService(id: ID!): AdminService
+  adminServiceTiles: AdminServiceTiles
   adminServices(after: String, filter: AdminServiceFilter, first: Int, sort: AdminCivicSort): AdminServiceConnection
   adminSource(id: UUID!): AdminSource
+  adminSourceTiles: AdminSourceTiles
   adminSources(after: String, first: Int): SourceConnection
   adminUnreadActivityCount: Int
   adminUserTiles: AdminUserTiles

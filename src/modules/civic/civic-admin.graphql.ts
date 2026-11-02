@@ -93,12 +93,41 @@ const AdminAddress = builder.objectRef<OfficeAddressDto>('AdminOfficeAddress').i
   }),
 });
 
+const AdminOfficePlace = builder
+  .objectRef<{ id: string; name: string; level: 'FEDERAL' | 'STATE' | 'COUNTY' | 'MUNICIPAL' | 'EDUCATION' | 'SPECIAL' }>('AdminOfficePlace')
+  .implement({
+    fields: (t) => ({
+      id: t.exposeID('id'),
+      name: t.exposeString('name'),
+      level: t.field({ type: GovLevelEnum, resolve: (row) => row.level }),
+    }),
+  });
+
+const AdminCurrentOfficial = builder
+  .objectRef<{ id: string; fullName: string }>('AdminCurrentOfficial')
+  .implement({
+    fields: (t) => ({
+      id: t.exposeID('id'),
+      fullName: t.exposeString('fullName'),
+    }),
+  });
+
 const OfficeAdmin = builder.objectRef<AdminOfficeRecord>('AdminOffice').implement({
   fields: (t) => ({
     id: t.exposeID('id'),
     slug: t.exposeString('slug'),
     displayId: t.exposeString('displayId', { nullable: true }),
     jurisdictionId: t.exposeID('jurisdictionId'),
+    jurisdiction: t.field({
+      type: AdminOfficePlace,
+      nullable: true,
+      resolve: (row) => row.jurisdiction ?? null,
+    }),
+    currentOfficial: t.field({
+      type: AdminCurrentOfficial,
+      nullable: true,
+      resolve: (row) => row.currentOfficial ?? null,
+    }),
     name: t.exposeString('name'),
     officeType: t.field({ type: OfficeTypeEnum, nullable: true, resolve: (row) => row.officeType ?? null }),
     parentRetired: t.boolean({ resolve: (row) => row.parentRetired ?? false }),
@@ -129,6 +158,15 @@ const AdminTermOffice = builder.objectRef<AdminOfficialTerm['office']>('AdminOff
     slug: t.exposeString('slug'),
     name: t.exposeString('name'),
     status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
+    seatLabel: t.exposeString('seatLabel', { nullable: true }),
+    officeType: t.field({ type: OfficeTypeEnum, nullable: true, resolve: (row) => row.officeType ?? null }),
+    email: t.exposeString('email', { nullable: true }),
+    phone: t.exposeString('phone', { nullable: true }),
+    jurisdiction: t.field({
+      type: AdminOfficePlace,
+      nullable: true,
+      resolve: (row) => row.jurisdiction ?? null,
+    }),
   }),
 });
 
@@ -718,6 +756,46 @@ builder.queryField('adminOfficialTiles', (t) =>
   }),
 );
 rememberScope('Query', 'adminOfficialTiles', readScope);
+
+const JurisdictionTiles = builder
+  .objectRef<{ active: number; missingBoundary: number; noOffices: number; outdated: number }>('AdminJurisdictionTiles')
+  .implement({
+    fields: (t) => ({
+      active: t.exposeInt('active'),
+      missingBoundary: t.exposeInt('missingBoundary'),
+      noOffices: t.exposeInt('noOffices'),
+      outdated: t.exposeInt('outdated'),
+    }),
+  });
+
+const ServiceTiles = builder
+  .objectRef<{ total: number; active: number; inactive: number; needsValidation: number }>('AdminServiceTiles')
+  .implement({
+    fields: (t) => ({
+      total: t.exposeInt('total'),
+      active: t.exposeInt('active'),
+      inactive: t.exposeInt('inactive'),
+      needsValidation: t.exposeInt('needsValidation'),
+    }),
+  });
+
+builder.queryField('adminJurisdictionTiles', (t) =>
+  t.field({
+    type: JurisdictionTiles,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => civic(ctx).adminJurisdictionTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminJurisdictionTiles', readScope);
+
+builder.queryField('adminServiceTiles', (t) =>
+  t.field({
+    type: ServiceTiles,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => civic(ctx).adminServiceTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminServiceTiles', readScope);
 
 const ValidatedService = builder.objectRef<{ id: string }>('ValidatedService').implement({
   fields: (t) => ({ id: t.exposeID('id') }),

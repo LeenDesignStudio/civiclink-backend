@@ -61,7 +61,7 @@ QubaLink staff who want resident features use a normal resident account.
 ### Admin
 | Permission | Allows |
 |---|---|
-| `admin.dashboard:read` | Work-queue counters on admin home |
+| `admin.dashboard:read` | Admin home: tiles, totals, needs-attention, recently edited, pilot coverage, global search, and the activity bell |
 | `admin.civic:read` | Read jurisdictions, offices, officials, terms, services, categories, sources, source runs, pending source changes — including RETIRED records and source record URLs |
 | `admin.civic:write` | Create/update jurisdictions (metadata only), offices, office addresses, officials, office terms, services, service categories; set freshness overrides; tick "notify followers" on a record update |
 | `admin.civic:retire` | Retire (and un-retire) offices, officials, and services. Jurisdiction retire and restore are Super Admin only |
@@ -83,7 +83,7 @@ QubaLink staff who want resident features use a normal resident account.
 | `system.pipeline:run` | Run source collectors; write civic records and pending changes; write source runs |
 | `system.notifications:deliver` | Fan out notifications and deliver email/push; update delivery status |
 | `system.billing:sync` | Apply verified Stripe webhook events; sync plans from Stripe |
-| `system.retention:run` | Delete expired lookups/sessions/events; purge accounts past their restore window |
+| `system.retention:run` | Delete expired lookups, sessions, and Stripe events; purge accounts past their restore window; delete admin activity older than 30 days |
 | `system.locations:reresolve` | Nightly re-resolution of saved locations; link checks on services/websites |
 
 ---
@@ -161,7 +161,7 @@ QubaLink staff who want resident features use a normal resident account.
 - Do anything other than `me`, `restoreAccount`, `signOut` while `PENDING_DELETION`; anything other than `me`, `acceptTerms`, `signOut` until Terms are accepted.
 
 ### Admin — Admin / Staff
-**Can**: open admin home; read every civic record (incl. retired) and sources; create and edit jurisdictions, offices, officials, and services; retire and reactivate offices, officials, and services; review corrections; create and send alerts; read change history; open My Profile and change their own password.
+**Can**: open admin home, including search and the activity bell; read every civic record (incl. retired) and sources; create and edit jurisdictions, offices, officials, and services; retire and reactivate offices, officials, and services; review corrections; create and send alerts; read change history; open My Profile and change their own password.
 **Cannot**: retire or restore a jurisdiction (`FORBIDDEN`); add, edit, pause, or retire sources; accept or reject pending source changes (`admin.source:decide`, pending QubaLink confirmation — docs/08 section 28 item 7); open Admin Users; export CSV; change their own role or status; hard-delete anything; draw or upload boundary geometry.
 
 ### Admin — Super Admin
@@ -203,4 +203,5 @@ so account purge never needs to modify the log. The table is append-only (DB tri
 
 Logged admin actions include: sign-in success/failure, admin invited/invite resent/user updated/password reset sent/role changed/deactivated,
 every civic create/update/retire, freshness override, source change accept/reject, source run triggered,
-correction assigned/applied/dismissed, alert created/edited/sent, CSV export (list + filter, not contents).
+correction assigned/applied/dismissed, alert created/edited/sent, activity marked read (`admin.activity_read`),
+CSV export (list + filter, not contents).

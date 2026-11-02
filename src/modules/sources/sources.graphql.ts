@@ -209,6 +209,26 @@ builder.queryField('adminSource', (t) =>
 );
 rememberScope('Query', 'adminSource', readScope);
 
+const SourceTiles = builder
+  .objectRef<{ total: number; healthy: number; overdueOrFailed: number; paused: number }>('AdminSourceTiles')
+  .implement({
+    fields: (t) => ({
+      total: t.exposeInt('total'),
+      healthy: t.exposeInt('healthy'),
+      overdueOrFailed: t.exposeInt('overdueOrFailed'),
+      paused: t.exposeInt('paused'),
+    }),
+  });
+
+builder.queryField('adminSourceTiles', (t) =>
+  t.field({
+    type: SourceTiles,
+    authScopes: readScope,
+    resolve: (_root, _args, ctx) => sources(ctx).adminSourceTiles(ctx),
+  }),
+);
+rememberScope('Query', 'adminSourceTiles', readScope);
+
 builder.queryField('pendingSourceChanges', (t) =>
   t.field({
     type: [PendingType],

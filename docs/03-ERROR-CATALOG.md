@@ -78,6 +78,8 @@ REST routes return `{ "error": { "code", "message", "requestId" } }` with the HT
 
 ## 5. Admin
 
+Dashboard search and the activity bell add no codes. A search shorter than 2 characters, or a mark-read with neither ids nor `all: true`, is `VALIDATION`.
+
 | Code | Class | HTTP | Default message | When |
 |---|---|---|---|---|
 | `JURISDICTION_CYCLE` | ValidationError | 400 | "A jurisdiction can't be its own ancestor." | parent chain cycle |

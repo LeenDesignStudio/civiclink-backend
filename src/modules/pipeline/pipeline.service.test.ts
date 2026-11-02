@@ -6,6 +6,7 @@ import { ValidationError } from '../../lib/errors.js';
 import { FakeClock } from '../../lib/clock.js';
 import type { PipelineStore, PendingQuery, SourceListQuery, SourceWrite } from './pipeline.ports.js';
 import { PipelineService } from './pipeline.service.js';
+import { sourceHealth } from '../civic/record-rules.js';
 import { tigerLayerPlan } from './tiger.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
 import { sameAttributes, type HttpFetcher, type HttpResult, type NormalisedRecord } from './types.js';
@@ -20,6 +21,28 @@ class MemoryStore implements PipelineStore {
 
   listSources(query: SourceListQuery): Promise<{ rows: SourceRow[]; total: number }> {
     return Promise.resolve({ rows: this.sources.slice(0, query.limit), total: this.sources.length });
+  }
+
+  sourceTiles(now: Date): Promise<{ total: number; healthy: number; overdueOrFailed: number; paused: number }> {
+    let healthy = 0;
+    let overdueOrFailed = 0;
+    let paused = 0;
+    for (const source of this.sources) {
+      const latest = this.runs
+        .filter((run) => run.sourceId === source.id)
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
+      const health = sourceHealth({
+        status: source.recordStatus ?? (source.active ? 'ACTIVE' : 'PAUSED'),
+        lastRunFailed: latest?.status === 'FAILED',
+        lastSuccessAt: source.lastSuccessAt ?? null,
+        outdatedAfterDays: source.freshnessDays,
+        now,
+      });
+      if (health === 'HEALTHY') healthy += 1;
+      else if (health === 'PAUSED') paused += 1;
+      else overdueOrFailed += 1;
+    }
+    return Promise.resolve({ total: this.sources.length, healthy, overdueOrFailed, paused });
   }
 
   findSource(id: string): Promise<SourceRow | null> {

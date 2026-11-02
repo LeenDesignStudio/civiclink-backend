@@ -24,6 +24,7 @@ import {
   type Selector,
   type SourceConfig,
 } from './types.js';
+import { chamberKind, seatFields } from './seats.js';
 
 const snapshotConfigs = new WeakMap<RawSnapshot, SourceConfig>();
 const tigerPrepared = new WeakMap<RawSnapshot, NormalisedRecord[]>();
@@ -168,6 +169,19 @@ export const congressCollector: Collector = {
       const latest = objectOf(terms[terms.length - 1]);
       const state = stringOf(latest.state);
       if (want && state?.toUpperCase() !== want) continue;
+      const seat = seatFields({
+        state,
+        kind: chamberKind(stringOf(latest.type)),
+        district: stringOf(latest.district),
+        senateClass: stringOf(latest.class),
+        stateRank: stringOf(latest.state_rank),
+        personKey: bioguide,
+        start: stringOf(latest.start),
+        end: stringOf(latest.end),
+        email: null,
+        photoUrl: null,
+        website: stringOf(latest.url),
+      });
       records.push({
         matchKey: `bioguide:${bioguide}`,
         entityType: 'OFFICIAL',
@@ -175,6 +189,7 @@ export const congressCollector: Collector = {
           fullName,
           party: stringOf(latest.party),
           state,
+          ...seat,
         },
       });
     }
@@ -200,6 +215,19 @@ export const openStatesCollector: Collector = {
       const stateColumn = row.state;
       if (want && stateColumn && stateColumn.toUpperCase() !== want) continue;
       const state = stateColumn ?? want ?? null;
+      const seat = seatFields({
+        state,
+        kind: chamberKind(row.current_chamber ?? row.chamber ?? null),
+        district: row.current_district ?? row.district ?? null,
+        senateClass: null,
+        stateRank: null,
+        personKey: id,
+        start: null,
+        end: null,
+        email: row.email ?? null,
+        photoUrl: row.image ?? null,
+        website: null,
+      });
       records.push({
         matchKey: `openstates:${id}`,
         entityType: 'OFFICIAL',
@@ -207,6 +235,7 @@ export const openStatesCollector: Collector = {
           fullName,
           party: row.party ?? row.current_party ?? null,
           state,
+          ...seat,
         },
       });
     }

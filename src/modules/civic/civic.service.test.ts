@@ -320,6 +320,24 @@ describe('CivicService public reads', () => {
     expect(one.sourceRecordUrl).toBe('https://example.test/dallas');
   });
 
+  it('returns jurisdiction and service tiles to an admin and refuses a resident', async () => {
+    const tiles = { active: 3, missingBoundary: 1, noOffices: 2, outdated: 1 };
+    const services = { total: 5, active: 4, inactive: 1, needsValidation: 2 };
+    const store = {
+      jurisdictionTiles: () => Promise.resolve(tiles),
+      serviceTiles: () => Promise.resolve(services),
+    } as unknown as CivicStore;
+    const civic = new CivicService({
+      repo: store,
+      lookups: { findActive: () => Promise.resolve(null) },
+      clock: new FakeClock(NOW),
+    });
+    await expect(civic.adminJurisdictionTiles(viewerContext())).resolves.toEqual(tiles);
+    await expect(civic.adminServiceTiles(viewerContext())).resolves.toEqual(services);
+    await expect(civic.adminJurisdictionTiles(residentContext())).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(civic.adminServiceTiles(context())).rejects.toBeInstanceOf(UnauthenticatedError);
+  });
+
   it('lists admin offices with a name cursor and rejects a resident', async () => {
     const calls: OfficeAdminQuery[] = [];
     const row: AdminOfficeRecord & { createdAt: Date } = {

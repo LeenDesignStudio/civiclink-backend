@@ -87,6 +87,40 @@ export class PipelineRepo implements PipelineStore {
     };
   }
 
+  async sourceTiles(now: Date): Promise<{ total: number; healthy: number; overdueOrFailed: number; paused: number }> {
+    const rows = await dbCall(() =>
+      this.db.$queryRaw<Array<{ total: number; healthy: number; overdue_or_failed: number; paused: number }>>`
+        SELECT
+          count(*)::int AS total,
+          count(*) FILTER (WHERE health = 'HEALTHY')::int AS healthy,
+          count(*) FILTER (WHERE health IN ('OVERDUE', 'FAILED'))::int AS overdue_or_failed,
+          count(*) FILTER (WHERE health = 'PAUSED')::int AS paused
+        FROM (
+          SELECT CASE
+            WHEN s.record_status IN ('PAUSED', 'RETIRED') THEN 'PAUSED'
+            WHEN EXISTS (
+              SELECT 1 FROM source_runs r
+              WHERE r.source_id = s.id
+                AND r.status = 'FAILED'
+                AND r.created_at = (SELECT max(r2.created_at) FROM source_runs r2 WHERE r2.source_id = s.id)
+            ) THEN 'FAILED'
+            WHEN s.last_success_at IS NULL
+              OR s.last_success_at < ${now} - (s.freshness_days * INTERVAL '1 day') THEN 'OVERDUE'
+            ELSE 'HEALTHY'
+          END AS health
+          FROM sources s
+        ) counted
+      `,
+    );
+    const row = rows[0];
+    return {
+      total: row?.total ?? 0,
+      healthy: row?.healthy ?? 0,
+      overdueOrFailed: row?.overdue_or_failed ?? 0,
+      paused: row?.paused ?? 0,
+    };
+  }
+
   async findSource(id: string): Promise<SourceRow | null> {
     const row = await dbCall(() => this.db.source.findUnique({ where: { id } }));
     if (!row) return null;
@@ -333,6 +367,9 @@ export class PipelineRepo implements PipelineStore {
   }
 
   async upsertCivic(sourceId: string, record: NormalisedRecord, now: Date): Promise<'added' | 'changed' | 'unchanged'> {
+    if (record.entityType === 'OFFICIAL' && record.fields.officeKey) {
+      return this.upsertOfficial(sourceId, record, now);
+    }
     const existing = await this.findCivic(record.matchKey);
     const attributesSame = Boolean(existing && sameAttributes(existing.fields, record.fields));
     const refreshBoundary = Boolean(record.fields.geometry || record.fields.boundaryVintage || record.fields.parentGeoid);
@@ -609,32 +646,181 @@ export class PipelineRepo implements PipelineStore {
     }
   }
 
-  private async upsertOfficial(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
+  private async upsertOfficial(sourceId: string, record: NormalisedRecord, now: Date): Promise<'added' | 'changed' | 'unchanged'> {
     const existing = await dbCall(() => this.db.official.findFirst({ where: { sourceRecordUrl: record.matchKey } }));
+    const photoUrl = httpsField(record.fields.photoUrl);
     const data = {
       fullName: (record.fields.fullName ?? 'Unknown').slice(0, 120),
+      ...(record.fields.title ? { displayName: record.fields.title.slice(0, 120) } : {}),
       party: record.fields.party?.slice(0, 60) ?? null,
-      website: record.fields.website ?? null,
+      ...(record.fields.website ? { website: httpsField(record.fields.website) } : {}),
+      ...(photoUrl ? { photoUrl } : {}),
       sourceId,
       sourceRecordUrl: record.matchKey.slice(0, 2048),
       lastUpdatedAt: now,
       externalIds: { matchKey: record.matchKey },
     };
-    if (existing) {
-      const write = refreshWrite(existing, data);
-      await dbCall(() =>
-        this.db.official.update({
-          where: { id: existing.id },
-          data: { ...write.data, ...(write.sourceChangedSinceOverride ? { sourceChangedSinceOverride: true } : {}) },
+    let officialId: string;
+    let outcome: 'added' | 'changed' | 'unchanged';
+    if (!existing) {
+      const created = await dbCall(() =>
+        this.db.official.create({
+          data: { ...data, slug: slugFor(record.matchKey) },
         }),
       );
-      return;
+      officialId = created.id;
+      outcome = 'added';
+    } else {
+      officialId = existing.id;
+      const stored = {
+        fullName: existing.fullName,
+        party: existing.party,
+        website: existing.website,
+        title: existing.displayName,
+        phone: null,
+        email: null,
+      };
+      const comparable = { ...record.fields };
+      if (comparable.website === undefined) comparable.website = existing.website;
+      if (comparable.title === undefined) comparable.title = existing.displayName;
+      const photoChanged = (photoUrl ?? null) !== (existing.photoUrl ?? null);
+      if (sameAttributes(stored, comparable) && !photoChanged) {
+        outcome = 'unchanged';
+      } else {
+        const write = refreshWrite(existing, data);
+        await dbCall(() =>
+          this.db.official.update({
+            where: { id: existing.id },
+            data: { ...write.data, ...(write.sourceChangedSinceOverride ? { sourceChangedSinceOverride: true } : {}) },
+          }),
+        );
+        outcome = 'changed';
+      }
     }
-    await dbCall(() =>
-      this.db.official.create({
-        data: { ...data, slug: slugFor(record.matchKey) },
+    const linked = await this.linkSeat(sourceId, officialId, record, now);
+    if (outcome === 'unchanged' && linked) return 'changed';
+    return outcome;
+  }
+
+  private async linkSeat(sourceId: string, officialId: string, record: NormalisedRecord, now: Date): Promise<boolean> {
+    const officeKey = record.fields.officeKey;
+    const officeName = record.fields.officeName;
+    const jurisdictionType = record.fields.jurisdictionType;
+    const jurisdictionGeoid = record.fields.jurisdictionGeoid;
+    if (!officeKey || !officeName || !jurisdictionType || !jurisdictionGeoid || !TYPES.has(jurisdictionType)) return false;
+    const jurisdiction = await dbCall(() =>
+      this.db.jurisdiction.findFirst({
+        where: { type: jurisdictionType as JurisdictionType, geoid: jurisdictionGeoid, status: 'ACTIVE' },
+        select: { id: true },
       }),
     );
+    if (!jurisdiction) return false;
+    const email = record.fields.contactEmail ? record.fields.contactEmail.slice(0, 254) : null;
+    const website = record.fields.website ? httpsField(record.fields.website) : null;
+    const seatLabel = record.fields.seatLabel?.slice(0, 60) ?? null;
+    const name = officeName.slice(0, 150);
+    let office = await dbCall(() => this.db.office.findFirst({ where: { sourceRecordUrl: officeKey } }));
+    if (!office) {
+      office = await dbCall(() =>
+        this.db.office.findFirst({ where: { jurisdictionId: jurisdiction.id, name } }),
+      );
+    }
+    let wrote = false;
+    if (!office) {
+      office = await dbCall(() =>
+        this.db.office.create({
+          data: {
+            name,
+            slug: slugFor(officeKey),
+            jurisdictionId: jurisdiction.id,
+            seatLabel,
+            selectionMethod: 'ELECTED',
+            officeType: 'ELECTED',
+            email,
+            website,
+            holderUnknown: false,
+            sourceId,
+            sourceRecordUrl: officeKey.slice(0, 2048),
+            lastUpdatedAt: now,
+          },
+        }),
+      );
+      wrote = true;
+    } else if (!office.overrideActive) {
+      const nextEmail = record.fields.contactEmail ? email : office.email;
+      const nextWebsite = record.fields.website ? website : office.website;
+      const patch = {
+        name,
+        seatLabel,
+        email: nextEmail,
+        website: nextWebsite,
+        holderUnknown: false,
+        jurisdictionId: jurisdiction.id,
+        sourceRecordUrl: officeKey.slice(0, 2048),
+        lastUpdatedAt: now,
+      };
+      const differs =
+        office.name !== patch.name ||
+        office.seatLabel !== patch.seatLabel ||
+        office.email !== patch.email ||
+        office.website !== patch.website ||
+        office.holderUnknown ||
+        office.jurisdictionId !== patch.jurisdictionId ||
+        office.sourceRecordUrl !== patch.sourceRecordUrl;
+      if (differs) {
+        const officeId = office.id;
+        await dbCall(() => this.db.office.update({ where: { id: officeId }, data: patch }));
+        wrote = true;
+      }
+    }
+    const officeId = office.id;
+    const termStart = dateOrNull(record.fields.termStart ?? null);
+    const termEnd = dateOrNull(record.fields.termEnd ?? null);
+    const seated = await dbCall(() =>
+      this.db.$transaction(async (tx) => {
+        const current = await tx.officeTerm.findFirst({
+          where: { officeId, isCurrent: true },
+        });
+        let changed = false;
+        if (current && current.officialId !== officialId) {
+          await tx.officeTerm.update({
+            where: { id: current.id },
+            data: { isCurrent: false, termEnd: current.termEnd ?? dateOnly(now) },
+          });
+          changed = true;
+        }
+        const moved = await tx.officeTerm.updateMany({
+          where: { officialId, isCurrent: true, officeId: { not: officeId } },
+          data: { isCurrent: false, termEnd: dateOnly(now) },
+        });
+        if (moved.count > 0) changed = true;
+        const held = current && current.officialId === officialId ? current : null;
+        if (held) {
+          const sameStart = sameDay(held.termStart, termStart);
+          const sameEnd = sameDay(held.termEnd, termEnd);
+          if (!sameStart || !sameEnd) {
+            await tx.officeTerm.update({
+              where: { id: held.id },
+              data: { termStart, termEnd, status: 'ELECTED' },
+            });
+            changed = true;
+          }
+          return changed;
+        }
+        await tx.officeTerm.create({
+          data: {
+            officeId,
+            officialId,
+            status: 'ELECTED',
+            isCurrent: true,
+            termStart,
+            termEnd,
+          },
+        });
+        return true;
+      }),
+    );
+    return wrote || seated;
   }
 
   private async upsertOffice(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
@@ -722,6 +908,28 @@ function asLevel(value: string | null): GovLevel {
 function asType(value: string | null): JurisdictionType {
   if (value && TYPES.has(value)) return value as JurisdictionType;
   return 'COUNTY';
+}
+
+function httpsField(value: string | null | undefined): string | null {
+  const text = value?.trim() ?? '';
+  if (!text.startsWith('https://') || text.length > 2048) return null;
+  return text;
+}
+
+function dateOrNull(value: string | null): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dateOnly(value: Date): Date {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+function sameDay(left: Date | null, right: Date | null): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return dateOnly(left).getTime() === dateOnly(right).getTime();
 }
 
 function slugFor(matchKey: string): string {

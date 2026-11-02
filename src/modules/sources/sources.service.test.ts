@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { Authz } from '../../authz/authz.js';
+import { Authz, anonymousPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { directTx } from '../../auth/tx.js';
-import {
-  AlreadyDecidedError,
-  RunInProgressError,
-  SourceInactiveError,
-  UnknownCollectorError,
-} from '../../lib/errors.js';
+import { AlreadyDecidedError, ForbiddenError, RunInProgressError, SourceInactiveError, UnknownCollectorError, UnauthenticatedError } from '../../lib/errors.js';
 import { FakeClock } from '../../lib/clock.js';
 import { DashboardService, type DashboardRepo } from './dashboard.js';
 import { SourcesService } from './sources.service.js';
@@ -20,6 +15,7 @@ const SOURCE = '11111111-1111-4111-8111-111111111111';
 class Store implements Pick<
   PipelineStore,
   | 'listSources'
+  | 'sourceTiles'
   | 'findSource'
   | 'nameTaken'
   | 'saveSource'
@@ -64,6 +60,9 @@ class Store implements Pick<
 
   listSources(): Promise<{ rows: SourceRow[]; total: number }> {
     return Promise.resolve({ rows: [this.source], total: 1 });
+  }
+  sourceTiles(): Promise<{ total: number; healthy: number; overdueOrFailed: number; paused: number }> {
+    return Promise.resolve({ total: 4, healthy: 1, overdueOrFailed: 2, paused: 1 });
   }
   findSource(): Promise<SourceRow | null> {
     return Promise.resolve(this.source);
@@ -237,6 +236,32 @@ describe('SourcesService', () => {
     await expect(
       sources.decideSourceChange(editor(), { id: store.pending.id, decision: 'REJECTED' }),
     ).rejects.toBeInstanceOf(AlreadyDecidedError);
+  });
+
+  it('returns source tiles to an admin and refuses a resident', async () => {
+    const tiles = await service(new Store()).adminSourceTiles(editor());
+    expect(tiles).toEqual({ total: 4, healthy: 1, overdueOrFailed: 2, paused: 1 });
+    const resident = {
+      kind: 'resident' as const,
+      userId: 'user-1',
+      status: 'ACTIVE' as const,
+      termsAccepted: true,
+      sessionId: 's',
+    };
+    const residentCtx: ServiceContext = {
+      requestId: 'req',
+      principal: resident,
+      authz: new Authz(resident),
+      ipHash: 'ip',
+    };
+    await expect(service(new Store()).adminSourceTiles(residentCtx)).rejects.toBeInstanceOf(ForbiddenError);
+    const anon: ServiceContext = {
+      requestId: 'req',
+      principal: anonymousPrincipal,
+      authz: new Authz(anonymousPrincipal),
+      ipHash: 'ip',
+    };
+    await expect(service(new Store()).adminSourceTiles(anon)).rejects.toBeInstanceOf(UnauthenticatedError);
   });
 
   it('returns zero-safe dashboard counts', async () => {
