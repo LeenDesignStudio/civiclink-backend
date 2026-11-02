@@ -98,6 +98,13 @@ export interface GoogleOidcOptions {
   clientAuth?: ClientAuth;
 }
 
+/** Send both the client id and the current secret. A secret-only body is rejected by Google. */
+export function googleClientAuth(readSecret: () => string): ClientAuth {
+  return (as, client, body, headers) => {
+    ClientSecretPost(readSecret())(as, client, body, headers);
+  };
+}
+
 export async function createGoogleOidc(options?: GoogleOidcOptions): Promise<OidcClient> {
   const issuer = options?.discoveryUrl ?? GOOGLE_ISSUER;
   const config = await discovery(
@@ -105,11 +112,7 @@ export async function createGoogleOidc(options?: GoogleOidcOptions): Promise<Oid
     options?.clientId ?? env.GOOGLE_CLIENT_ID,
     undefined,
     options?.clientAuth ??
-      (options?.clientSecret
-        ? ClientSecretPost(options.clientSecret)
-        : (_server, _client, body) => {
-            body.set('client_secret', env.GOOGLE_CLIENT_SECRET);
-          }),
+      googleClientAuth(() => options?.clientSecret ?? env.GOOGLE_CLIENT_SECRET),
   );
   config.timeout = 10;
   return new OpenIdClient(config);

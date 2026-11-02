@@ -6,7 +6,7 @@ import { OauthFailedError } from '../../lib/errors.js';
 import { FakeRandom } from '../../lib/random.js';
 import { AppleClientSecret, AppleOAuth, APPLE_ISSUER, appleDisplayName } from './apple.js';
 import { pkceS256 } from './pkce.js';
-import { GoogleOAuth, GOOGLE_ISSUER } from './google.js';
+import { GoogleOAuth, GOOGLE_ISSUER, googleClientAuth } from './google.js';
 import type { AuthorizationParams, ExchangeParams, IdClaims, OidcClient } from './types.js';
 
 class FakeOidc implements OidcClient {
@@ -43,6 +43,13 @@ function claims(now: Date, nonce: string, extra?: Partial<IdClaims>): IdClaims {
 
 describe('oauth', () => {
   const now = new Date('2026-04-01T12:00:00.000Z');
+
+  it('sends the Google client id with the secret', () => {
+    const body = new URLSearchParams();
+    googleClientAuth(() => 'secret-value')({} as never, { client_id: 'client-id' } as never, body, new Headers());
+    expect(body.get('client_id')).toBe('client-id');
+    expect(body.get('client_secret')).toBe('secret-value');
+  });
 
   it('starts Google with PKCE S256 and rejects a bad nonce', async () => {
     const client = new FakeOidc();
