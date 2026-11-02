@@ -53,6 +53,31 @@ Integration tests exist for civic admin and admin read. They need Docker (Postgr
 ## Left for later
 
 - FE-11 and the Civic Cards API, after QubaLink confirms section 7.
-- FE-12 resident pages.
-- FE-13 final pass.
 - The partial rows in the table (followers chart data, unlink, official contact fields).
+
+## FE-13 — frontend screens
+
+Walked `docs/08` sections 4–23 and the resident screens. Apexcharts is not a dependency. Dead event mock, the events card, and the sample representative card are removed. Empty copy on the dashboard matches section 23.
+
+| Screen | Route or drawer | Operations | States | Status |
+|---|---|---|---|---|
+| Admin frame, sidebar, search, bell | `/admin` shell | `adminMe`, `adminSearch`, `adminActivity`, `markAdminActivityRead` | loading, denied, empty bell | done |
+| Sign in, forgot password, reset, invite | `/admin/login`, `/admin/forgot-password`, `/admin/update-password` | `/admin-auth/*` | field errors, locked, expired link | done |
+| Dashboard | `/admin` | `adminDashboard` | loading, error, empty attention and edits | done. Followers chart is the sample graphic from BE-6, not live counts |
+| Civic Cards | `/admin/civic-cards` | none until QubaLink confirms | — | needs QubaLink confirmation |
+| Offices | `/admin/offices` drawer | `adminOffices`, `upsertOffice`, `retireOffice`, `restoreOffice` | empty, filtered empty, denied, save error | done |
+| Officials | `/admin/officials` drawer | `adminOfficials`, `upsertOfficial`, `setOfficeTerm`, retire and restore | empty, filtered empty, denied | done. No separate phone, email, or unlink. A term is ended |
+| Jurisdictions | `/admin/jurisdictions` drawer | `adminJurisdictions`, `upsertJurisdiction`, retire and restore | empty, filtered empty | done. Retire still needs the section 28 confirmation |
+| Corrections | `/admin/corrections` drawer | `adminCorrections`, assign, review, apply, dismiss, notes | empty, validation, denied | done. No email to the resident until QubaLink confirms |
+| Services | `/admin/services-resources` drawer | `adminServices`, `upsertService`, validate, retire, restore, categories | empty, filtered empty | done. Categories fixed-or-editable still needs confirmation |
+| Sources | `/admin/sources` drawer | `adminSources`, pause, resume, refresh, `decideSourceChange` | empty, pending changes | done. Decide is Super Admin only, pending confirmation |
+| Alerts | `/admin/alerts` drawer | drafts, preview, test, send, duplicate | empty, validation, not confirmed | done |
+| Admin users | `/admin/users` drawer | invite, update, role, status, reset | empty, denied, last Super Admin | done. Two roles still need confirmation |
+| Admin profile and password | `/admin/settings`, gear menu | `myAdminProfile`, `updateMyProfile`, `changeMyPassword` | unsaved, validation | done |
+| Resident sign-in and sign-up | `/signin`, `/signup` | `/auth/google/start`, `/auth/apple/start` | error query, already signed in | done. Same card, different URL |
+| Terms | `/welcome` | `me`, `legalVersions`, `acceptTerms` | signed out, pending deletion, accepted | done |
+| Civic Card, office, official | `/card/[token]`, `/offices/[slug]`, `/officials/[slug]` | `civicCard`, `office`, `official` | not covered, report, follow | done |
+| Resident home | `/me` | `me`, saved locations, follows, notifications | loading shell, signed out redirect | done |
+| Places, following, notifications | `/me/locations`, `/me/following`, `/me/notifications` | location, follow, notification operations | empty tables, errors | done |
+| Settings and profile | `/me/settings`, `/me/account` | preferences, `updateProfile`, sign out, deletion | unsaved, pending deletion | done |
+| Billing and contact | `/me/billing`, `/#pricing`, `/#contact` | plans, checkout, portal, invoices, `submitContactMessage` | empty plans, checkout return, Turnstile missing | done in code. Contact stays disabled until the site key is set |
