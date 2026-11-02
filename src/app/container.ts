@@ -1,5 +1,7 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { Prisma } from '../generated/prisma/client.js';
-import { env } from '../config/env.js';
+import { env, installEnv } from '../config/env.js';
 import { prisma, withTx } from '../db/prisma.js';
 import { SpatialRepo } from '../db/spatial.repo.js';
 import { systemClock } from '../lib/clock.js';
@@ -38,6 +40,8 @@ import { AdminUsersService } from '../modules/admin-users/admin-users.service.js
 import { AdminReadRepo } from '../modules/admin-read/admin-read.repo.js';
 import { AdminReadService } from '../modules/admin-read/admin-read.service.js';
 import { SourcesService } from '../modules/sources/sources.service.js';
+import { integrationValues } from '../modules/integrations/integrations.catalog.js';
+import { IntegrationSettingsService } from '../modules/integrations/integrations.service.js';
 import { DashboardRepo } from '../modules/sources/dashboard.repo.js';
 import { DashboardService } from '../modules/sources/dashboard.js';
 import { PipelineRepo } from '../modules/pipeline/pipeline.repo.js';
@@ -123,14 +127,14 @@ export function buildContainer(): AppContainer {
   });
   const analytics = new PostHogAnalytics({
     fetchFn: fetch,
-    apiKey: env.POSTHOG_API_KEY ?? '',
-    host: env.POSTHOG_HOST,
+    apiKey: () => env.POSTHOG_API_KEY ?? '',
+    host: () => env.POSTHOG_HOST,
   });
   const lookup = new LookupService({
     repo: new LookupRepo(prisma),
     spatial: new SpatialRepo(prisma),
     geocoder: new GoogleGeocoder({
-      apiKey: env.GOOGLE_MAPS_API_KEY,
+      apiKey: () => env.GOOGLE_MAPS_API_KEY,
       fetch: async (url, init) => {
         const response = await fetch(url, init);
         return {
@@ -243,13 +247,35 @@ export function buildContainer(): AppContainer {
       enqueue: (name, payload) => jobs.send(name, payload, payload.entityId),
     },
   });
+  const billingProvider = StripeBillingProvider.fromApiKey(env.STRIPE_SECRET_KEY);
   const billing = new BillingService({
     repo: new BillingRepo(prisma),
-    provider: StripeBillingProvider.fromApiKey(env.STRIPE_SECRET_KEY),
-    publicWebUrl: env.PUBLIC_WEB_URL,
+    provider: billingProvider,
+    publicWebUrl: () => env.PUBLIC_WEB_URL,
     queue: {
       enqueue: (name, data, options) => jobs.send(name, data, options.singletonKey),
     },
+  });
+  const envFile = join(process.cwd(), '.env');
+  const integrations = new IntegrationSettingsService({
+    readSource: () => process.env,
+    currentValues: () => integrationValues(env),
+    readEnvFile: async () => {
+      try {
+        return await readFile(envFile, 'utf8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return '';
+        throw err;
+      }
+    },
+    writeEnvFile: (contents) => writeFile(envFile, contents, { mode: 0o600 }),
+    apply: (updates) => {
+      for (const [key, value] of Object.entries(updates)) process.env[key] = value;
+      installEnv(process.env);
+    },
+    rebindStripe: (apiKey) => billingProvider.replaceApiKey(apiKey),
+    audit,
+    runTx,
   });
   const contact = new ContactService({
     repo: new ContactRepo(prisma),
@@ -332,6 +358,7 @@ export function buildContainer(): AppContainer {
       contact,
       sources,
       adminRead,
+      integrations,
     },
     stopJobs: () => jobs.stop(),
   };

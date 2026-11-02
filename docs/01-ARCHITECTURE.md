@@ -85,6 +85,7 @@ What a paid plan unlocks is decision D-02; only these two limits are wired in Ph
 ## 6. Environment variables
 
 All validated by `src/config/env.ts` (Zod) at boot. `S` = secret (Secrets Manager in staging/prod).
+A Super Admin can replace the provider keys (site URL, Google, Apple, Maps, Stripe, Turnstile, PostHog, Sentry, Firebase) from Admin → Settings → Integrations. That write updates the API `.env` file and the running API process. Database, JWT, and cookie keys are not on that screen. Restart the worker after a Stripe or Firebase change so background jobs pick it up. Restart the API after a Google or Apple client id change.
 
 | Variable | S | Example / rule |
 |---|:-:|---|
@@ -112,6 +113,7 @@ All validated by `src/config/env.ts` (Zod) at boot. `S` = secret (Secrets Manage
 | `PUSH_PROVIDER` | | `fcm` \| `console` |
 | `FCM_SERVICE_ACCOUNT_JSON` | S | base64 JSON |
 | `TURNSTILE_SECRET_KEY` | S | |
+| `TURNSTILE_SITE_KEY` | | Public site key. The contact form reads it from `siteConfig`. A Super Admin can change it from Admin → Settings → Integrations |
 | `POSTHOG_API_KEY` / `POSTHOG_HOST` | S / | |
 | `SENTRY_DSN` | S | optional in dev |
 | `AWS_REGION` / `S3_BUCKET_EXPORTS` / `S3_BUCKET_SNAPSHOTS` | | |

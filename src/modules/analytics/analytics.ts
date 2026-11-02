@@ -48,21 +48,23 @@ export class PostHogAnalytics implements Analytics {
   constructor(
     private readonly options: {
       fetchFn: FetchLike;
-      apiKey: string;
-      host: string;
+      apiKey: string | (() => string);
+      host: string | (() => string);
       timeoutMs?: number;
     },
   ) {}
 
   async track(distinctId: string, event: string, properties: Record<string, unknown>): Promise<void> {
-    if (!this.options.apiKey) return;
+    const apiKey = typeof this.options.apiKey === 'function' ? this.options.apiKey() : this.options.apiKey;
+    if (!apiKey) return;
     const safe = sanitizeProperties(properties);
-    const host = this.options.host.replace(/\/$/, '');
+    const hostValue = typeof this.options.host === 'function' ? this.options.host() : this.options.host;
+    const host = hostValue.replace(/\/$/, '');
     await this.options.fetchFn(`${host}/capture/`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        api_key: this.options.apiKey,
+        api_key: apiKey,
         event,
         distinct_id: distinctId,
         properties: safe,

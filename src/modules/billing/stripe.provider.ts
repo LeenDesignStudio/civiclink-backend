@@ -25,36 +25,17 @@ async function settle<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
 
 export class StripeBillingProvider implements BillingProvider {
   constructor(
-    private readonly gateway: StripeGateway,
+    private gateway: StripeGateway,
     private readonly signals: () => AbortSignal = () => AbortSignal.timeout(TIMEOUT_MS),
   ) {}
 
   static fromApiKey(apiKey: string): StripeBillingProvider {
-    const stripe = new Stripe(apiKey, { timeout: TIMEOUT_MS, maxNetworkRetries: 2 });
-    const gateway: StripeGateway = {
-      createCustomer: (params, options) =>
-        stripe.customers.create(params, stripeOptions(options)),
-      createCheckoutSession: (params, options) =>
-        stripe.checkout.sessions.create(params, stripeOptions(options)),
-      createPortalSession: (params, options) =>
-        stripe.billingPortal.sessions.create(params, stripeOptions(options)),
-      listPrices: async (params, options) => {
-        const page = await stripe.prices.list(
-          {
-            active: params.active,
-            limit: params.limit,
-            expand: ['data.product'],
-            ...(params.starting_after ? { starting_after: params.starting_after } : {}),
-          },
-          stripeOptions(options),
-        );
-        return {
-          has_more: page.has_more,
-          data: page.data.map((price) => listedPrice(price)),
-        };
-      },
-    };
-    return new StripeBillingProvider(gateway);
+    return new StripeBillingProvider(gatewayFromKey(apiKey));
+  }
+
+  /** Swap the Stripe client after an admin saves a new secret key. */
+  replaceApiKey(apiKey: string): void {
+    this.gateway = gatewayFromKey(apiKey);
   }
 
   createCustomer(input: { userId: string; email: string; idempotencyKey: string }): Promise<{ stripeCustomerId: string }> {
@@ -150,6 +131,32 @@ export class StripeBillingProvider implements BillingProvider {
       throw new BillingUnavailableError({ cause: err });
     }
   }
+}
+
+function gatewayFromKey(apiKey: string): StripeGateway {
+  const stripe = new Stripe(apiKey, { timeout: TIMEOUT_MS, maxNetworkRetries: 2 });
+  return {
+    createCustomer: (params, options) => stripe.customers.create(params, stripeOptions(options)),
+    createCheckoutSession: (params, options) =>
+      stripe.checkout.sessions.create(params, stripeOptions(options)),
+    createPortalSession: (params, options) =>
+      stripe.billingPortal.sessions.create(params, stripeOptions(options)),
+    listPrices: async (params, options) => {
+      const page = await stripe.prices.list(
+        {
+          active: params.active,
+          limit: params.limit,
+          expand: ['data.product'],
+          ...(params.starting_after ? { starting_after: params.starting_after } : {}),
+        },
+        stripeOptions(options),
+      );
+      return {
+        has_more: page.has_more,
+        data: page.data.map((price) => listedPrice(price)),
+      };
+    },
+  };
 }
 
 function listedPrice(price: Stripe.Price): ListedPrice {

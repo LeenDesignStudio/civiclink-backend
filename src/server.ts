@@ -1,3 +1,4 @@
+import './config/load-integration-env.js';
 import * as Sentry from '@sentry/node';
 import pg from 'pg';
 import { pathToFileURL } from 'node:url';

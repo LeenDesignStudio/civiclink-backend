@@ -20,25 +20,30 @@ export interface AppleSecretMaterial {
 
 export class AppleClientSecret {
   private cached: { jwt: string; exp: number } | undefined;
+  private fingerprint = '';
 
   constructor(
-    private readonly material: AppleSecretMaterial,
+    private readonly material: AppleSecretMaterial | (() => AppleSecretMaterial),
     private readonly clock: Clock = systemClock,
   ) {}
 
   async current(): Promise<string> {
+    const material = typeof this.material === 'function' ? this.material() : this.material;
+    const fingerprint = `${material.teamId}|${material.keyId}|${material.clientId}|${material.privateKeyPem}`;
+    if (fingerprint !== this.fingerprint) this.cached = undefined;
+    this.fingerprint = fingerprint;
     const now = this.clock.now();
     const nowSec = Math.floor(now.getTime() / 1000);
     if (this.cached && this.cached.exp > nowSec + 60) return this.cached.jwt;
     const exp = nowSec + SECRET_TTL_SEC;
     const jwt = await new SignJWT({})
-      .setProtectedHeader({ alg: 'ES256', kid: this.material.keyId })
-      .setIssuer(this.material.teamId)
+      .setProtectedHeader({ alg: 'ES256', kid: material.keyId })
+      .setIssuer(material.teamId)
       .setIssuedAt(nowSec)
       .setExpirationTime(exp)
       .setAudience(APPLE_ISSUER)
-      .setSubject(this.material.clientId)
-      .sign(await importPKCS8(this.material.privateKeyPem, 'ES256'));
+      .setSubject(material.clientId)
+      .sign(await importPKCS8(material.privateKeyPem, 'ES256'));
     this.cached = { jwt, exp };
     return jwt;
   }
@@ -70,12 +75,12 @@ export async function createAppleOidc(options?: AppleOidcOptions): Promise<OidcC
   const clientId = options?.clientId ?? env.APPLE_CLIENT_ID;
   const secret =
     options?.secret ??
-    new AppleClientSecret({
+    new AppleClientSecret(() => ({
       teamId: env.APPLE_TEAM_ID,
       keyId: env.APPLE_KEY_ID,
       clientId,
       privateKeyPem: env.APPLE_PRIVATE_KEY,
-    });
+    }));
   const holder = { value: '' };
   const auth: ClientAuth = (_server, _client, body) => {
     body.set('client_id', clientId);

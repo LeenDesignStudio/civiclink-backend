@@ -983,6 +983,20 @@ enum GovLevel {
   STATE
 }
 
+type IntegrationSetting {
+  group: String
+  key: String
+  label: String
+  multiline: Boolean
+  secret: Boolean
+  value: String
+}
+
+input IntegrationSettingInput {
+  key: String!
+  value: String!
+}
+
 input InviteAdminInput {
   email: String!
   name: String!
@@ -1164,6 +1178,7 @@ type Mutation {
   unfollow(input: UnfollowInput!): UnfollowPayload
   updateAdminRole(input: UpdateAdminRoleInput!): AdminUserPayload
   updateAdminUser(input: UpdateAdminUserInput!): AdminUserPayload
+  updateIntegrationSettings(settings: [IntegrationSettingInput!]!): [IntegrationSetting!]
   updateMyProfile(input: UpdateMyProfileInput!): AdminUserPayload
   updateNotificationPreference(input: UpdateNotificationPreferenceInput!): UpdateNotificationPreferencePayload
   updateProfile(input: UpdateProfileInput!): MePayload
@@ -1405,6 +1420,7 @@ type Query {
   confirmLocationCandidate(candidateToken: String!): ResolveLocationResult
   follows(after: String, first: Int): FollowConnection
   health: String
+  integrationSettings: [IntegrationSetting!]
   invoices(after: String, first: Int): InvoiceConnection
   legalVersions: [LegalVersion!]
   me: Me
@@ -1422,6 +1438,7 @@ type Query {
   savedLocations: [SavedLocation!]
   serviceCategories: [ServiceCategory!]
   services(after: String, categoryId: ID, first: Int, jurisdictionId: ID, lookupToken: String, officeId: ID): ServiceConnection
+  siteConfig: SiteConfig
   subscription: Subscription
   unreadNotificationCount: Int
 }
@@ -1618,6 +1635,10 @@ input SignOutInput {
 
 type SignOutPayload {
   signedOut: Boolean
+}
+
+type SiteConfig {
+  turnstileSiteKey: String
 }
 
 type Source {

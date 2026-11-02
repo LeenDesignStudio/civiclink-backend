@@ -104,7 +104,12 @@ export async function createGoogleOidc(options?: GoogleOidcOptions): Promise<Oid
     new URL(issuer),
     options?.clientId ?? env.GOOGLE_CLIENT_ID,
     undefined,
-    options?.clientAuth ?? ClientSecretPost(options?.clientSecret ?? env.GOOGLE_CLIENT_SECRET),
+    options?.clientAuth ??
+      (options?.clientSecret
+        ? ClientSecretPost(options.clientSecret)
+        : (_server, _client, body) => {
+            body.set('client_secret', env.GOOGLE_CLIENT_SECRET);
+          }),
   );
   config.timeout = 10;
   return new OpenIdClient(config);

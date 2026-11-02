@@ -43,6 +43,7 @@ const envSchema = z
     PUSH_PROVIDER: z.enum(['fcm', 'console']),
     FCM_SERVICE_ACCOUNT_JSON: optionalText,
     TURNSTILE_SECRET_KEY: z.string().min(1),
+    TURNSTILE_SITE_KEY: optionalText,
     POSTHOG_API_KEY: optionalText,
     POSTHOG_HOST: z.url().default('https://us.i.posthog.com'),
     SENTRY_DSN: optionalText,
@@ -173,4 +174,14 @@ export function loadEnv(
   return Object.freeze(parsed.env);
 }
 
-export const env: Env = loadEnv(process.env);
+export let env: Env = loadEnv(process.env);
+
+/** Replace the process configuration after a Super Admin saves integration keys. */
+export function installEnv(source: EnvSource): Env {
+  const parsed = parseEnv(source);
+  if (!parsed.ok) {
+    throw new Error(`Invalid environment configuration. Invalid keys: ${parsed.keys.join(', ')}`);
+  }
+  env = parsed.env;
+  return env;
+}

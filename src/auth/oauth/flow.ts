@@ -16,7 +16,7 @@ export interface OAuthFlowOptions {
   client: OidcClient;
   provider: 'GOOGLE' | 'APPLE';
   issuer: string;
-  audience: string;
+  audience: string | (() => string);
   scope: string;
   responseMode?: 'form_post';
   hostedDomain?: string;
@@ -84,7 +84,7 @@ export class OAuthCodeFlow {
     const now = this.clock.now();
     assertIdClaims(exchanged.claims, {
       issuer: this.options.issuer,
-      audience: this.options.audience,
+      audience: typeof this.options.audience === 'function' ? this.options.audience() : this.options.audience,
       nonce: input.expectedNonce,
       now,
     });

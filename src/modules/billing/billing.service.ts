@@ -15,6 +15,11 @@ import type { BillingProvider } from './billing.provider.js';
 import type { BillingRepo, PlanRecord, SubscriptionRecord } from './billing.ports.js';
 import { isEntitledStatus } from './entitlements.service.js';
 
+function siteOrigin(value: string | (() => string)): string {
+  const raw = typeof value === 'function' ? value() : value;
+  return raw.replace(/\/$/, '');
+}
+
 const SUBSCRIPTION_EVENTS = new Set([
   'customer.subscription.created',
   'customer.subscription.updated',
@@ -57,7 +62,7 @@ export interface BillingJobQueue {
 export interface BillingDeps {
   repo: BillingRepo;
   provider: BillingProvider;
-  publicWebUrl: string;
+  publicWebUrl: string | (() => string);
   queue?: BillingJobQueue;
 }
 
@@ -114,7 +119,7 @@ export class BillingService {
     const user = await this.deps.repo.findUser(userId);
     if (!user) throw new NotFoundError();
     const customer = await this.customerFor(user.id, user.email);
-    const base = this.deps.publicWebUrl.replace(/\/$/, '');
+    const base = siteOrigin(this.deps.publicWebUrl);
     try {
       return await this.deps.provider.createCheckoutSession({
         stripeCustomerId: customer.stripeCustomerId,
@@ -136,7 +141,7 @@ export class BillingService {
     const userId = ctx.authz.requireResident({ active: true });
     const customer = await this.deps.repo.findCustomer(userId);
     if (!customer) throw new NoBillingAccountError();
-    const base = this.deps.publicWebUrl.replace(/\/$/, '');
+    const base = siteOrigin(this.deps.publicWebUrl);
     try {
       return await this.deps.provider.createPortalSession({
         stripeCustomerId: customer.stripeCustomerId,

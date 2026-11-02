@@ -38,7 +38,7 @@ export type GeocoderFetch = (
 ) => Promise<GeocoderHttpResponse>;
 
 export interface GoogleGeocoderDeps {
-  apiKey: string;
+  apiKey: string | (() => string);
   fetch: GeocoderFetch;
   clock?: Clock;
   random?: RandomSource;
@@ -154,7 +154,8 @@ export class GoogleGeocoder implements Geocoder {
   private endpoint(params: { address?: string; latlng?: string }): string {
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('components', 'country:US');
-    url.searchParams.set('key', this.deps.apiKey);
+    const apiKey = typeof this.deps.apiKey === 'function' ? this.deps.apiKey() : this.deps.apiKey;
+    url.searchParams.set('key', apiKey);
     if (params.address !== undefined) url.searchParams.set('address', params.address);
     if (params.latlng !== undefined) url.searchParams.set('latlng', params.latlng);
     return url.toString();

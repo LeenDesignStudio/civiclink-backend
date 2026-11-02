@@ -11,6 +11,7 @@ import type { LocationsService } from '../modules/locations/locations.service.js
 import type { LookupService } from '../modules/lookup/lookup.service.js';
 import type { NotificationsService } from '../modules/notifications/notifications.service.js';
 import type { ResidentsService } from '../modules/residents/residents.service.js';
+import type { IntegrationSettingsService } from '../modules/integrations/integrations.service.js';
 import type { SourcesService } from '../modules/sources/sources.service.js';
 
 export interface AppServices {
@@ -28,4 +29,5 @@ export interface AppServices {
   contact: ContactService;
   sources: SourcesService;
   adminRead: AdminReadService;
+  integrations: IntegrationSettingsService;
 }

@@ -55,6 +55,7 @@ certification (government-grade compliance is excluded by SOW A20). Implementati
 | OAuth cookie, signed links | AES-256-GCM (`COOKIE_ENC_KEY`, 32 bytes) and HMAC-SHA256 (`LINK_SIGNING_SECRET`) |
 | IP hashing | HMAC-SHA256 with `IP_HASH_SECRET` |
 | Refresh / admin session tokens | 32 random bytes, stored as SHA-256 |
+| Provider keys | Super Admin only (`admin.users:manage`). The change log stores key names, never the values. The settings query returns the values only to that role |
 
 ## 4. Pre-release security checklist (run at M3 and M4)
 

@@ -16,6 +16,7 @@ import '../modules/corrections/corrections.graphql.js';
 import '../modules/notifications/notifications.graphql.js';
 import '../modules/alerts/alerts.graphql.js';
 import '../modules/sources/sources.graphql.js';
+import '../modules/integrations/integrations.graphql.js';
 
 const publicScope = { public: true };
 

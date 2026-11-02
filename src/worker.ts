@@ -1,3 +1,4 @@
+import './config/load-integration-env.js';
 import { pathToFileURL } from 'node:url';
 import { AdminAuthRepo } from './auth/admin-auth.repo.js';
 import { env } from './config/env.js';
