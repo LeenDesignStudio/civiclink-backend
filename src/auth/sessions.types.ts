@@ -31,6 +31,7 @@ export interface NewSession {
 export interface SessionStore {
   insert(session: NewSession): Promise<StoredSession>;
   findByHash(hash: string): Promise<StoredSession | null>;
+  findById(id: string): Promise<StoredSession | null>;
   rotate(previousId: string, rotatedAt: Date, next: NewSession): Promise<StoredSession>;
   revokeFamily(familyId: string, at: Date): Promise<void>;
   revokeById(id: string, at: Date): Promise<void>;

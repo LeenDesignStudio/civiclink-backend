@@ -20,6 +20,10 @@ class MemorySessions implements SessionStore {
     return Promise.resolve(this.rows.find((row) => row.refreshTokenHash === hash) ?? null);
   }
 
+  findById(id: string): Promise<StoredSession | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
   rotate(previousId: string, rotatedAt: Date, next: NewSession): Promise<StoredSession> {
     const previous = this.rows.find((row) => row.id === previousId);
     if (previous) previous.rotatedAt = rotatedAt;
@@ -95,6 +99,15 @@ describe('resident sessions', () => {
     store.setStatus('user-1', 'DELETED');
     await expect(sessions.rotate(created.refreshToken)).rejects.toBeInstanceOf(AccountDeletedError);
     expect(store.rows.every((row) => row.revokedAt)).toBe(true);
+  });
+
+  it('accepts the access cookie only for the current session', async () => {
+    const { sessions } = setup();
+    const created = await sessions.create({ userId: 'user-1' });
+    await expect(sessions.isAccessSession(created.sessionId, created.userId)).resolves.toBe(true);
+    const next = await sessions.rotate(created.refreshToken);
+    await expect(sessions.isAccessSession(created.sessionId, created.userId)).resolves.toBe(false);
+    await expect(sessions.isAccessSession(next.sessionId, next.userId)).resolves.toBe(true);
   });
 
   it('blocks refresh while deletion is pending', async () => {

@@ -29,7 +29,13 @@ export async function start(): Promise<void> {
   const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 2 });
   const app = await buildServer({
     services: container.services,
-    resolvePrincipal: createRequestPrincipal({ adminAuth: container.adminAuth }),
+    resolvePrincipal: createRequestPrincipal({
+      adminAuth: container.adminAuth,
+      residents: {
+        isAccessSession: (sessionId, userId) => container.sessions.isAccessSession(sessionId, userId),
+        accessState: (userId) => container.services.residents.accessState(userId),
+      },
+    }),
     rateGate: createPostgresRateGate(pool),
     readiness: {
       isShuttingDown: () => shuttingDown,

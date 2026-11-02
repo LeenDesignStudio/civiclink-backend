@@ -64,6 +64,11 @@ export class SessionRepo implements SessionStore {
     return row ? mapSession(row) : null;
   }
 
+  async findById(id: string): Promise<StoredSession | null> {
+    const row = await dbCall(() => this.db.userSession.findUnique({ where: { id }, select: sessionSelect }));
+    return row ? mapSession(row) : null;
+  }
+
   async rotate(previousId: string, rotatedAt: Date, next: NewSession): Promise<StoredSession> {
     const write = async (tx: Db): Promise<StoredSession> => {
       await tx.userSession.update({ where: { id: previousId }, data: { rotatedAt } });

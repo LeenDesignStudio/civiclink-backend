@@ -102,6 +102,15 @@ export class SessionService {
     return this.deps.store.countActive(userId, this.clock.now());
   }
 
+  /** The access cookie is usable only while its session row is still the current one. */
+  async isAccessSession(sessionId: string, userId: string): Promise<boolean> {
+    const row = await this.deps.store.findById(sessionId);
+    if (!row || row.userId !== userId) return false;
+    if (row.revokedAt || row.rotatedAt) return false;
+    if (row.expiresAt.getTime() <= this.clock.now().getTime()) return false;
+    return row.userStatus !== 'DELETED';
+  }
+
   private issued(
     refreshToken: string,
     session: { id: string; familyId: string; userId: string; expiresAt: Date },

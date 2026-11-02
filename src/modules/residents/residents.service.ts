@@ -128,6 +128,12 @@ export class ResidentsService {
     });
   }
 
+  async accessState(userId: string): Promise<{ status: ResidentRecord['status']; termsAccepted: boolean } | null> {
+    const user = await this.deps.store.getById(undefined, userId);
+    if (!user || user.status === 'DELETED') return null;
+    return { status: user.status, termsAccepted: await this.termsAreCurrent(user) };
+  }
+
   async termsAreCurrent(user: ResidentRecord): Promise<boolean> {
     const legal = await this.deps.store.currentLegal();
     if (!legal) return false;

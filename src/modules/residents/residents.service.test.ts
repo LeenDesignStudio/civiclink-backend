@@ -29,6 +29,9 @@ class MemorySessions implements SessionStore {
   findByHash(): Promise<StoredSession | null> {
     return Promise.resolve(null);
   }
+  findById(): Promise<StoredSession | null> {
+    return Promise.resolve(null);
+  }
   rotate(_previousId: string, _rotatedAt: Date, next: NewSession): Promise<StoredSession> {
     return Promise.resolve({ ...next, rotatedAt: null, revokedAt: null });
   }
