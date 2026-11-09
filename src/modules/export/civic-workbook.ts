@@ -1,4 +1,7 @@
-import { Workbook, type Worksheet } from 'exceljs';
+import { createRequire } from 'node:module';
+import type { Workbook as WorkbookType, Worksheet } from 'exceljs';
+
+const { Workbook } = createRequire(import.meta.url)('exceljs') as { Workbook: new () => WorkbookType };
 import { computeFreshness, renderWhyItApplies } from '../civic/civic.service.js';
 import { GOV_LEVELS, type GovLevel, type JurisdictionType } from '../civic/civic.dto.js';
 import type { FreshnessOverride } from '../civic/civic.dto.js';
@@ -243,7 +246,7 @@ export function exportFileName(now: Date): string {
   return `civic-data-${now.toISOString().slice(0, 10)}.xlsx`;
 }
 
-export function buildCivicWorkbook(data: CivicExport): Workbook {
+export function buildCivicWorkbook(data: CivicExport): WorkbookType {
   const book = new Workbook();
   book.creator = 'CivicLink';
   book.created = data.generatedAt;
@@ -260,7 +263,7 @@ export function buildCivicWorkbook(data: CivicExport): Workbook {
   return book;
 }
 
-export function sheetRowCounts(book: Workbook): Array<{ sheet: string; rows: number }> {
+export function sheetRowCounts(book: WorkbookType): Array<{ sheet: string; rows: number }> {
   return book.worksheets.map((sheet) => ({ sheet: sheet.name, rows: Math.max(sheet.rowCount - 1, 0) }));
 }
 
@@ -894,7 +897,7 @@ function sourceRow(row: ExportSource): Array<string | number> {
 }
 
 function addTable(
-  book: Workbook,
+  book: WorkbookType,
   name: string,
   headers: readonly string[],
   rows: Array<Array<string | number>>,
