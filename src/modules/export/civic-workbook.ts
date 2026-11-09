@@ -56,8 +56,6 @@ export interface ExportJurisdiction {
   level: GovLevel;
   type: JurisdictionType;
   subtype: string | null;
-  parentId: string | null;
-  parentName: string | null;
   districtCode: string | null;
   geoid: string | null;
   state: string | null;
@@ -126,6 +124,9 @@ export interface ExportOfficial {
   party: string | null;
   photoUrl: string | null;
   website: string | null;
+  firstElectedYear: number | null;
+  termEnd: Date | null;
+  electedYear: number | null;
   externalIds: unknown;
   useOfficeAddress: boolean;
   sourceId: string;
@@ -155,6 +156,7 @@ export interface ExportTerm {
   status: string;
   termStart: Date | null;
   termEnd: Date | null;
+  electedYear: number | null;
   isCurrent: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -204,7 +206,6 @@ const CARD_HEADERS = [
   'jurisdiction displayId',
   'jurisdiction name',
   'level',
-  'parent name',
   'district/seat ID',
   'office displayId',
   'office name',
@@ -212,6 +213,7 @@ const CARD_HEADERS = [
   'official displayId',
   'official name',
   'official title',
+  'photo',
   'term start',
   'term end',
   'phone',
@@ -241,6 +243,7 @@ const COVERAGE_FIELDS = [
   'last updated',
   'freshness',
   'why it applies',
+  'photo',
 ] as const;
 
 export function parseExportArgs(argv: string[]): ExportArgs {
@@ -360,11 +363,11 @@ function readmeRows(data: CivicExport): string[][] {
     ],
     [
       'Civic_Card_Rows',
-      'One row per office, joined the way a resident Civic Card shows that office: place, parent, district or seat, office, current official, term dates, phone, email, website, contact page, office address, source, last updated, freshness, why it applies, and status. An office with no current term has VACANT in the official columns. Why it applies is the office template, or the default sentence for that kind of place, filled as it would be for an exact match on that place.',
+      'One row per office, joined the way a resident Civic Card shows that office. Cards are grouped by government level, not by a parent jurisdiction. Columns are place, district or seat, office, current official, photo, term dates, phone, email, website, contact page, office address, source, last updated, freshness, why it applies, and status. An office with no current term has VACANT in the official columns. Why it applies is the office template, or the default sentence for that kind of place, filled as it would be for an exact match on that place.',
     ],
     [
       'Jurisdictions',
-      'Every column of the jurisdictions table. parentId is paired with the parent name. sourceId is paired with the source name. boundary is present or missing.',
+      'Jurisdictions, without a parent column. Group and filter by level and state. sourceId is paired with the source name. boundary is present or missing.',
     ],
     [
       'Offices',
@@ -372,11 +375,11 @@ function readmeRows(data: CivicExport): string[][] {
     ],
     [
       'Officials',
-      'Every column of the officials table. sourceId is paired with the source name. Title is stored as display name. This sheet has no resident account, follow, or notification fields.',
+      'Officials, including photo URL, first elected year, and the current term end and elected year when a current term exists. A missing year means the source did not publish a start date. sourceId is paired with the source name.',
     ],
     [
       'Terms',
-      'Every column of the office terms table. officeId is paired with the office name and display ID. officialId is paired with the official name and display ID. isCurrent marks the holder.',
+      'Office terms, including term end and elected year. elected year is the year this person first took that office in the current continuous run. A blank year means no start date was published. isCurrent marks the holder.',
     ],
     [
       'Sources',
@@ -384,7 +387,7 @@ function readmeRows(data: CivicExport): string[][] {
     ],
     [
       'Field_Coverage',
-      'For each field the Civic Card must show (SOW A7): total offices, how many have that field filled, and the filled percent. The same counts are repeated by government level and by source. An empty official name, title, phone, email, website and contact page, address, district, or why-it-applies sentence counts as not filled. Vacant offices count as missing the person fields.',
+      'For each field the Civic Card must show (SOW A7), plus photo: total offices, how many have that field filled, and the filled percent. Photo is filled when the current official has a photo URL. The same counts are repeated by government level and by source. Vacant offices count as missing the person fields and the photo.',
     ],
     [
       'Problems',
@@ -426,7 +429,6 @@ function civicCardRows(data: CivicExport): string[][] {
       place?.displayId ?? '',
       values.jurisdictionName,
       values.level,
-      place?.parentName ?? '',
       values.district,
       office.displayId,
       values.officeName,
@@ -434,6 +436,7 @@ function civicCardRows(data: CivicExport): string[][] {
       vacant ? VACANT : person.displayId,
       vacant ? VACANT : values.officialName,
       vacant ? VACANT : values.title,
+      vacant ? '' : text(person.photoUrl),
       term ? day(term.termStart) : '',
       term ? day(term.termEnd) : '',
       values.phone,
@@ -511,9 +514,11 @@ function cardValues(
 }
 
 function coverageRows(data: CivicExport, cards: string[][]): Array<Array<string | number>> {
+  const levelAt = CARD_HEADERS.indexOf('level');
+  const sourceAt = CARD_HEADERS.indexOf('source name');
   const prepared = data.offices.map((office, index) => ({
-    level: cards[index]?.[2] ?? '',
-    source: text(cards[index]?.[18]) || '(no source)',
+    level: cards[index]?.[levelAt] ?? '',
+    source: text(cards[index]?.[sourceAt]) || '(no source)',
     card: cards[index] ?? [],
   }));
   const groups: Array<{ scope: string; group: string; rows: string[][] }> = [
@@ -544,21 +549,26 @@ function coverageRows(data: CivicExport, cards: string[][]): Array<Array<string 
   return out;
 }
 
+function cardColumn(row: string[], header: (typeof CARD_HEADERS)[number]): string {
+  return row[CARD_HEADERS.indexOf(header)] ?? '';
+}
+
 function fieldFilled(field: (typeof COVERAGE_FIELDS)[number], row: string[]): boolean {
-  const at = (index: number) => filled(row[index] ?? '');
-  if (field === 'official name') return at(9);
-  if (field === 'title') return at(10);
-  if (field === 'office') return at(6);
-  if (field === 'jurisdiction') return at(1);
-  if (field === 'district') return at(4);
-  if (field === 'phone') return at(13);
-  if (field === 'email') return at(14);
-  if (field === 'website/contact page') return at(15) || at(16);
-  if (field === 'office address') return at(17);
-  if (field === 'source') return at(18);
-  if (field === 'last updated') return at(20);
-  if (field === 'freshness') return at(21);
-  return at(22);
+  const at = (header: (typeof CARD_HEADERS)[number]) => filled(cardColumn(row, header));
+  if (field === 'official name') return at('official name');
+  if (field === 'title') return at('official title');
+  if (field === 'office') return at('office name');
+  if (field === 'jurisdiction') return at('jurisdiction name');
+  if (field === 'district') return at('district/seat ID');
+  if (field === 'phone') return at('phone');
+  if (field === 'email') return at('email');
+  if (field === 'website/contact page') return at('website') || at('contact page');
+  if (field === 'office address') return at('office address');
+  if (field === 'source') return at('source name');
+  if (field === 'last updated') return at('last updated');
+  if (field === 'freshness') return at('freshness');
+  if (field === 'photo') return at('photo');
+  return at('why it applies');
 }
 
 function filled(value: string): boolean {
@@ -702,8 +712,6 @@ const JURISDICTION_HEADERS = [
   'level',
   'type',
   'subtype',
-  'parentId',
-  'parentName',
   'districtCode',
   'geoid',
   'state',
@@ -738,8 +746,6 @@ function jurisdictionRow(row: ExportJurisdiction): string[] {
     row.level,
     row.type,
     text(row.subtype),
-    text(row.parentId),
-    text(row.parentName),
     text(row.districtCode),
     text(row.geoid),
     text(row.state),
@@ -844,6 +850,9 @@ const OFFICIAL_HEADERS = [
   'party',
   'photoUrl',
   'website',
+  'firstElectedYear',
+  'termEnd',
+  'electedYear',
   'externalIds',
   'useOfficeAddress',
   'sourceId',
@@ -872,6 +881,9 @@ function officialRow(row: ExportOfficial): string[] {
     text(row.party),
     text(row.photoUrl),
     text(row.website),
+    row.firstElectedYear === null ? '' : String(row.firstElectedYear),
+    day(row.termEnd),
+    row.electedYear === null ? '' : String(row.electedYear),
     jsonText(row.externalIds),
     yesNo(row.useOfficeAddress),
     row.sourceId,
@@ -902,6 +914,7 @@ const TERM_HEADERS = [
   'status',
   'termStart',
   'termEnd',
+  'electedYear',
   'isCurrent',
   'createdAt',
   'updatedAt',
@@ -919,6 +932,7 @@ function termRow(row: ExportTerm): string[] {
     row.status,
     day(row.termStart),
     day(row.termEnd),
+    row.electedYear === null ? '' : String(row.electedYear),
     yesNo(row.isCurrent),
     stamp(row.createdAt),
     stamp(row.updatedAt),

@@ -202,7 +202,6 @@ export const upsertJurisdictionSchema = z
     level: z.enum(GOV_LEVELS),
     type: z.enum(JURISDICTION_TYPES),
     subtype: optionalText(80),
-    parentId: z.uuid().nullish().transform((value) => value ?? null),
     districtCode: optionalText(40),
     geoid: optionalText(40),
     state: z
@@ -231,7 +230,6 @@ export interface UpsertJurisdictionInput {
   level: GovLevel;
   type: JurisdictionType;
   subtype: string | null;
-  parentId: string | null;
   districtCode: string | null;
   geoid: string | null;
   state: string | null;
@@ -254,7 +252,6 @@ export function parseUpsertJurisdiction(input: unknown): UpsertJurisdictionInput
     level: value.level,
     type: value.type,
     subtype: value.subtype,
-    parentId: value.parentId,
     districtCode: value.districtCode,
     geoid: value.geoid,
     state: value.state,
@@ -593,7 +590,6 @@ export const adminJurisdictionListSchema = z
         type: z.enum(JURISDICTION_TYPES).optional(),
         state: z.string().regex(/^[A-Z]{2}$/).optional(),
         status: recordStatus.optional(),
-        parentId: z.uuid().optional(),
         isPilot: z.boolean().optional(),
         boundary: z.enum(['OK', 'MISSING']).optional(),
         freshness: freshness.optional(),
@@ -640,6 +636,8 @@ export const adminOfficialListSchema = z
         officeId: z.uuid().optional(),
         freshness: freshness.optional(),
         noCurrentOffice: z.boolean().optional(),
+        termEndingBefore: z.union([z.date(), z.string().refine((value) => !Number.isNaN(Date.parse(value)))]).optional(),
+        electedYear: z.number().int().min(1700).max(2200).optional(),
         q: searchText.optional(),
       })
       .strict()

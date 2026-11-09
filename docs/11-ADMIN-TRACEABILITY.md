@@ -25,7 +25,7 @@ Integration tests exist for civic admin and admin read. They need Docker (Postgr
 | 8 Unlink an official from an office | none — a term is ended, not unlinked | — | partial |
 | 9 Officials list, tiles, create/edit, retire, term | `adminOfficials`, `adminOfficial`, `adminOfficialTiles`, `upsertOfficial`, `setOfficeTerm`, `retireOfficial`, `restoreOfficial` | `civic.service.test.ts`, `civic-admin.int.test.ts` | done |
 | 9 Official phone, email, and own address | none — the official uses the office address (`useOfficeAddress`) | — | partial |
-| 10 Jurisdictions list, tree, create/edit | `adminJurisdictions`, `adminJurisdiction`, `adminJurisdictionTree`, `upsertJurisdiction` | `civic.service.test.ts`, `civic-admin.int.test.ts` | done |
+| 10 Jurisdictions list, create/edit | `adminJurisdictions`, `adminJurisdiction`, `upsertJurisdiction` | `civic.service.test.ts`, `civic-admin.int.test.ts` | done. No parent field and no jurisdiction tree. Filter by level and state |
 | 10 Jurisdiction tiles (27.6) | `adminJurisdictionTiles` | `src/modules/civic/civic.service.test.ts` | done |
 | 10 Retire / restore jurisdiction | `retireJurisdiction`, `restoreJurisdiction` (Super Admin) | `civic.service.test.ts` | done. Section 28 item 1 still asks QubaLink to confirm retire is in scope |
 | 10 Draw or upload a boundary | none — geometry is collector-owned (`docs/02` section 4) | — | done (intentionally absent) |

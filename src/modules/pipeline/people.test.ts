@@ -46,6 +46,8 @@ describe('congress and open states fixtures', () => {
     expect(records[0]?.fields.jurisdictionGeoid).toBe('24');
     expect(records[0]?.fields.officeKey).toBe('seat:senate:24:S000001');
     expect(records[0]?.matchKey).toBe('bioguide:S000001');
+    expect(records[0]?.fields.photoUrl).toBe('https://theunitedstates.io/images/congress/225x275/S000001.jpg');
+    expect(records[0]?.fields.termStart).toBeUndefined();
   });
 
   it('places a representative on the Census congressional district', async () => {
@@ -55,6 +57,18 @@ describe('congress and open states fixtures', () => {
   name:
     official_full: Rita House
   terms:
+  - type: rep
+    state: MD
+    district: 8
+    party: Democratic
+    start: '2013-01-03'
+    end: '2015-01-03'
+  - type: rep
+    state: MD
+    district: 6
+    party: Democratic
+    start: '2015-01-03'
+    end: '2025-01-03'
   - type: rep
     state: MD
     district: 8
@@ -83,6 +97,10 @@ describe('congress and open states fixtures', () => {
     expect(row?.fields.phone).toBe('202-225-0008');
     expect(row?.fields.address).toBe('101 Independence Ave Washington DC 20515');
     expect(row?.fields.contactUrl).toBe('https://house.example.gov/contact');
+    expect(row?.fields.photoUrl).toBe('https://theunitedstates.io/images/congress/225x275/R000008.jpg');
+    const history = JSON.parse(row?.fields.termsJson ?? '[]') as Array<{ start: string | null; officeKey: string }>;
+    expect(history.map((term) => term.start)).toEqual(['2013-01-03', '2015-01-03', '2025-01-03']);
+    expect(history.map((term) => term.officeKey)).toEqual(['seat:cd:2408', 'seat:cd:2406', 'seat:cd:2408']);
   });
 
   it('reads the Open States CSV for the requested state', async () => {
@@ -98,6 +116,9 @@ describe('congress and open states fixtures', () => {
       maxBytes: 100_000,
       fetch: {
         get: (url) => {
+          if (url.includes('github.com')) {
+            return Promise.resolve({ status: 404, body: new Uint8Array(), contentType: 'application/json' });
+          }
           expect(url).toBe('https://data.openstates.org/people/current/md.csv');
           return Promise.resolve({ status: 200, body: new TextEncoder().encode(csv), contentType: 'text/csv' });
         },
@@ -174,5 +195,70 @@ describe('congress and open states fixtures', () => {
     expect(row?.fields.contactEmail).toBeUndefined();
     expect(row?.fields.emailReview).toBe('tim.czmowski@example.gov');
     expect(row?.fields.jurisdictionGeoid).toBe('24014');
+  });
+
+  it('uses Open States role dates and leaves a missing date empty', async () => {
+    const csvBody =
+      'id,name,current_chamber,current_district,state\n' +
+      'ocd-person/md-14,Ada Lovelace,upper,14,MD\n' +
+      'ocd-person/md-15,No Dates,upper,15,MD\n';
+    const dated = `id: ocd-person/md-14
+roles:
+- type: upper
+  district: '14'
+  start_date: 2019-01-09
+  end_date: 2023-01-10
+- type: upper
+  district: '14'
+  start_date: 2023-01-11
+  end_date: 2027-01-13
+`;
+    const undated = `id: ocd-person/md-15
+roles:
+- type: upper
+  district: '15'
+  start_date: unknown
+`;
+    const snap = await openStatesCollector.fetch({
+      source: source({
+        collectorKey: 'openstates.people',
+        url: 'https://data.openstates.org/people/current/',
+        config: { state: 'MD' },
+      }),
+      maxBytes: 100_000,
+      fetch: {
+        get: (url) => {
+          if (url.endsWith('/md.csv')) {
+            return Promise.resolve({ status: 200, body: new TextEncoder().encode(csvBody), contentType: 'text/csv' });
+          }
+          if (url.includes('api.github.com')) {
+            const listing = JSON.stringify([
+              {
+                type: 'file',
+                name: 'ada.yml',
+                download_url: 'https://raw.githubusercontent.com/openstates/people/main/data/md/legislature/ada.yml',
+              },
+              {
+                type: 'file',
+                name: 'none.yml',
+                download_url: 'https://raw.githubusercontent.com/openstates/people/main/data/md/legislature/none.yml',
+              },
+            ]);
+            return Promise.resolve({ status: 200, body: new TextEncoder().encode(listing), contentType: 'application/json' });
+          }
+          const body = url.endsWith('ada.yml') ? dated : undated;
+          return Promise.resolve({ status: 200, body: new TextEncoder().encode(body), contentType: 'text/yaml' });
+        },
+      },
+    });
+    const records = openStatesCollector.normalise(snap);
+    const ada = records.find((row) => row.fields.fullName === 'Ada Lovelace');
+    expect(ada?.fields.termStart).toBe('2023-01-11');
+    expect(ada?.fields.termEnd).toBe('2027-01-13');
+    const history = JSON.parse(ada?.fields.termsJson ?? '[]') as Array<{ start: string | null }>;
+    expect(history.map((term) => term.start)).toEqual(['2019-01-09', '2023-01-11']);
+    const blank = records.find((row) => row.fields.fullName === 'No Dates');
+    expect(blank?.fields.termStart).toBeUndefined();
+    expect(blank?.fields.termsJson).toBeUndefined();
   });
 });

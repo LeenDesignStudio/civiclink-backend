@@ -26,7 +26,18 @@ import {
   type Selector,
   type SourceConfig,
 } from './types.js';
+import { congressPhotoUrl } from './photos.js';
+import {
+  encodePeopleEnvelope,
+  parsePersonYaml,
+  personById,
+  readPeopleEnvelope,
+  rolesForSeat,
+  type PersonFile,
+  type PersonRole,
+} from './openstates-yaml.js';
 import { chamberKind, seatFields } from './seats.js';
+import { historyJson, type HistoryTerm } from './term-years.js';
 
 const snapshotConfigs = new WeakMap<RawSnapshot, SourceConfig>();
 const tigerPrepared = new WeakMap<RawSnapshot, NormalisedRecord[]>();
@@ -184,6 +195,33 @@ export const congressCollector: Collector = {
       const latest = objectOf(terms[terms.length - 1]);
       const state = stringOf(latest.state);
       if (want && state?.toUpperCase() !== want) continue;
+      const history: HistoryTerm[] = [];
+      for (const term of terms) {
+        const itemTerm = objectOf(term);
+        const seated = seatFields({
+          state: stringOf(itemTerm.state),
+          kind: chamberKind(stringOf(itemTerm.type)),
+          district: stringOf(itemTerm.district),
+          senateClass: stringOf(itemTerm.class),
+          stateRank: stringOf(itemTerm.state_rank),
+          personKey: bioguide,
+          start: stringOf(itemTerm.start),
+          end: stringOf(itemTerm.end),
+          email: null,
+          photoUrl: null,
+          website: null,
+        });
+        if (!seated.officeKey || !seated.jurisdictionType || !seated.jurisdictionGeoid) continue;
+        history.push({
+          officeKey: seated.officeKey,
+          officeName: seated.officeName ?? 'Office',
+          jurisdictionType: seated.jurisdictionType,
+          jurisdictionGeoid: seated.jurisdictionGeoid,
+          seatLabel: seated.seatLabel ?? null,
+          start: seated.termStart ?? null,
+          end: seated.termEnd ?? null,
+        });
+      }
       const seat = seatFields({
         state,
         kind: chamberKind(stringOf(latest.type)),
@@ -194,12 +232,13 @@ export const congressCollector: Collector = {
         start: stringOf(latest.start),
         end: stringOf(latest.end),
         email: null,
-        photoUrl: null,
+        photoUrl: congressPhotoUrl(bioguide),
         website: stringOf(latest.url),
         phone: stringOf(latest.phone),
         address: stringOf(latest.address),
         contactForm: stringOf(latest.contact_form),
       });
+      const past = historyJson(history);
       records.push({
         matchKey: `bioguide:${bioguide}`,
         entityType: 'OFFICIAL',
@@ -208,6 +247,7 @@ export const congressCollector: Collector = {
           party: stringOf(latest.party),
           state,
           ...seat,
+          ...(past ? { termsJson: past } : {}),
         },
       });
     }
@@ -215,18 +255,25 @@ export const congressCollector: Collector = {
   },
 };
 
+const OPENSTATES_YAML_CAP = 500;
+const OPENSTATES_YAML_BYTES = 200_000;
+
 export const openStatesCollector: Collector = {
   key: 'openstates.people',
   async fetch(ctx) {
     const response = await load(ctx, openStatesUrl(ctx.source.config, ctx.source.url));
-    const snap = snapshotFrom(response.body, 'text/csv');
+    const people = await loadOpenStatesYaml(ctx);
+    const body = people.length > 0 ? encodePeopleEnvelope(decoder.decode(response.body), people) : response.body;
+    const snap = snapshotFrom(body, people.length > 0 ? 'application/json' : 'text/csv');
     snapshotConfigs.set(snap, ctx.source.config);
     return snap;
   },
   normalise(raw) {
     const want = snapshotConfigs.get(raw)?.state?.toUpperCase();
+    const envelope = readPeopleEnvelope(raw.body);
+    const people = personById(envelope.people);
     const records: NormalisedRecord[] = [];
-    for (const row of parseCsv(decoder.decode(raw.body))) {
+    for (const row of parseCsv(envelope.csv)) {
       const id = row.id ?? row.openstates_id;
       const fullName = row.name ?? row.full_name;
       if (!id || !fullName) continue;
@@ -234,15 +281,18 @@ export const openStatesCollector: Collector = {
       if (want && stateColumn && stateColumn.toUpperCase() !== want) continue;
       const state = stateColumn ?? want ?? null;
       const reviewed = reviewEmail(row.email ?? null, fullName);
+      const chamber = chamberKind(row.current_chamber ?? row.chamber ?? null);
+      const district = row.current_district ?? row.district ?? null;
+      const dated = rolesForSeat(people.get(id), chamber, district);
       const seat = seatFields({
         state,
-        kind: chamberKind(row.current_chamber ?? row.chamber ?? null),
-        district: row.current_district ?? row.district ?? null,
+        kind: chamber,
+        district,
         senateClass: null,
         stateRank: null,
         personKey: id,
-        start: null,
-        end: null,
+        start: dated.current?.start ?? null,
+        end: dated.current?.end ?? null,
         email: reviewed.publish,
         photoUrl: row.image ?? null,
         website: firstHttps(row.links ?? null),
@@ -250,6 +300,9 @@ export const openStatesCollector: Collector = {
         capitolAddress: row.capitol_address ?? null,
         districtAddress: row.district_address ?? null,
       });
+      const past = historyJson(
+        openStatesHistory(state, id, chamber, dated.current ? [...dated.earlier, dated.current] : dated.earlier),
+      );
       records.push({
         matchKey: `openstates:${id}`,
         entityType: 'OFFICIAL',
@@ -258,6 +311,7 @@ export const openStatesCollector: Collector = {
           party: row.party ?? row.current_party ?? null,
           state,
           ...seat,
+          ...(past ? { termsJson: past } : {}),
           ...(reviewed.review ? { emailReview: reviewed.review } : {}),
         },
       });
@@ -265,6 +319,93 @@ export const openStatesCollector: Collector = {
     return records;
   },
 };
+
+function openStatesHistory(
+  state: string | null,
+  personKey: string,
+  chamber: ReturnType<typeof chamberKind>,
+  roles: PersonRole[],
+): HistoryTerm[] {
+  if (!state || !chamber) return [];
+  const terms: HistoryTerm[] = [];
+  for (const role of roles) {
+    const seated = seatFields({
+      state,
+      kind: chamber,
+      district: role.district,
+      senateClass: null,
+      stateRank: null,
+      personKey,
+      start: role.start,
+      end: role.end,
+      email: null,
+      photoUrl: null,
+      website: null,
+    });
+    if (!seated.officeKey || !seated.jurisdictionType || !seated.jurisdictionGeoid) continue;
+    terms.push({
+      officeKey: seated.officeKey,
+      officeName: seated.officeName ?? 'Office',
+      jurisdictionType: seated.jurisdictionType,
+      jurisdictionGeoid: seated.jurisdictionGeoid,
+      seatLabel: seated.seatLabel ?? null,
+      start: seated.termStart ?? null,
+      end: seated.termEnd ?? null,
+    });
+  }
+  return terms;
+}
+
+async function loadOpenStatesYaml(ctx: CollectorContext): Promise<PersonFile[]> {
+  const state = ctx.source.config.state?.trim().toLowerCase();
+  if (!state || !/^[a-z]{2}$/.test(state)) return [];
+  const listUrl = `https://api.github.com/repos/openstates/people/contents/data/${state}/legislature?ref=main`;
+  let listing: HttpResult;
+  try {
+    listing = await load(ctx, listUrl, 30_000);
+  } catch {
+    return [];
+  }
+  if (listing.status !== 200) return [];
+  const files = yamlDownloadUrls(listing.body).slice(0, OPENSTATES_YAML_CAP);
+  const people: PersonFile[] = [];
+  for (const url of files) {
+    if (ctx.pace) await ctx.pace.wait();
+    let file: HttpResult;
+    try {
+      file = await ctx.fetch.get(url, {
+        maxBytes: OPENSTATES_YAML_BYTES,
+        timeoutMs: 30_000,
+        headers: { 'user-agent': ctx.userAgent ?? USER_AGENT, accept: 'text/yaml' },
+      });
+    } catch {
+      continue;
+    }
+    if (file.status !== 200 || file.body.byteLength > OPENSTATES_YAML_BYTES) continue;
+    const parsed = parsePersonYaml(decoder.decode(file.body));
+    if (parsed) people.push(parsed);
+  }
+  return people;
+}
+
+function yamlDownloadUrls(body: Uint8Array): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoder.decode(body));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const urls: string[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { type?: unknown; name?: unknown; download_url?: unknown };
+    if (row.type !== 'file' || typeof row.name !== 'string' || !row.name.endsWith('.yml')) continue;
+    if (typeof row.download_url !== 'string' || !row.download_url.startsWith('https://')) continue;
+    urls.push(row.download_url);
+  }
+  return urls;
+}
 
 const DEFAULT_ITEM: Selector = { tag: 'article', className: 'directory-item' };
 const DEFAULT_FIELDS: Record<string, Selector> = {

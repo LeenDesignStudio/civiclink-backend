@@ -42,8 +42,6 @@ function place(overrides: Partial<ExportJurisdiction> = {}): ExportJurisdiction 
     level: 'COUNTY',
     type: 'COUNTY',
     subtype: null,
-    parentId: null,
-    parentName: 'Maryland',
     districtCode: null,
     geoid: '24031',
     state: 'MD',
@@ -129,6 +127,9 @@ function person(overrides: Partial<ExportOfficial> = {}): ExportOfficial {
     party: null,
     photoUrl: null,
     website: null,
+    firstElectedYear: null,
+    termEnd: null,
+    electedYear: null,
     externalIds: {},
     useOfficeAddress: true,
     sourceId: SOURCE,
@@ -161,6 +162,7 @@ function term(overrides: Partial<ExportTerm> = {}): ExportTerm {
     status: 'ELECTED',
     termStart: new Date('2022-12-05T00:00:00.000Z'),
     termEnd: null,
+    electedYear: 2022,
     isCurrent: true,
     createdAt: NOW,
     updatedAt: NOW,
@@ -276,13 +278,19 @@ describe('civic workbook export', () => {
       expect(sheet.getColumn(1).width).toBeGreaterThan(0);
     }
     const cards = book.getWorksheet('Civic_Card_Rows');
-    expect(cards?.getRow(2).getCell(6).value).toBe('OFF-00000001');
-    expect(cards?.getRow(2).getCell(10).value).toBe('Ada Example');
-    expect(cards?.getRow(2).getCell(18).value).toBe('Office: 101 Monroe St, Rockville, MD 20850');
-    expect(String(cards?.getRow(2).getCell(23).value)).toContain('County Executive serves Montgomery');
-    expect(cards?.getRow(4).getCell(9).value).toBe('VACANT');
-    expect(cards?.getRow(4).getCell(10).value).toBe('VACANT');
-    expect(cards?.getRow(4).getCell(11).value).toBe('VACANT');
+    const cardCell = (row: number, header: string) => {
+      const headers = cards?.getRow(1).values;
+      const index = Array.isArray(headers) ? headers.indexOf(header) : -1;
+      return cards?.getRow(row).getCell(index).value;
+    };
+    expect(cards?.getRow(1).values).not.toContain('parent name');
+    expect(cardCell(2, 'office displayId')).toBe('OFF-00000001');
+    expect(cardCell(2, 'official name')).toBe('Ada Example');
+    expect(cardCell(2, 'office address')).toBe('Office: 101 Monroe St, Rockville, MD 20850');
+    expect(String(cardCell(2, 'why it applies'))).toContain('County Executive serves Montgomery');
+    expect(cardCell(4, 'official displayId')).toBe('VACANT');
+    expect(cardCell(4, 'official name')).toBe('VACANT');
+    expect(cardCell(4, 'official title')).toBe('VACANT');
 
     const offices = book.getWorksheet('Offices');
     expect(offices?.getRow(1).getCell(4).value).toBe('jurisdictionId');

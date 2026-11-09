@@ -26,6 +26,25 @@ export async function httpGet(
   return { status: response.status, body, contentType };
 }
 
+/** Image check. A network failure is status 0 so the caller can store the photo as broken. */
+export async function httpHead(
+  url: string,
+  init: { timeoutMs: number; headers?: Record<string, string> },
+): Promise<{ status: number }> {
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      ...(init.headers ? { headers: init.headers } : {}),
+      signal: AbortSignal.timeout(init.timeoutMs),
+    });
+    await response.body?.cancel();
+    return { status: response.status };
+  } catch {
+    return { status: 0 };
+  }
+}
+
 async function readAtMost(response: Response, maxBytes: number): Promise<Uint8Array> {
   const reader = response.body?.getReader();
   if (!reader) {

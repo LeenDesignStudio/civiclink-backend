@@ -16,7 +16,7 @@ import {
   type PilotScope,
 } from '../src/modules/pipeline/cli.js';
 import { parsePilotList, pilotListFromStateCounty } from '../src/modules/pipeline/pilot-list.js';
-import { httpGet } from '../src/modules/pipeline/http.js';
+import { httpGet, httpHead } from '../src/modules/pipeline/http.js';
 import { convertTigerZip } from '../src/modules/pipeline/ogr.js';
 import { createRequestPacer } from '../src/modules/pipeline/pace.js';
 import { PipelineRepo } from '../src/modules/pipeline/pipeline.repo.js';
@@ -61,7 +61,7 @@ export async function runPilotCli(argv: string[]): Promise<void> {
 function pipelineService(): PipelineService {
   return new PipelineService({
     store: new PipelineRepo(db),
-    fetch: { get: httpGet },
+    fetch: { get: httpGet, head: httpHead },
     audit: new AuditService(new AuditRepo(db)),
     userAgent: civicLinkUserAgent(env.CONTACT_INBOX),
     pace: createRequestPacer(1000),

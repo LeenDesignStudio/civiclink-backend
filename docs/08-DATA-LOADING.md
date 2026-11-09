@@ -99,15 +99,36 @@ Order, once per listed state: `tiger.boundaries`, `congress.legislators`, `opens
 then each `page.directory` source whose config state and county match a listed county.
 Runs use the System principal and store a checksum on `source_runs.snapshot_sha`.
 
-Congress and Open States write the person, the seat, and the current term. Phone, office
-address, and contact-form URL are stored on the office, with the source and last-updated
-time. A U.S. representative is attached to the Census congressional district (`24` plus the
-two-digit district, so Maryland 8 is `2408`). A U.S. senator is attached to the state, one
-office per class. A state legislator is attached to the Census upper or lower district (`24`
-plus the three-character district). An email is stored only when the mailbox contains part of
-the person's name or is an office mailbox (`info`, `office`, `council`, and the same kind).
-Any other email is queued for review and is not shown. If that district is not loaded yet,
-the person is saved and the seat is added on the next people run. Re-running those two sources
+Congress and Open States write the person, every published term (start and end), and the
+current seat. A missing date stays null. The loader does not guess a year. `elected_year` on
+a term is the year that person first took that same office in the current continuous run.
+`first_elected_year` on the person is the earliest start of any office, when a date was
+published. Phone, office address, and contact-form URL are stored on the office, with the
+source and last-updated time. A U.S. representative is attached to the Census congressional
+district (`24` plus the two-digit district, so Maryland 8 is `2408`). A U.S. senator is
+attached to the state, one office per class. Congress stores every term from
+congress-legislators. When that file has no image, the photo URL is
+`https://theunitedstates.io/images/congress/225x275/{bioguide}.jpg` (public domain).
+
+State legislators keep contacts from the Open States CSV. Term dates come from the Open
+States people YAML (`https://github.com/openstates/people`, `data/<state>/legislature/*.yml`,
+role `start_date` / `end_date`), matched by the Open States person id. The state photo is the
+CSV `image` URL when it is https. The weekly source run sends HEAD to each photo URL and
+stores `photo_status`. A missing or broken image is stored as null. Hosts the frontend must
+allow in `next.config` `images.remotePatterns` and CSP `img-src`:
+
+- `https://theunitedstates.io` for congressional portraits
+- the https host of each Open States `image` URL (the host is whatever that column publishes; it is not one fixed CDN)
+
+Civic Cards group offices by government level. `parent_id` remains nullable in the database
+and is not cleared. The admin API, the jurisdiction tree, and the export Parent column do not
+use it. Filter and group jurisdictions by `state`.
+
+A state legislator is attached to the Census upper or lower district (`24` plus the
+three-character district). An email is stored only when the mailbox contains part of the
+person's name or is an office mailbox (`info`, `office`, `council`, and the same kind). Any
+other email is queued for review and is not shown. If that district is not loaded yet, the
+person is saved and the seat is added on the next people run. Re-running those two sources
 links existing people even when the file has not changed. Census does not need to run again.
 
 One collector:
@@ -125,7 +146,7 @@ is over 50 MB. A 404 on elementary or secondary school districts is skipped when
 not publish that layer for the state. ZIP (ZCTA) polygons are clipped to the state with GDAL
 and stored as jurisdictions. A ZIP lookup that crosses more than one district of the same type
 returns those candidates with confidence MULTIPLE. County subdivisions, congressional districts, and state legislative districts store the Census long name (`NAMELSAD`), so a Maryland election district is `District 1` or `District 10, Deer Park` rather than the short code `1`. Cities and counties keep the short name (`Rockville`, `Montgomery`). Jurisdictions upsert on `(type, geoid)`
-with `ST_Multi(ST_MakeValid(...))`. Parents are state, then county, then place.
+with `ST_Multi(ST_MakeValid(...))`. The loader may still set `parent_id` (state, then county, then place). That column is not part of the admin API or the export.
 `boundary_vintage` is `TIGER{YEAR}`.
 
 ## 4. Review pending changes
@@ -148,4 +169,5 @@ from that source and state whose GEOID is no longer in the file.
 
 `pnpm data:export` reads the database and writes `exports/civic-data-<date>.xlsx`.
 It does not write to the database, and it does not include residents, saved locations,
-follows, or notifications. Optional flags: `--state MD` and `--pilot-only`.
+follows, or notifications. The workbook has no Parent column. Officials and terms include
+`termEnd` and `electedYear`. Field_Coverage includes photo. Optional flags: `--state MD` and `--pilot-only`.

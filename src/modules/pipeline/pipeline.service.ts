@@ -17,6 +17,7 @@ import {
 } from '../../lib/errors.js';
 import { z } from 'zod';
 import { collectorFor } from './collectors.js';
+import { checkPhoto } from './photos.js';
 import type { PipelineStore } from './pipeline.ports.js';
 import {
   BULK_CAP,
@@ -116,6 +117,7 @@ export class PipelineService {
         await this.finish(run.id, { sha: snapshot.sha256, added: 0, changed: 0, retired: 0, pending: 0 });
         return withNotice({ skipped: true, added: 0, changed: 0, retired: 0, pending: 0, sha: snapshot.sha256 }, snapshot);
       }
+      if (relinkPeople) await this.verifyPhotos(records);
       const page = source.method === 'PAGE_COLLECTION' || collector.key === 'page.directory';
       let added = 0;
       let changed = 0;
@@ -227,6 +229,16 @@ export class PipelineService {
       if (isBroken) broken += 1;
     }
     return { checked: rows.length, broken };
+  }
+
+  private async verifyPhotos(records: NormalisedRecord[]): Promise<void> {
+    if (!this.deps.fetch.head) return;
+    for (const record of records) {
+      if (!record.fields.photoUrl) continue;
+      const checked = await checkPhoto(this.deps.fetch, record.fields.photoUrl);
+      record.fields.photoUrl = checked.photoUrl;
+      record.fields.photoStatus = checked.photoStatus;
+    }
   }
 
   private async fetchRecords(source: SourceRow, collector: Collector): Promise<{ snapshot: Awaited<ReturnType<Collector['fetch']>>; records: NormalisedRecord[] }> {

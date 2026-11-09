@@ -60,6 +60,8 @@ export interface CurrentHolderDto {
   displayName: string | null;
   party: string | null;
   photoUrl: string | null;
+  termEnd: Date | null;
+  electedYear: number | null;
 }
 
 export interface JurisdictionRef {
@@ -108,6 +110,8 @@ export interface OfficialProfile {
   freshness: Freshness;
   redirectOfficeSlug: string | null;
   whyItApplies: string | null;
+  termEnd: Date | null;
+  electedYear: number | null;
 }
 
 export interface ServiceCategoryDto {
@@ -178,13 +182,16 @@ export interface OfficeRecord {
   addresses: OfficeAddressDto[];
   currentTerm: {
     status: TermStatus;
-    official: CurrentHolderDto & { status: RecordStatus };
+    termEnd: Date | null;
+    electedYear: number | null;
+    official: Omit<CurrentHolderDto, 'termEnd' | 'electedYear'> & { status: RecordStatus };
   } | null;
 }
 
 export interface OfficialTermLink {
   isCurrent: boolean;
   termEnd: Date | null;
+  electedYear: number | null;
   office: {
     id: string;
     slug: string;
@@ -307,6 +314,7 @@ export interface AdminOfficialTerm {
   status: TermStatus;
   termStart: Date | null;
   termEnd: Date | null;
+  electedYear: number | null;
   isCurrent: boolean;
   office: {
     id: string;
@@ -331,6 +339,7 @@ export interface AdminOfficialRecord {
   displayName: string | null;
   party: string | null;
   photoUrl: string | null;
+  firstElectedYear: number | null;
   website: string | null;
   sourceId: string;
   sourceRecordUrl: string | null;

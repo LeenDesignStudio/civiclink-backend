@@ -110,7 +110,6 @@ export const OPERATION_RATES: Record<string, RateClass> = {
   changeLog: 'admin',
   pauseSource: 'admin',
   resumeSource: 'admin',
-  adminJurisdictionTree: 'admin',
   adminOfficeTiles: 'admin',
   adminOfficialTiles: 'admin',
   adminJurisdictionTiles: 'admin',

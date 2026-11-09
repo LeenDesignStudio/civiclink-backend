@@ -69,6 +69,8 @@ const HolderType = builder.objectRef<NonNullable<OfficeProfile['currentHolder']>
     displayName: t.exposeString('displayName', { nullable: true }),
     party: t.exposeString('party', { nullable: true }),
     photoUrl: t.field({ type: 'URL', nullable: true, resolve: (holder) => holder.photoUrl }),
+    termEnd: t.field({ type: 'DateTime', nullable: true, resolve: (holder) => holder.termEnd }),
+    electedYear: t.int({ nullable: true, resolve: (holder) => holder.electedYear }),
   }),
 });
 
@@ -112,6 +114,8 @@ const OfficialRef = builder.objectRef<OfficialProfile>('Official').implement({
     freshness: t.field({ type: FreshnessEnum, resolve: (official) => official.freshness }),
     redirectOfficeSlug: t.exposeString('redirectOfficeSlug', { nullable: true }),
     whyItApplies: t.exposeString('whyItApplies', { nullable: true }),
+    termEnd: t.field({ type: 'DateTime', nullable: true, resolve: (official) => official.termEnd }),
+    electedYear: t.int({ nullable: true, resolve: (official) => official.electedYear }),
   }),
 });
 

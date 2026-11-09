@@ -3,7 +3,6 @@ import type { Connection } from '../../lib/pagination.js';
 import { PageInfoRef } from '../audit/audit.graphql.js';
 import { withoutNulls } from '../follows/relay.graphql.js';
 import { CivicService } from './civic.service.js';
-import type { JurisdictionTreeNode } from './record-rules.js';
 import type { AdminJurisdictionNode, AdminOfficeRecord, AdminOfficialRecord, AdminOfficialTerm, AdminServiceLink, AdminServiceRecord, JurisdictionRecord, OfficeAddressDto, OfficeTermPayload, OfficeTermRecord, ServiceCategoryRecord } from './civic.dto.js';
 import { FreshnessEnum, FreshnessOverrideEnum, JurisdictionTypeEnum, SelectionMethodEnum, TermStatusEnum } from './civic.graphql.js';
 import { GovLevelEnum } from '../follows/relay.graphql.js';
@@ -52,7 +51,6 @@ JurisdictionAdmin.implement({
     aliases: t.stringList({ resolve: (row) => row.aliases ?? [] }),
     description: t.exposeString('description', { nullable: true }),
     isPilot: t.boolean({ resolve: (row) => row.isPilot ?? false }),
-    parentRetired: t.boolean({ resolve: (row) => row.parentRetired ?? false }),
     boundaryStatus: t.field({ type: BoundaryStatusEnum, resolve: (row) => row.boundaryStatus ?? (row.hasBoundary ? 'OK' : 'MISSING') }),
     childCount: t.int({ resolve: (row) => row.childCount ?? 0 }),
     officeCount: t.int({ resolve: (row) => row.officeCount ?? 0 }),
@@ -65,7 +63,6 @@ JurisdictionAdmin.implement({
     }),
     status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
     subtype: t.exposeString('subtype', { nullable: true }),
-    parentId: t.exposeID('parentId', { nullable: true }),
     districtCode: t.exposeString('districtCode', { nullable: true }),
     geoid: t.exposeString('geoid', { nullable: true }),
     state: t.exposeString('state', { nullable: true }),
@@ -130,7 +127,6 @@ const OfficeAdmin = builder.objectRef<AdminOfficeRecord>('AdminOffice').implemen
     }),
     name: t.exposeString('name'),
     officeType: t.field({ type: OfficeTypeEnum, nullable: true, resolve: (row) => row.officeType ?? null }),
-    parentRetired: t.boolean({ resolve: (row) => row.parentRetired ?? false }),
     freshness: t.field({ type: FreshnessEnum, nullable: true, resolve: (row) => row.freshness ?? null }),
     seatLabel: t.exposeString('seatLabel', { nullable: true }),
     selectionMethod: t.field({ type: SelectionMethodEnum, resolve: (row) => row.selectionMethod }),
@@ -177,6 +173,7 @@ const AdminTerm = builder.objectRef<AdminOfficialTerm>('AdminOfficialTerm').impl
     status: t.field({ type: TermStatusEnum, resolve: (row) => row.status }),
     termStart: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.termStart }),
     termEnd: t.field({ type: 'DateTime', nullable: true, resolve: (row) => row.termEnd }),
+    electedYear: t.int({ nullable: true, resolve: (row) => row.electedYear }),
     isCurrent: t.exposeBoolean('isCurrent'),
     office: t.field({ type: AdminTermOffice, resolve: (row) => row.office }),
   }),
@@ -201,6 +198,7 @@ const OfficialAdmin = builder.objectRef<AdminOfficialRecord>('AdminOfficial').im
     displayName: t.exposeString('displayName', { nullable: true }),
     party: t.exposeString('party', { nullable: true }),
     photoUrl: t.exposeString('photoUrl', { nullable: true }),
+    firstElectedYear: t.int({ nullable: true, resolve: (row) => row.firstElectedYear }),
     website: t.exposeString('website', { nullable: true }),
     sourceId: t.exposeID('sourceId'),
     sourceRecordUrl: t.exposeString('sourceRecordUrl', { nullable: true }),
@@ -267,7 +265,6 @@ builder.mutationField('upsertJurisdiction', (t) =>
             level: i.field({ type: GovLevelEnum, required: true }),
             type: i.field({ type: JurisdictionTypeEnum, required: true }),
             subtype: i.string({ required: false }),
-            parentId: i.id({ required: false }),
             districtCode: i.string({ required: false }),
             geoid: i.string({ required: false }),
             state: i.string({ required: false }),
@@ -584,7 +581,6 @@ const JurisdictionFilter = builder.inputType('AdminJurisdictionFilter', {
     type: t.field({ type: JurisdictionTypeEnum, required: false }),
     state: t.string({ required: false }),
     status: t.field({ type: RecordStatusEnum, required: false }),
-    parentId: t.id({ required: false }),
     isPilot: t.boolean({ required: false }),
     boundary: t.field({ type: BoundaryStatusEnum, required: false }),
     freshness: t.field({ type: FreshnessEnum, required: false }),
@@ -615,6 +611,8 @@ const OfficialFilter = builder.inputType('AdminOfficialFilter', {
     freshness: t.field({ type: FreshnessEnum, required: false }),
     officeId: t.id({ required: false }),
     noCurrentOffice: t.boolean({ required: false }),
+    termEndingBefore: t.field({ type: 'DateTime', required: false }),
+    electedYear: t.int({ required: false }),
     q: t.string({ required: false }),
   }),
 });
@@ -693,30 +691,6 @@ builder.queryField('adminServices', (t) =>
   }),
 );
 rememberScope('Query', 'adminServices', readScope);
-
-const JurisdictionTree = builder.objectRef<JurisdictionTreeNode>('AdminJurisdictionTreeNode');
-JurisdictionTree.implement({
-  fields: (t) => ({
-    id: t.exposeID('id'),
-    parentId: t.exposeID('parentId', { nullable: true }),
-    name: t.exposeString('name'),
-    displayId: t.exposeString('displayId'),
-    level: t.field({ type: GovLevelEnum, resolve: (row) => row.level }),
-    status: t.field({ type: RecordStatusEnum, resolve: (row) => row.status }),
-    parentRetired: t.exposeBoolean('parentRetired'),
-    children: t.field({ type: [JurisdictionTree], resolve: (row) => row.children }),
-  }),
-});
-
-builder.queryField('adminJurisdictionTree', (t) =>
-  t.field({
-    type: [JurisdictionTree],
-    authScopes: readScope,
-    args: { rootId: t.arg.id({ required: false }) },
-    resolve: (_root, args, ctx) => civic(ctx).adminJurisdictionTree(ctx, args.rootId),
-  }),
-);
-rememberScope('Query', 'adminJurisdictionTree', readScope);
 
 const OfficeTiles = builder
   .objectRef<{ active: number; vacant: number; outdated: number; missingContact: number }>('AdminOfficeTiles')

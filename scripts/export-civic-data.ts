@@ -47,7 +47,7 @@ async function loadExport(client: PrismaClient, state: string | undefined, pilot
       ...(state ? { state } : {}),
       ...(pilotOnly ? { isPilot: true } : {}),
     },
-    include: { source: { select: { name: true } }, parent: { select: { name: true } } },
+    include: { source: { select: { name: true } } },
     orderBy: [{ displayId: 'asc' }],
   });
   const flags = await client.$queryRaw<Array<{ id: string; has_boundary: boolean }>>`
@@ -66,8 +66,6 @@ async function loadExport(client: PrismaClient, state: string | undefined, pilot
     level: row.level,
     type: row.type,
     subtype: row.subtype,
-    parentId: row.parentId,
-    parentName: row.parent?.name ?? null,
     districtCode: row.districtCode,
     geoid: row.geoid,
     state: row.state,
@@ -165,6 +163,9 @@ async function loadExport(client: PrismaClient, state: string | undefined, pilot
     party: row.party,
     photoUrl: row.photoUrl,
     website: row.website,
+    firstElectedYear: row.firstElectedYear,
+    termEnd: null,
+    electedYear: null,
     externalIds: row.externalIds,
     useOfficeAddress: row.useOfficeAddress,
     sourceId: row.sourceId,
@@ -204,10 +205,18 @@ async function loadExport(client: PrismaClient, state: string | undefined, pilot
     status: row.status,
     termStart: row.termStart,
     termEnd: row.termEnd,
+    electedYear: row.electedYear,
     isCurrent: row.isCurrent,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));
+  for (const term of terms) {
+    if (!term.isCurrent) continue;
+    const person = officials.find((row) => row.id === term.officialId);
+    if (!person) continue;
+    person.termEnd = term.termEnd;
+    person.electedYear = term.electedYear;
+  }
   const sourceIds = new Set<string>([
     ...jurisdictions.map((row) => row.sourceId),
     ...offices.map((row) => row.sourceId),

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client.js';
-import { GovLevel, JurisdictionType, type CivicEntityType } from '../../generated/prisma/enums.js';
+import { GovLevel, JurisdictionType, PhotoStatus, type CivicEntityType } from '../../generated/prisma/enums.js';
 import { dbCall, postgresMessage, prisma, type Db } from '../../db/prisma.js';
 import { ValidationError } from '../../lib/errors.js';
 import { clipPhone, parsePublishedAddress } from './contacts.js';
@@ -9,6 +9,7 @@ import type { PendingQuery, PipelineStore, SourceListQuery, SourceWrite } from '
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
 import { sourceConfigFromJson } from './source-config.js';
 import { refreshWrite } from '../civic/record-rules.js';
+import { electedYearByTerm, firstElectedYear, parseTermHistory } from './term-years.js';
 import { sameAttributes, type NormalisedRecord } from './types.js';
 
 const LEVELS = new Set<string>(Object.values(GovLevel));
@@ -808,13 +809,13 @@ export class PipelineRepo implements PipelineStore {
 
   private async upsertOfficial(sourceId: string, record: NormalisedRecord, now: Date): Promise<'added' | 'changed' | 'unchanged'> {
     const existing = await dbCall(() => this.db.official.findFirst({ where: { sourceRecordUrl: record.matchKey } }));
-    const photoUrl = httpsField(record.fields.photoUrl);
+    const photo = photoWrite(record.fields);
     const data = {
       fullName: (record.fields.fullName ?? 'Unknown').slice(0, 120),
       ...(record.fields.title ? { displayName: record.fields.title.slice(0, 120) } : {}),
       party: record.fields.party?.slice(0, 60) ?? null,
       ...(record.fields.website ? { website: httpsField(record.fields.website) } : {}),
-      ...(photoUrl ? { photoUrl } : {}),
+      ...photo,
       sourceId,
       sourceRecordUrl: record.matchKey.slice(0, 2048),
       lastUpdatedAt: now,
@@ -843,7 +844,9 @@ export class PipelineRepo implements PipelineStore {
       const comparable = { ...record.fields };
       if (comparable.website === undefined) comparable.website = existing.website;
       if (comparable.title === undefined) comparable.title = existing.displayName;
-      const photoChanged = (photoUrl ?? null) !== (existing.photoUrl ?? null);
+      const photoChanged =
+        (photo.photoUrl !== undefined && (photo.photoUrl ?? null) !== (existing.photoUrl ?? null)) ||
+        (photo.photoStatus !== undefined && photo.photoStatus !== existing.photoStatus);
       if (sameAttributes(stored, comparable) && !photoChanged) {
         outcome = 'unchanged';
       } else {
@@ -858,7 +861,8 @@ export class PipelineRepo implements PipelineStore {
       }
     }
     const linked = await this.linkSeat(sourceId, officialId, record, now);
-    if (outcome === 'unchanged' && linked) return 'changed';
+    const years = await this.writeElectedYears(officialId, record.fields.termsJson ?? null);
+    if (outcome === 'unchanged' && (linked || years)) return 'changed';
     return outcome;
   }
 
@@ -990,6 +994,7 @@ export class PipelineRepo implements PipelineStore {
         return true;
       }),
     );
+    const past = await this.writePastTerms(sourceId, officialId, record, officeKey, now);
     if (!office.overrideActive) {
       const state = record.fields.state;
       const labeled = [
@@ -1002,7 +1007,129 @@ export class PipelineRepo implements PipelineStore {
         if (await this.writeOfficeAddress(officeId, item.label, item.raw, state ?? null)) wrote = true;
       }
     }
-    return wrote || seated;
+    return wrote || seated || past;
+  }
+
+  private async writePastTerms(
+    sourceId: string,
+    officialId: string,
+    record: NormalisedRecord,
+    currentOfficeKey: string,
+    now: Date,
+  ): Promise<boolean> {
+    const history = parseTermHistory(record.fields.termsJson ?? null);
+    const currentStart = record.fields.termStart ?? null;
+    let wrote = false;
+    for (const past of history) {
+      if (past.officeKey === currentOfficeKey && past.start === currentStart) continue;
+      if (!TYPES.has(past.jurisdictionType) || !past.jurisdictionGeoid) continue;
+      const officeId = await this.ensureHistoricalOffice(sourceId, past, now);
+      if (!officeId) continue;
+      if (await this.ensureHistoricalTerm(officeId, officialId, past.start, past.end)) wrote = true;
+    }
+    return wrote;
+  }
+
+  private async ensureHistoricalOffice(
+    sourceId: string,
+    past: { officeKey: string; officeName: string; jurisdictionType: string; jurisdictionGeoid: string; seatLabel: string | null },
+    now: Date,
+  ): Promise<string | null> {
+    const existing = await dbCall(() =>
+      this.db.office.findFirst({ where: { sourceRecordUrl: past.officeKey }, select: { id: true } }),
+    );
+    if (existing) return existing.id;
+    const jurisdiction = await dbCall(() =>
+      this.db.jurisdiction.findFirst({
+        where: { type: past.jurisdictionType as JurisdictionType, geoid: past.jurisdictionGeoid, status: 'ACTIVE' },
+        select: { id: true },
+      }),
+    );
+    if (!jurisdiction) return null;
+    const name = past.officeName.slice(0, 150);
+    const named = await dbCall(() =>
+      this.db.office.findFirst({ where: { jurisdictionId: jurisdiction.id, name }, select: { id: true } }),
+    );
+    if (named) return named.id;
+    const created = await dbCall(() =>
+      this.db.office.create({
+        data: {
+          name,
+          slug: slugFor(past.officeKey),
+          jurisdictionId: jurisdiction.id,
+          seatLabel: past.seatLabel?.slice(0, 60) ?? null,
+          selectionMethod: 'ELECTED',
+          officeType: 'ELECTED',
+          holderUnknown: true,
+          sourceId,
+          sourceRecordUrl: past.officeKey.slice(0, 2048),
+          lastUpdatedAt: now,
+        },
+        select: { id: true },
+      }),
+    );
+    return created.id;
+  }
+
+  private async ensureHistoricalTerm(
+    officeId: string,
+    officialId: string,
+    start: string | null,
+    end: string | null,
+  ): Promise<boolean> {
+    const termStart = dateOrNull(start);
+    const termEnd = dateOrNull(end);
+    const existing = await dbCall(() =>
+      this.db.officeTerm.findMany({
+        where: { officeId, officialId, isCurrent: false },
+        select: { id: true, termStart: true, termEnd: true },
+      }),
+    );
+    const held = existing.find((term) => sameDay(term.termStart, termStart));
+    if (held) {
+      if (sameDay(held.termEnd, termEnd)) return false;
+      await dbCall(() => this.db.officeTerm.update({ where: { id: held.id }, data: { termEnd } }));
+      return true;
+    }
+    await dbCall(() =>
+      this.db.officeTerm.create({
+        data: { officeId, officialId, status: 'ELECTED', isCurrent: false, termStart, termEnd },
+      }),
+    );
+    return true;
+  }
+
+  private async writeElectedYears(officialId: string, termsJson: string | null): Promise<boolean> {
+    const terms = await dbCall(() =>
+      this.db.officeTerm.findMany({
+        where: { officialId },
+        select: { id: true, officeId: true, termStart: true, termEnd: true, electedYear: true },
+      }),
+    );
+    const dated = terms.map((term) => ({
+      key: term.id,
+      officeKey: term.officeId,
+      start: term.termStart ? term.termStart.toISOString().slice(0, 10) : null,
+      end: term.termEnd ? term.termEnd.toISOString().slice(0, 10) : null,
+    }));
+    const years = electedYearByTerm(dated);
+    let wrote = false;
+    for (const term of terms) {
+      const year = years.get(term.id) ?? null;
+      if (term.electedYear === year) continue;
+      await dbCall(() => this.db.officeTerm.update({ where: { id: term.id }, data: { electedYear: year } }));
+      wrote = true;
+    }
+    const sourceStarts = parseTermHistory(termsJson).map((term) => term.start);
+    const first = firstElectedYear([...dated.map((term) => term.start), ...sourceStarts]);
+    const official = await dbCall(() =>
+      this.db.official.findUnique({ where: { id: officialId }, select: { firstElectedYear: true } }),
+    );
+    if (official && official.firstElectedYear !== first) {
+      await dbCall(() => this.db.official.update({ where: { id: officialId }, data: { firstElectedYear: first } }));
+      wrote = true;
+    }
+    return wrote;
   }
 
   private async writeOfficeAddress(officeId: string, label: string, raw: string, state: string | null): Promise<boolean> {
@@ -1105,6 +1232,15 @@ function asLevel(value: string | null): GovLevel {
 function asType(value: string | null): JurisdictionType {
   if (value && TYPES.has(value)) return value as JurisdictionType;
   return 'COUNTY';
+}
+
+function photoWrite(fields: Record<string, string | null>): { photoUrl?: string | null; photoStatus?: PhotoStatus } {
+  const url = httpsField(fields.photoUrl);
+  if (fields.photoStatus === 'BROKEN') return { photoUrl: null, photoStatus: PhotoStatus.BROKEN };
+  if (fields.photoStatus === 'OK' && url) return { photoUrl: url, photoStatus: PhotoStatus.OK };
+  if (fields.photoStatus === 'NONE') return { photoUrl: null, photoStatus: PhotoStatus.NONE };
+  if (url) return { photoUrl: url };
+  return {};
 }
 
 function httpsField(value: string | null | undefined): string | null {

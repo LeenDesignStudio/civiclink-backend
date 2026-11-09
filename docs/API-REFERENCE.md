@@ -52,12 +52,6 @@ Generated from the GraphQL schema. Do not edit by hand — run `pnpm docs:api`.
 - Returns: `AdminJurisdiction`
 - Scope: `{"permission":"admin.civic:read"}`
 
-### `adminJurisdictionTree`
-
-- Arguments: `rootId: ID`
-- Returns: `[AdminJurisdictionTreeNode!]`
-- Scope: `{"permission":"admin.civic:read"}`
-
 ### `adminJurisdictions`
 
 - Arguments: `after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort`

@@ -74,6 +74,7 @@ function term(link: Partial<OfficialTermLink> = {}): OfficialTermLink {
   return {
     isCurrent: true,
     termEnd: null,
+    electedYear: null,
     office: {
       id: 'office-1',
       slug: 'district-a',
@@ -177,6 +178,8 @@ describe('CivicService public reads', () => {
           holderUnknown: true,
           currentTerm: {
             status: 'ELECTED',
+            termEnd: null,
+            electedYear: null,
             official: {
               id: 'official-1',
               slug: 'ada-example',
@@ -393,6 +396,7 @@ describe('CivicService public reads', () => {
       displayName: null,
       party: null,
       photoUrl: null,
+      firstElectedYear: null,
       website: null,
       sourceId: '22222222-2222-4222-8222-222222222222',
       sourceRecordUrl: null,
@@ -408,6 +412,7 @@ describe('CivicService public reads', () => {
           status: 'ELECTED',
           termStart: NOW,
           termEnd: null,
+          electedYear: null,
           isCurrent: true,
           office: { id: 'office-1', slug: 'mayor', name: 'Mayor', status: 'ACTIVE' },
         },

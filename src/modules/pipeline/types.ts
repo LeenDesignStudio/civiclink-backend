@@ -82,6 +82,11 @@ export interface HttpFetcher {
     url: string,
     init: { maxBytes: number; timeoutMs: number; headers?: Record<string, string> },
   ): Promise<HttpResult>;
+  /** Weekly image check. Absent in tests that only parse a file. */
+  head?(
+    url: string,
+    init: { timeoutMs: number; headers?: Record<string, string> },
+  ): Promise<{ status: number }>;
 }
 
 export interface CollectorContext {

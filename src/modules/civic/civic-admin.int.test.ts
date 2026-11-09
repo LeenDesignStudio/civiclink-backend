@@ -148,7 +148,6 @@ function operations(): Operation[] {
       success: (fx) => ({
         input: {
           ...jurisdiction,
-          parentId: fx.jurisdictionId,
           sourceId: fx.sourceId,
           sourceRecordUrl: 'https://example.com/new-jurisdiction',
         },

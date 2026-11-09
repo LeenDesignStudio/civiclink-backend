@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { dbCall, prisma, withTx, type Db } from '../../db/prisma.js';
 import { NotFoundError, PreconditionError, RecordRetiredError, ValidationError } from '../../lib/errors.js';
 import { boundaryStatus, freshnessLabel } from './record-rules.js';
+import { electedYearByTerm, firstElectedYear } from '../pipeline/term-years.js';
 import type {
   AdminJurisdictionNode,
   GovLevel,
@@ -73,6 +74,8 @@ export interface OfficeAdminQuery extends AdminPageQuery {
 export interface OfficialAdminQuery extends AdminPageQuery {
   officeId?: string;
   noCurrentOffice?: boolean;
+  termEndingBefore?: Date;
+  electedYear?: number;
   level?: JurisdictionRecord['level'];
   jurisdictionId?: string;
   officeType?: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION';
@@ -135,7 +138,7 @@ export interface CivicStore {
   sourceExists(id: string): Promise<boolean>;
   countActiveOffices(jurisdictionId: string): Promise<number>;
   retireActiveOffices(jurisdictionId: string): Promise<string[]>;
-  jurisdictionNameTaken(parentId: string | null, name: string, excludeId?: string): Promise<boolean>;
+  jurisdictionNameTaken(state: string | null, type: JurisdictionRecord['type'], name: string, excludeId?: string): Promise<boolean>;
   officeNameTaken(jurisdictionId: string, name: string, excludeId?: string): Promise<boolean>;
   currentOfficialId(officeId: string): Promise<string | null>;
   flagParentRetired(jurisdictionId: string, retired: boolean): Promise<void>;
@@ -254,6 +257,8 @@ const officeSelect = {
     take: 1,
     select: {
       status: true,
+      termEnd: true,
+      electedYear: true,
       official: {
         select: {
           id: true,
@@ -312,6 +317,8 @@ function mapOffice(row: {
   addresses: OfficeAddressDto[];
   terms: Array<{
     status: TermStatus;
+    termEnd: Date | null;
+    electedYear: number | null;
     official: {
       id: string;
       slug: string;
@@ -357,6 +364,8 @@ function mapOffice(row: {
     currentTerm: term
       ? {
           status: term.status,
+          termEnd: term.termEnd,
+          electedYear: term.electedYear,
           official: {
             id: term.official.id,
             slug: term.official.slug,
@@ -516,6 +525,7 @@ export class CivicRepo implements CivicStore {
           select: {
             isCurrent: true,
             termEnd: true,
+            electedYear: true,
             office: {
               select: {
                 id: true,
@@ -552,6 +562,7 @@ export class CivicRepo implements CivicStore {
       terms: row.terms.map((term) => ({
         isCurrent: term.isCurrent,
         termEnd: term.termEnd,
+        electedYear: term.electedYear,
         office: {
           id: term.office.id,
           slug: term.office.slug,
@@ -941,11 +952,22 @@ export class CivicRepo implements CivicStore {
       if (query.officeType) office.officeType = query.officeType;
       if (query.jurisdictionId) office.jurisdictionId = query.jurisdictionId;
       if (query.level) office.jurisdiction = { level: query.level };
+      const currentTerm: Prisma.OfficeTermWhereInput = { isCurrent: true };
+      if (query.termEndingBefore) currentTerm.termEnd = { lte: query.termEndingBefore };
+      if (query.electedYear !== undefined) currentTerm.electedYear = query.electedYear;
+      const termFilter =
+        query.termEndingBefore !== undefined ||
+        query.electedYear !== undefined ||
+        query.officeId ||
+        query.officeType ||
+        query.jurisdictionId ||
+        query.level;
       if (query.noCurrentOffice) {
         where.terms = { none: { isCurrent: true } };
-      } else if (query.officeId || query.officeType || query.jurisdictionId || query.level) {
+      } else if (termFilter) {
         where.terms = {
           some: {
+            ...currentTerm,
             ...(query.officeId ? { officeId: query.officeId } : {}),
             ...(Object.keys(office).length > 0 ? { office } : {}),
           },
@@ -989,6 +1011,7 @@ export class CivicRepo implements CivicStore {
           displayName: true,
           party: true,
           photoUrl: true,
+          firstElectedYear: true,
           website: true,
           sourceId: true,
           sourceRecordUrl: true,
@@ -1172,11 +1195,12 @@ export class CivicRepo implements CivicStore {
     return this.run(() => this.db.office.count({ where: { jurisdictionId, status: 'ACTIVE' } }));
   }
 
-  jurisdictionNameTaken(parentId: string | null, name: string, excludeId?: string): Promise<boolean> {
+  jurisdictionNameTaken(state: string | null, type: JurisdictionRecord['type'], name: string, excludeId?: string): Promise<boolean> {
     return this.run(async () => {
       const row = await this.db.jurisdiction.findFirst({
         where: {
-          parentId,
+          state,
+          type,
           name,
           ...(excludeId ? { NOT: { id: excludeId } } : {}),
         },
@@ -1367,8 +1391,8 @@ export class CivicRepo implements CivicStore {
   }
 
   createTerm(input: CreateTermInput): Promise<OfficeTermRecord> {
-    return this.run(() =>
-      this.db.officeTerm.create({
+    return this.run(async () => {
+      const created = await this.db.officeTerm.create({
         data: {
           officeId: input.officeId,
           officialId: input.officialId,
@@ -1377,9 +1401,37 @@ export class CivicRepo implements CivicStore {
           termEnd: input.termEnd,
           isCurrent: input.isCurrent,
         },
-        select: termSelect,
-      }),
-    );
+        select: { id: true },
+      });
+      await this.recomputeElectedYears(input.officialId);
+      const row = await this.db.officeTerm.findUnique({ where: { id: created.id }, select: termSelect });
+      if (!row) throw new NotFoundError();
+      return row;
+    });
+  }
+
+  private async recomputeElectedYears(officialId: string): Promise<void> {
+    const terms = await this.db.officeTerm.findMany({
+      where: { officialId },
+      select: { id: true, officeId: true, termStart: true, termEnd: true, electedYear: true },
+    });
+    const dated = terms.map((term) => ({
+      key: term.id,
+      officeKey: term.officeId,
+      start: term.termStart ? term.termStart.toISOString().slice(0, 10) : null,
+      end: term.termEnd ? term.termEnd.toISOString().slice(0, 10) : null,
+    }));
+    const years = electedYearByTerm(dated);
+    for (const term of terms) {
+      const year = years.get(term.id) ?? null;
+      if (term.electedYear !== year) {
+        await this.db.officeTerm.update({ where: { id: term.id }, data: { electedYear: year } });
+      }
+    }
+    await this.db.official.update({
+      where: { id: officialId },
+      data: { firstElectedYear: firstElectedYear(dated.map((term) => term.start)) },
+    });
   }
 
   findTerm(id: string): Promise<OfficeTermRecord | null> {
@@ -1459,7 +1511,11 @@ export class CivicRepo implements CivicStore {
       const [active, termsEndingWithin90d, outdated, missingContact, noCurrentOffice] = await Promise.all([
         this.db.official.count({ where: { status: 'ACTIVE' } }),
         this.db.officeTerm.count({
-          where: { isCurrent: true, termEnd: { gte: now, lte: endingBy }, official: { status: 'ACTIVE' } },
+          where: {
+            isCurrent: true,
+            termEnd: { gte: now, lte: endingBy, not: null },
+            official: { status: 'ACTIVE' },
+          },
         }),
         this.db.official.count({
           where: {
@@ -1629,6 +1685,7 @@ export class CivicRepo implements CivicStore {
         party: true,
         photoUrl: true,
         website: true,
+        firstElectedYear: true,
         sourceId: true,
         sourceRecordUrl: true,
         lastUpdatedAt: true,
@@ -1698,6 +1755,7 @@ const termSelect = {
   status: true,
   termStart: true,
   termEnd: true,
+  electedYear: true,
   isCurrent: true,
 } as const;
 
@@ -1709,6 +1767,7 @@ const adminTermSelect = {
     status: true,
     termStart: true,
     termEnd: true,
+    electedYear: true,
     isCurrent: true,
     office: {
       select: {
@@ -1733,6 +1792,7 @@ function mapAdminOfficial(row: {
   displayName: string | null;
   party: string | null;
   photoUrl: string | null;
+  firstElectedYear: number | null;
   website: string | null;
   sourceId: string;
   sourceRecordUrl: string | null;
@@ -1749,6 +1809,7 @@ function mapAdminOfficial(row: {
     displayName: row.displayName,
     party: row.party,
     photoUrl: row.photoUrl,
+    firstElectedYear: row.firstElectedYear,
     website: row.website,
     sourceId: row.sourceId,
     sourceRecordUrl: row.sourceRecordUrl,
@@ -1801,7 +1862,6 @@ function jurisdictionData(input: UpsertJurisdictionInput) {
     level: input.level,
     type: input.type,
     subtype: input.subtype,
-    parentId: input.parentId,
     districtCode: input.districtCode,
     geoid: input.geoid,
     state: input.state,

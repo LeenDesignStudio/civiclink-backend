@@ -17,7 +17,7 @@ import { BrowserPushSender, ConsolePushSender, FcmPushSender } from './modules/n
 import { AlertsRepo } from './modules/alerts/alerts.repo.js';
 import { AuditRepo } from './modules/audit/audit.repo.js';
 import { AuditService } from './modules/audit/audit.service.js';
-import { httpGet } from './modules/pipeline/http.js';
+import { httpGet, httpHead } from './modules/pipeline/http.js';
 import { convertTigerZip } from './modules/pipeline/ogr.js';
 import { createRequestPacer } from './modules/pipeline/pace.js';
 import { PipelineRepo } from './modules/pipeline/pipeline.repo.js';
@@ -94,7 +94,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
   const store = new PipelineRepo(prisma);
   const pipeline = new PipelineService({
     store,
-    fetch: { get: httpGet },
+    fetch: { get: httpGet, head: httpHead },
     audit,
     clock: systemClock,
     userAgent: civicLinkUserAgent(env.CONTACT_INBOX),

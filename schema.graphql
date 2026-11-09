@@ -192,8 +192,6 @@ type AdminJurisdiction {
   name: String
   officeCount: Int
   officialCount: Int
-  parentId: ID
-  parentRetired: Boolean
   sourceId: ID
   sourceRecordUrl: String
   state: String
@@ -219,7 +217,6 @@ input AdminJurisdictionFilter {
   freshness: Freshness
   isPilot: Boolean
   level: GovLevel
-  parentId: ID
   q: String
   state: String
   status: RecordStatus
@@ -231,17 +228,6 @@ type AdminJurisdictionTiles {
   missingBoundary: Int
   noOffices: Int
   outdated: Int
-}
-
-type AdminJurisdictionTreeNode {
-  children: [AdminJurisdictionTreeNode!]
-  displayId: String
-  id: ID
-  level: GovLevel
-  name: String
-  parentId: ID
-  parentRetired: Boolean
-  status: RecordStatus
 }
 
 type AdminMe {
@@ -271,7 +257,6 @@ type AdminOffice {
   lastUpdatedAt: DateTime
   name: String
   officeType: OfficeType
-  parentRetired: Boolean
   phone: String
   seatLabel: String
   selectionMethod: SelectionMethod
@@ -333,6 +318,7 @@ type AdminOfficeTiles {
 type AdminOfficial {
   displayId: String
   displayName: String
+  firstElectedYear: Int
   freshness: Freshness
   freshnessNote: String
   freshnessOverride: FreshnessOverride
@@ -362,6 +348,7 @@ type AdminOfficialEdge {
 }
 
 input AdminOfficialFilter {
+  electedYear: Int
   freshness: Freshness
   jurisdictionId: ID
   level: GovLevel
@@ -370,9 +357,11 @@ input AdminOfficialFilter {
   officeType: OfficeType
   q: String
   status: RecordStatus
+  termEndingBefore: DateTime
 }
 
 type AdminOfficialTerm {
+  electedYear: Int
   id: ID
   isCurrent: Boolean
   office: AdminOfficialTermOffice
@@ -1300,11 +1289,13 @@ input OfficeAddressInput {
 
 type OfficeHolder {
   displayName: String
+  electedYear: Int
   fullName: String
   id: ID
   party: String
   photoUrl: URL
   slug: String
+  termEnd: DateTime
 }
 
 type OfficeTerm {
@@ -1331,6 +1322,7 @@ enum OfficeType {
 
 type Official {
   displayName: String
+  electedYear: Int
   freshness: Freshness
   fullName: String
   id: ID
@@ -1340,6 +1332,7 @@ type Official {
   redirectOfficeSlug: String
   slug: String
   source: CivicSource
+  termEnd: DateTime
   website: URL
   whyItApplies: String
 }
@@ -1398,7 +1391,6 @@ type Query {
   adminDashboardCounts: AdminDashboardCounts
   adminJurisdiction(id: ID!): AdminJurisdiction
   adminJurisdictionTiles: AdminJurisdictionTiles
-  adminJurisdictionTree(rootId: ID): [AdminJurisdictionTreeNode!]
   adminJurisdictions(after: String, filter: AdminJurisdictionFilter, first: Int, sort: AdminCivicSort): AdminJurisdictionConnection
   adminMe: AdminMe
   adminOffice(id: ID!): AdminOffice
@@ -1862,7 +1854,6 @@ input UpsertJurisdictionInput {
   lastUpdatedAt: DateTime!
   level: GovLevel!
   name: String!
-  parentId: ID
   sourceId: ID!
   sourceRecordUrl: String
   state: String

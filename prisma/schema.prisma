@@ -88,6 +88,13 @@ enum RecordStatus {
   RETIRED
 }
 
+/// Result of the weekly image check. NONE means no https image was published.
+enum PhotoStatus {
+  NONE
+  OK
+  BROKEN
+}
+
 enum OfficeType {
   ELECTED
   APPOINTED
@@ -667,6 +674,9 @@ model Official {
   displayName       String?           @map("display_name") @db.VarChar(120)
   party             String?           @db.VarChar(60)
   photoUrl          String?           @map("photo_url") @db.VarChar(2048)
+  photoStatus       PhotoStatus       @default(NONE) @map("photo_status")
+  /// Earliest known term of any office. Null when no source published a start date.
+  firstElectedYear  Int?              @map("first_elected_year")
   website           String?           @db.VarChar(2048)
   externalIds       Json              @default("{}") @map("external_ids")
   useOfficeAddress  Boolean           @default(false) @map("use_office_address")
@@ -700,9 +710,11 @@ model OfficeTerm {
   officeId   String     @map("office_id") @db.Uuid
   officialId String     @map("official_id") @db.Uuid
   status     TermStatus
-  termStart  DateTime?  @map("term_start") @db.Date
-  termEnd    DateTime?  @map("term_end") @db.Date
-  isCurrent  Boolean    @default(true) @map("is_current")
+  termStart   DateTime?  @map("term_start") @db.Date
+  termEnd     DateTime?  @map("term_end") @db.Date
+  /// Year this person first took this office in the current continuous run. Null when no start date was published.
+  electedYear Int?       @map("elected_year")
+  isCurrent   Boolean    @default(true) @map("is_current")
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -711,6 +723,8 @@ model OfficeTerm {
 
   @@index([officeId, isCurrent])
   @@index([officialId])
+  @@index([termEnd], map: "office_terms_term_end_idx")
+  @@index([electedYear], map: "office_terms_elected_year_idx")
   @@map("office_terms")
 }
 
