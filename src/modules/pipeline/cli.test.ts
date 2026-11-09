@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { executePlan, formatCounts, parsePilotArgs, parseRunArgs, planForCollector, planForPilot } from './cli.js';
+import { executePlan, formatCounts, parsePilotArgs, parseRunArgs, planForCollector, planForPilot, planPilotRuns } from './cli.js';
+import { parsePilotList } from './pilot-list.js';
 import { parsePageSourceFile, sourceCatalog } from './source-catalog.js';
 import type { SourceRow } from './records.js';
 import type { RunCounts } from './types.js';
@@ -39,6 +40,49 @@ describe('pipeline cli', () => {
       dryRun: false,
     });
     expect(() => parsePilotArgs(['--state', 'MD'])).toThrow(/Usage/);
+    expect(parsePilotArgs(['--list', 'pilot.json', '--dry-run'])).toEqual({ listPath: 'pilot.json', dryRun: true });
+  });
+
+  it('plans one bulk run per listed state and the matching directory pages', () => {
+    const page = source({
+      id: '22222222-2222-4222-8222-222222222222',
+      name: 'Montgomery Council',
+      collectorKey: 'page.directory',
+      method: 'PAGE_COLLECTION',
+      config: { state: 'MD', county: 'Montgomery' },
+    });
+    const arlington = source({
+      id: '44444444-4444-4444-8444-444444444444',
+      name: 'Arlington Board',
+      collectorKey: 'page.directory',
+      method: 'PAGE_COLLECTION',
+      config: { state: 'VA', county: 'Arlington' },
+    });
+    const sources = [
+      page,
+      arlington,
+      source({ name: 'Open States people', collectorKey: 'openstates.people' }),
+      source({ name: 'Census TIGER/Line', collectorKey: 'tiger.boundaries' }),
+      source({ name: 'unitedstates/congress-legislators', collectorKey: 'congress.legislators' }),
+    ];
+    const list = parsePilotList(
+      JSON.stringify({
+        states: ['MD', 'VA'],
+        counties: [
+          { state: 'MD', name: 'Montgomery' },
+          { state: 'VA', name: 'Arlington' },
+        ],
+        places: [{ state: 'MD', name: 'Rockville' }],
+        schoolDistricts: [],
+        specialDistricts: [],
+      }),
+    );
+    const runs = planPilotRuns(sources, list);
+    expect(runs.filter((run) => run.source.collectorKey === 'tiger.boundaries').map((run) => run.scope.state)).toEqual(['MD', 'VA']);
+    expect(runs.filter((run) => run.source.collectorKey === 'page.directory').map((run) => run.scope.county)).toEqual([
+      'Arlington',
+      'Montgomery',
+    ]);
   });
 
   it('orders the pilot and then the matching directory sources', () => {

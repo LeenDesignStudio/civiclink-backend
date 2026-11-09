@@ -11,7 +11,9 @@ import {
   tigerRecordsFromFeatures,
   tigerShapefileName,
   type TigerFeature,
+  type TigerLayerId,
 } from './tiger.js';
+import { firstHttps, reviewEmail } from './contacts.js';
 import {
   sha256Bytes,
   snapshotFrom,
@@ -70,6 +72,19 @@ export const tigerCollector: Collector = {
     const notes: string[] = [];
     let stateClip: Uint8Array | undefined;
     for (const layer of tigerLayerPlan(year, postal)) {
+      if (layer.remoteClip) {
+        if (!stateClip) throw new ValidationError('State boundary is required before ZCTA.');
+        const geojson = await ctx.convertZip({
+          zip: new Uint8Array(),
+          layer: layer.id,
+          shapefile: tigerShapefileName(layer.url),
+          remoteUrl: layer.url,
+          clipGeoJson: stateClip,
+        });
+        absorbTigerGeoJson(features, geojson, layer.id, postal, fips);
+        files.push({ id: layer.id, sha256: sha256Bytes(geojson), bytes: geojson.byteLength });
+        continue;
+      }
       let response: HttpResult;
       try {
         response = await load(ctx, layer.url, TIGER_FETCH_TIMEOUT_MS);
@@ -181,6 +196,9 @@ export const congressCollector: Collector = {
         email: null,
         photoUrl: null,
         website: stringOf(latest.url),
+        phone: stringOf(latest.phone),
+        address: stringOf(latest.address),
+        contactForm: stringOf(latest.contact_form),
       });
       records.push({
         matchKey: `bioguide:${bioguide}`,
@@ -215,6 +233,7 @@ export const openStatesCollector: Collector = {
       const stateColumn = row.state;
       if (want && stateColumn && stateColumn.toUpperCase() !== want) continue;
       const state = stateColumn ?? want ?? null;
+      const reviewed = reviewEmail(row.email ?? null, fullName);
       const seat = seatFields({
         state,
         kind: chamberKind(row.current_chamber ?? row.chamber ?? null),
@@ -224,9 +243,12 @@ export const openStatesCollector: Collector = {
         personKey: id,
         start: null,
         end: null,
-        email: row.email ?? null,
+        email: reviewed.publish,
         photoUrl: row.image ?? null,
-        website: null,
+        website: firstHttps(row.links ?? null),
+        phone: row.capitol_voice ?? row.district_voice ?? row.voice ?? null,
+        capitolAddress: row.capitol_address ?? null,
+        districtAddress: row.district_address ?? null,
       });
       records.push({
         matchKey: `openstates:${id}`,
@@ -236,6 +258,7 @@ export const openStatesCollector: Collector = {
           party: row.party ?? row.current_party ?? null,
           state,
           ...seat,
+          ...(reviewed.review ? { emailReview: reviewed.review } : {}),
         },
       });
     }
@@ -294,35 +317,46 @@ export const pageCollector: Collector = {
       const phone = fields.phone ? cleanValue(extractField(block, fields.phone), 'phone') : undefined;
       const email = fields.email ? cleanValue(extractField(block, fields.email), 'email') : undefined;
       const address = fields.address ? cleanValue(extractField(block, fields.address), 'text') : undefined;
-      const officialFields: Record<string, string | null> = { fullName };
-      if (title !== undefined) officialFields.title = title;
-      const contacts: Record<string, string | null> = {};
-      if (phone !== undefined) contacts.phone = phone;
-      if (email !== undefined) contacts.email = email;
-      if (address !== undefined) contacts.address = address;
       const matchKey = config?.jurisdictionGeoid
         ? `page:${config.jurisdictionGeoid}:${fullName.toLowerCase()}`
         : `page:${fullName.toLowerCase()}`;
-      if (officeId && Object.keys(contacts).length > 0) {
-        records.push({ matchKey, entityType: 'OFFICIAL', fields: officialFields });
-        records.push({
-          matchKey: `office:${officeId}:${fullName.toLowerCase()}`,
-          entityType: 'OFFICE',
-          entityId: officeId,
-          fields: contacts,
-        });
-      } else {
-        records.push({ matchKey, entityType: 'OFFICIAL', fields: { ...officialFields, ...contacts } });
-      }
+      const directory = JSON.stringify({
+        officeId: officeId ?? null,
+        officeName: (config?.officeName ?? title ?? 'Office').slice(0, 150),
+        jurisdictionGeoid: config?.jurisdictionGeoid ?? null,
+        fullName,
+        title: title ?? null,
+        phone: phone ?? null,
+        email: email ?? null,
+        address: address ?? null,
+      });
+      records.push({
+        matchKey,
+        entityType: 'OFFICE',
+        ...(officeId ? { entityId: officeId } : {}),
+        fields: { directory },
+      });
     }
     const configured = Boolean(config?.selectors || config?.item || config?.fields);
     if (records.length === 0 && !configured) {
       const loose = textContent(html);
       if (loose.length > 0) {
+        const fullName = loose.slice(0, 120);
         records.push({
-          matchKey: `page:${loose.slice(0, 40).toLowerCase()}`,
-          entityType: 'OFFICIAL',
-          fields: { fullName: loose.slice(0, 120), phone: null, email: null },
+          matchKey: `page:${fullName.slice(0, 40).toLowerCase()}`,
+          entityType: 'OFFICE',
+          fields: {
+            directory: JSON.stringify({
+              officeId: null,
+              officeName: 'Office',
+              jurisdictionGeoid: null,
+              fullName,
+              title: null,
+              phone: null,
+              email: null,
+              address: null,
+            }),
+          },
         });
       }
     }
@@ -389,6 +423,26 @@ function cleanValue(value: string | undefined, kind: 'text' | 'email' | 'phone')
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function absorbTigerGeoJson(
+  features: TigerFeature[],
+  geojson: Uint8Array,
+  layerId: TigerLayerId,
+  postal: string,
+  fips: string,
+): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoder.decode(geojson)) as unknown;
+  } catch {
+    throw new ValidationError('Boundary file could not be parsed.');
+  }
+  for (const feature of featuresOf(parsed)) {
+    const props = objectOf(feature.properties);
+    if (!keepTigerFeature(props, layerId, postal, fips)) continue;
+    features.push({ geometry: feature.geometry, properties: { ...props, tigerLayer: layerId } });
+  }
 }
 
 function featuresOf(value: unknown): TigerFeature[] {

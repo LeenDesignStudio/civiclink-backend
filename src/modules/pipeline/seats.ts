@@ -12,6 +12,11 @@ export interface SeatInput {
   email: string | null;
   photoUrl: string | null;
   website: string | null;
+  phone?: string | null;
+  address?: string | null;
+  contactForm?: string | null;
+  capitolAddress?: string | null;
+  districtAddress?: string | null;
 }
 
 /** Fields carried on an official record so the loader can create the office and the term. */
@@ -34,6 +39,16 @@ export function seatFields(input: SeatInput): Record<string, string | null> {
   if (contactEmail) extras.contactEmail = contactEmail;
   if (photoUrl) extras.photoUrl = photoUrl;
   if (website) extras.website = website;
+  const phone = input.phone?.trim();
+  if (phone) extras.phone = phone;
+  const address = input.address?.trim();
+  if (address) extras.address = address;
+  const contactForm = httpsOrNull(input.contactForm ?? null);
+  if (contactForm) extras.contactUrl = contactForm;
+  const capitol = input.capitolAddress?.trim();
+  if (capitol) extras.capitolAddress = capitol;
+  const districtOffice = input.districtAddress?.trim();
+  if (districtOffice) extras.districtAddress = districtOffice;
 
   if (input.kind === 'sen') {
     const seat = senateSeat(input.senateClass, input.stateRank, input.personKey);

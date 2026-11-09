@@ -639,6 +639,7 @@ export const adminOfficialListSchema = z
         officeType: z.enum(['ELECTED', 'APPOINTED', 'DEPARTMENT', 'COMMISSION']).optional(),
         officeId: z.uuid().optional(),
         freshness: freshness.optional(),
+        noCurrentOffice: z.boolean().optional(),
         q: searchText.optional(),
       })
       .strict()

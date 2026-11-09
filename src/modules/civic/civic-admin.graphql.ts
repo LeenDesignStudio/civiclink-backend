@@ -614,6 +614,7 @@ const OfficialFilter = builder.inputType('AdminOfficialFilter', {
     officeType: t.field({ type: OfficeTypeEnum, required: false }),
     freshness: t.field({ type: FreshnessEnum, required: false }),
     officeId: t.id({ required: false }),
+    noCurrentOffice: t.boolean({ required: false }),
     q: t.string({ required: false }),
   }),
 });
@@ -729,13 +730,14 @@ const OfficeTiles = builder
   });
 
 const OfficialTiles = builder
-  .objectRef<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number }>('AdminOfficialTiles')
+  .objectRef<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number; noCurrentOffice: number }>('AdminOfficialTiles')
   .implement({
     fields: (t) => ({
       active: t.exposeInt('active'),
       termsEndingWithin90d: t.exposeInt('termsEndingWithin90d'),
       outdated: t.exposeInt('outdated'),
       missingContact: t.exposeInt('missingContact'),
+      noCurrentOffice: t.exposeInt('noCurrentOffice'),
     }),
   });
 

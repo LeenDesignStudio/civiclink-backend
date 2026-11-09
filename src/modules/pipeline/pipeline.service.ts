@@ -127,6 +127,7 @@ export class PipelineService {
         }
         const before = await this.deps.store.findCivic(record.matchKey);
         const outcome = await this.deps.store.upsertCivic(source.id, record, this.clock.now());
+        pending += await this.queueEmailReview(run.id, record);
         if (outcome === 'unchanged') continue;
         if (outcome === 'added') added += 1;
         else changed += 1;
@@ -261,6 +262,25 @@ export class PipelineService {
       types,
       now: this.clock.now(),
     });
+  }
+
+  private async queueEmailReview(runId: string, record: NormalisedRecord): Promise<number> {
+    const review = record.fields.emailReview;
+    const officeKey = record.fields.officeKey;
+    if (!review || !officeKey) return 0;
+    const officeId = await this.deps.store.findOfficeIdByKey(officeKey);
+    if (!officeId) return 0;
+    if (await this.deps.store.hasPendingField(officeId, 'email')) return 0;
+    await this.deps.store.addPending({
+      sourceRunId: runId,
+      entityType: 'OFFICE',
+      entityId: officeId,
+      field: 'email',
+      oldValue: null,
+      newValue: review,
+      now: this.clock.now(),
+    });
+    return 1;
   }
 
   private async queuePageChange(runId: string, record: NormalisedRecord): Promise<number> {

@@ -1,6 +1,7 @@
 import { Authz, systemPrincipal } from '../../authz/authz.js';
 import type { ServiceContext } from '../../graphql/context.js';
 import { isKnownCollector } from './collectors.js';
+import { pilotListFromStateCounty, pilotStates, type PilotList } from './pilot-list.js';
 import type { SourceRow } from './records.js';
 import type { RunCounts } from './types.js';
 
@@ -18,9 +19,15 @@ export interface RunArgs {
 }
 
 export interface PilotArgs {
-  state: string;
-  county: string;
+  listPath?: string;
+  state?: string;
+  county?: string;
   dryRun: boolean;
+}
+
+export interface PilotRun {
+  source: SourceRow;
+  scope: PilotScope;
 }
 
 const PILOT_KEYS = ['tiger.boundaries', 'congress.legislators', 'openstates.people'] as const;
@@ -36,23 +43,35 @@ export function parseRunArgs(argv: string[]): RunArgs {
 
 export function parsePilotArgs(argv: string[]): PilotArgs {
   const dryRun = argv.includes('--dry-run');
+  const listPath = readFlag(argv, '--list');
   const state = readFlag(argv, '--state');
   const county = readFlag(argv, '--county');
-  if (!state || !county) throw new Error('Usage: pnpm pipeline:pilot --state MD --county Montgomery [--dry-run]');
+  if (listPath) return { listPath, dryRun };
+  if (!state || !county) {
+    throw new Error('Usage: pnpm pipeline:pilot --list pilot.json | --state MD --county Montgomery [--dry-run]');
+  }
   return { state, county, dryRun };
 }
 
 export function planForPilot(sources: SourceRow[], scope: { state: string; county: string }): SourceRow[] {
-  const ordered: SourceRow[] = [];
+  return planPilotRuns(sources, pilotListFromStateCounty(scope.state, scope.county)).map((run) => run.source);
+}
+
+export function planPilotRuns(sources: SourceRow[], list: PilotList): PilotRun[] {
+  const runs: PilotRun[] = [];
   for (const key of PILOT_KEYS) {
     const found = sources.find((row) => row.active && row.collectorKey === key);
     if (!found) throw new Error(`No active source for collector ${key}. Run pnpm db:seed:sources.`);
-    ordered.push(found);
+    for (const state of pilotStates(list)) runs.push({ source: found, scope: { state } });
   }
   const pages = sources
-    .filter((row) => row.active && row.collectorKey === 'page.directory' && placeMatch(row, scope))
+    .filter((row) => row.active && row.collectorKey === 'page.directory')
     .sort((left, right) => left.name.localeCompare(right.name));
-  return [...ordered, ...pages];
+  for (const page of pages) {
+    const county = list.counties.find((place) => placeMatch(page, { state: place.state, county: place.name }));
+    if (county) runs.push({ source: page, scope: { state: county.state, county: county.name } });
+  }
+  return runs;
 }
 
 export function planForCollector(sources: SourceRow[], args: { collectorKey: string; state?: string; county?: string }): SourceRow[] {

@@ -361,7 +361,11 @@ describe('LookupService', () => {
       'Earlier Office',
       'Later Office',
     ]);
-    expect(card.levels.find((level) => level.level === 'FEDERAL')?.offices[0]?.isFollowed).toBe(true);
+    const shown = card.levels.find((level) => level.level === 'FEDERAL')?.offices[0];
+    expect(shown?.isFollowed).toBe(true);
+    expect(shown?.whyItApplies?.length).toBeGreaterThan(0);
+    expect(shown?.source.name).toBe('Clerk');
+    expect(shown?.lastUpdatedAt).toBeInstanceOf(Date);
     expect(card.servicesPreview).toHaveLength(5);
 
     const anon = await rebuilt.service.civicCard(anonymous(), { token: resolved.token });

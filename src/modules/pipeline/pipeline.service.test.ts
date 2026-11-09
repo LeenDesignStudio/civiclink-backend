@@ -214,6 +214,22 @@ class MemoryStore implements PipelineStore {
     return Promise.resolve();
   }
 
+  applyDirectory(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  findOfficeIdByKey(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
+  hasPendingField(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  markPilot(): Promise<number> {
+    return Promise.resolve(0);
+  }
+
   reresolveLocations(): Promise<number> {
     return Promise.resolve(0);
   }
@@ -387,7 +403,11 @@ describe('PipelineService', () => {
     const result = await service.runSource(system(), { sourceId: store.sources[0]?.id });
     expect(result.pending).toBeGreaterThan(0);
     expect(store.civic[0]?.fields.phone).toBe('111');
-    expect(store.pending.some((row) => row.field === 'phone' && row.newValue === '222')).toBe(true);
+    expect(
+      store.pending.some(
+        (row) => row.field === 'directory' && row.newValue?.includes('Ada Mayor') && row.newValue.includes('222'),
+      ),
+    ).toBe(true);
     expect(store.upserts).toBe(0);
   });
 
@@ -477,8 +497,11 @@ describe('PipelineService', () => {
     const written = await service.runSource(system(), { sourceId: store.sources[0]?.id });
     expect(written.pending).toBe(preview.pending);
     expect(store.upserts).toBe(0);
-    expect(store.pending.some((row) => row.field === 'fullName' && row.newValue === 'Jane Smith')).toBe(true);
-    expect(store.pending.some((row) => row.entityType === 'OFFICE' && row.field === 'email' && row.newValue === 'jane@example.gov')).toBe(true);
+    expect(store.pending).toHaveLength(1);
+    expect(store.pending[0]?.field).toBe('directory');
+    expect(store.pending[0]?.entityType).toBe('OFFICE');
+    expect(store.pending[0]?.newValue).toContain('Jane Smith');
+    expect(store.pending[0]?.newValue).toContain('jane@example.gov');
     expect(store.civic).toHaveLength(0);
   });
 

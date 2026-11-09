@@ -11,22 +11,26 @@ export function ogrArguments(paths: {
   shapefile?: string;
   where?: string;
   clipPath?: string;
+  remoteUrl?: string;
 }): string[] {
   const args = ['-f', 'GeoJSON', '-t_srs', 'EPSG:4326'];
   if (paths.where) args.push('-where', paths.where);
   if (paths.clipPath) args.push('-clipsrc', paths.clipPath);
-  const source = paths.shapefile ? `/vsizip/${paths.zipPath}/${paths.shapefile}` : `/vsizip/${paths.zipPath}`;
+  const local = paths.shapefile ? `/vsizip/${paths.zipPath}/${paths.shapefile}` : `/vsizip/${paths.zipPath}`;
+  const source = paths.remoteUrl
+    ? `/vsizip/vsicurl/${paths.remoteUrl}${paths.shapefile ? `/${paths.shapefile}` : ''}`
+    : local;
   args.push(paths.outPath, source);
   return args;
 }
 
 export async function convertTigerZip(request: ZipConvertRequest): Promise<Uint8Array> {
-  if (request.zip.byteLength > BULK_CAP) throw new ValidationError('Download exceeded the size cap.');
+  if (!request.remoteUrl && request.zip.byteLength > BULK_CAP) throw new ValidationError('Download exceeded the size cap.');
   const dir = await mkdtemp(path.join(tmpdir(), 'civiclink-tiger-'));
   try {
     const zipPath = path.join(dir, 'layer.zip');
     const outPath = path.join(dir, 'layer.geojson');
-    await writeFile(zipPath, request.zip);
+    if (!request.remoteUrl) await writeFile(zipPath, request.zip);
     let clipPath: string | undefined;
     if (request.clipGeoJson) {
       clipPath = path.join(dir, 'clip.geojson');
@@ -40,6 +44,7 @@ export async function convertTigerZip(request: ZipConvertRequest): Promise<Uint8
         ...(request.shapefile ? { shapefile: request.shapefile } : {}),
         ...(request.where ? { where: request.where } : {}),
         ...(clipPath ? { clipPath } : {}),
+        ...(request.remoteUrl ? { remoteUrl: request.remoteUrl } : {}),
       }),
       request.layer,
     );

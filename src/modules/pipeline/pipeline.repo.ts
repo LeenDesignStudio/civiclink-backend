@@ -1,7 +1,10 @@
+import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client.js';
 import { GovLevel, JurisdictionType, type CivicEntityType } from '../../generated/prisma/enums.js';
 import { dbCall, postgresMessage, prisma, type Db } from '../../db/prisma.js';
 import { ValidationError } from '../../lib/errors.js';
+import { clipPhone, parsePublishedAddress } from './contacts.js';
+import type { PilotList, PilotPlace } from './pilot-list.js';
 import type { PendingQuery, PipelineStore, SourceListQuery, SourceWrite } from './pipeline.ports.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
 import { sourceConfigFromJson } from './source-config.js';
@@ -463,6 +466,163 @@ export class PipelineRepo implements PipelineStore {
     throw new ValidationError('That field cannot be applied.');
   }
 
+  async applyDirectory(sourceRunId: string, raw: string): Promise<void> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      throw new ValidationError('That directory change could not be read.');
+    }
+    const result = directorySchema.safeParse(parsed);
+    if (!result.success) throw new ValidationError('That directory change could not be read.');
+    const body = result.data;
+    const run = await dbCall(() => this.db.sourceRun.findUnique({ where: { id: sourceRunId }, select: { sourceId: true } }));
+    if (!run) throw new ValidationError('That change has no source.');
+    const now = new Date();
+    const geoid = body.jurisdictionGeoid ?? null;
+    const jurisdiction = geoid
+      ? await dbCall(() =>
+          this.db.jurisdiction.findFirst({
+            where: { geoid, status: 'ACTIVE' },
+            select: { id: true, state: true },
+          }),
+        )
+      : null;
+    let officeId = body.officeId ?? null;
+    if (!officeId) {
+      if (!jurisdiction) throw new ValidationError('That jurisdiction is not loaded yet.');
+      const name = body.officeName.slice(0, 150);
+      const existing = await dbCall(() => this.db.office.findFirst({ where: { jurisdictionId: jurisdiction.id, name } }));
+      if (existing) {
+        officeId = existing.id;
+      } else {
+        const created = await dbCall(() =>
+          this.db.office.create({
+            data: {
+              name,
+              slug: slugFor(`page-office:${body.jurisdictionGeoid}:${name}`),
+              jurisdictionId: jurisdiction.id,
+              selectionMethod: 'ELECTED',
+              phone: clipPhone(body.phone ?? null),
+              email: body.email?.slice(0, 254) ?? null,
+              sourceId: run.sourceId,
+              sourceRecordUrl: `page:${body.jurisdictionGeoid}:${body.fullName.toLowerCase()}`.slice(0, 2048),
+              lastUpdatedAt: now,
+            },
+          }),
+        );
+        officeId = created.id;
+      }
+    }
+    if (body.phone || body.email) {
+      await dbCall(() =>
+        this.db.office.update({
+          where: { id: officeId },
+          data: {
+            ...(body.phone ? { phone: clipPhone(body.phone) } : {}),
+            ...(body.email ? { email: body.email.slice(0, 254) } : {}),
+            sourceId: run.sourceId,
+            lastUpdatedAt: now,
+          },
+        }),
+      );
+    }
+    const matchKey = `page:${body.jurisdictionGeoid ?? 'office'}:${body.fullName.toLowerCase()}`;
+    let official = await dbCall(() => this.db.official.findFirst({ where: { sourceRecordUrl: matchKey } }));
+    if (!official) {
+      official = await dbCall(() =>
+        this.db.official.create({
+          data: {
+            fullName: body.fullName.slice(0, 120),
+            displayName: body.title?.slice(0, 120) ?? null,
+            slug: slugFor(matchKey),
+            sourceId: run.sourceId,
+            sourceRecordUrl: matchKey.slice(0, 2048),
+            lastUpdatedAt: now,
+            externalIds: { matchKey },
+          },
+        }),
+      );
+    }
+    const current = await dbCall(() => this.db.officeTerm.findFirst({ where: { officeId, isCurrent: true } }));
+    if (!current || current.officialId !== official.id) {
+      if (current) {
+        await dbCall(() =>
+          this.db.officeTerm.update({ where: { id: current.id }, data: { isCurrent: false, termEnd: dateOnly(now) } }),
+        );
+      }
+      await dbCall(() =>
+        this.db.officeTerm.create({
+          data: { officeId, officialId: official.id, status: 'ELECTED', isCurrent: true },
+        }),
+      );
+    }
+    if (body.address) {
+      await this.writeOfficeAddress(officeId, 'Office', body.address, jurisdiction?.state ?? null);
+    }
+  }
+
+  async findOfficeIdByKey(officeKey: string): Promise<string | null> {
+    const office = await dbCall(() => this.db.office.findFirst({ where: { sourceRecordUrl: officeKey }, select: { id: true } }));
+    return office?.id ?? null;
+  }
+
+  async hasPendingField(entityId: string, field: string): Promise<boolean> {
+    const count = await dbCall(() =>
+      this.db.pendingSourceChange.count({ where: { entityId, field, decision: 'PENDING' } }),
+    );
+    return count > 0;
+  }
+
+  async markPilot(list: PilotList): Promise<number> {
+    const states = [
+      ...new Set([
+        ...list.states,
+        ...list.counties.map((row) => row.state),
+        ...list.places.map((row) => row.state),
+        ...list.schoolDistricts.map((row) => row.state),
+        ...list.specialDistricts.map((row) => row.state),
+      ]),
+    ];
+    let count = 0;
+    if (states.length > 0) {
+      const marked = await dbCall(() =>
+        this.db.jurisdiction.updateMany({
+          where: {
+            status: 'ACTIVE',
+            state: { in: states },
+            type: { in: ['STATE', 'CONGRESSIONAL_DISTRICT', 'STATE_SENATE_DISTRICT', 'STATE_HOUSE_DISTRICT', 'ZCTA'] },
+          },
+          data: { isPilot: true },
+        }),
+      );
+      count += marked.count;
+    }
+    const named: Array<{ type: JurisdictionType; rows: PilotPlace[] }> = [
+      { type: 'COUNTY', rows: list.counties },
+      { type: 'MUNICIPALITY', rows: list.places },
+      { type: 'SCHOOL_DISTRICT', rows: list.schoolDistricts },
+      { type: 'SPECIAL_DISTRICT', rows: list.specialDistricts },
+    ];
+    for (const group of named) {
+      for (const place of group.rows) {
+        const marked = await dbCall(() =>
+          this.db.jurisdiction.updateMany({
+            where: {
+              status: 'ACTIVE',
+              type: group.type,
+              state: place.state,
+              name: { equals: place.name, mode: 'insensitive' },
+            },
+            data: { isPilot: true },
+          }),
+        );
+        count += marked.count;
+      }
+    }
+    return count;
+  }
+
   async reresolveLocations(now: Date): Promise<number> {
     return dbCall(() =>
       this.db.$executeRaw`
@@ -717,6 +877,8 @@ export class PipelineRepo implements PipelineStore {
     if (!jurisdiction) return false;
     const email = record.fields.contactEmail ? record.fields.contactEmail.slice(0, 254) : null;
     const website = record.fields.website ? httpsField(record.fields.website) : null;
+    const phone = clipPhone(record.fields.phone ?? null);
+    const contactUrl = record.fields.contactUrl ? httpsField(record.fields.contactUrl) : null;
     const seatLabel = record.fields.seatLabel?.slice(0, 60) ?? null;
     const name = officeName.slice(0, 150);
     let office = await dbCall(() => this.db.office.findFirst({ where: { sourceRecordUrl: officeKey } }));
@@ -738,6 +900,8 @@ export class PipelineRepo implements PipelineStore {
             officeType: 'ELECTED',
             email,
             website,
+            phone,
+            contactUrl,
             holderUnknown: false,
             sourceId,
             sourceRecordUrl: officeKey.slice(0, 2048),
@@ -749,11 +913,15 @@ export class PipelineRepo implements PipelineStore {
     } else if (!office.overrideActive) {
       const nextEmail = record.fields.contactEmail ? email : office.email;
       const nextWebsite = record.fields.website ? website : office.website;
+      const nextPhone = record.fields.phone ? phone : office.phone;
+      const nextContact = record.fields.contactUrl ? contactUrl : office.contactUrl;
       const patch = {
         name,
         seatLabel,
         email: nextEmail,
         website: nextWebsite,
+        phone: nextPhone,
+        contactUrl: nextContact,
         holderUnknown: false,
         jurisdictionId: jurisdiction.id,
         sourceRecordUrl: officeKey.slice(0, 2048),
@@ -764,6 +932,8 @@ export class PipelineRepo implements PipelineStore {
         office.seatLabel !== patch.seatLabel ||
         office.email !== patch.email ||
         office.website !== patch.website ||
+        office.phone !== patch.phone ||
+        office.contactUrl !== patch.contactUrl ||
         office.holderUnknown ||
         office.jurisdictionId !== patch.jurisdictionId ||
         office.sourceRecordUrl !== patch.sourceRecordUrl;
@@ -820,7 +990,34 @@ export class PipelineRepo implements PipelineStore {
         return true;
       }),
     );
+    if (!office.overrideActive) {
+      const state = record.fields.state;
+      const labeled = [
+        record.fields.capitolAddress ? { label: 'Capitol', raw: record.fields.capitolAddress } : null,
+        record.fields.districtAddress ? { label: 'District', raw: record.fields.districtAddress } : null,
+        !record.fields.capitolAddress && record.fields.address ? { label: 'Office', raw: record.fields.address } : null,
+      ];
+      for (const item of labeled) {
+        if (!item) continue;
+        if (await this.writeOfficeAddress(officeId, item.label, item.raw, state ?? null)) wrote = true;
+      }
+    }
     return wrote || seated;
+  }
+
+  private async writeOfficeAddress(officeId: string, label: string, raw: string, state: string | null): Promise<boolean> {
+    const parsed = parsePublishedAddress(raw, state);
+    if (!parsed) return false;
+    const existing = await dbCall(() => this.db.officeAddress.findFirst({ where: { officeId, label } }));
+    if (!existing) {
+      await dbCall(() => this.db.officeAddress.create({ data: { officeId, label: label.slice(0, 60), ...parsed } }));
+      return true;
+    }
+    if (existing.street === parsed.street && existing.city === parsed.city && existing.state === parsed.state && existing.zip === parsed.zip) {
+      return false;
+    }
+    await dbCall(() => this.db.officeAddress.update({ where: { id: existing.id }, data: parsed }));
+    return true;
   }
 
   private async upsertOffice(sourceId: string, record: NormalisedRecord, now: Date): Promise<void> {
@@ -965,6 +1162,19 @@ function officePatch(
   if (field === 'contactUrl') return { contactUrl: value };
   throw new ValidationError('That field cannot be applied.');
 }
+
+const directorySchema = z
+  .object({
+    officeId: z.uuid().nullable().optional(),
+    officeName: z.string().trim().min(1).max(150),
+    jurisdictionGeoid: z.string().trim().min(2).max(40).nullable().optional(),
+    fullName: z.string().trim().min(1).max(120),
+    title: z.string().trim().max(120).nullable().optional(),
+    phone: z.string().trim().max(40).nullable().optional(),
+    email: z.string().trim().max(254).nullable().optional(),
+    address: z.string().trim().max(300).nullable().optional(),
+  })
+  .strict();
 
 function jurisdictionPatch(field: string, value: string | null): { name?: string; website?: string | null } {
   if (field === 'name' && value) return { name: value.slice(0, 150) };

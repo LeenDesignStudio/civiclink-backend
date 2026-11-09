@@ -1,5 +1,6 @@
 import type { Tx } from '../../auth/tx.js';
 import type { CivicEntityType } from '../../generated/prisma/enums.js';
+import type { PilotList } from './pilot-list.js';
 import type { CivicRow, PendingRow, RunRow, SourceRow } from './records.js';
 import type { NormalisedRecord } from './types.js';
 
@@ -80,6 +81,10 @@ export interface PipelineStore {
   findPending(id: string): Promise<PendingRow | null>;
   decidePending(id: string, decision: 'ACCEPTED' | 'REJECTED', adminId: string, now: Date): Promise<boolean>;
   applyField(entityType: CivicEntityType, entityId: string, field: string, value: string | null): Promise<void>;
+  applyDirectory(sourceRunId: string, raw: string): Promise<void>;
+  findOfficeIdByKey(officeKey: string): Promise<string | null>;
+  hasPendingField(entityId: string, field: string): Promise<boolean>;
+  markPilot(list: PilotList): Promise<number>;
   reresolveLocations(now: Date): Promise<number>;
   servicesWithUrls(): Promise<{ id: string; url: string }[]>;
   setLinkBroken(id: string, broken: boolean, now: Date): Promise<void>;

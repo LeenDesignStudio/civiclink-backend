@@ -67,15 +67,27 @@ describe('page.directory', () => {
     const records = pageCollector.normalise(snap);
     expect(headers[0]?.['user-agent']).toBe('CivicLinkBot/1.0 (+hello@qubalink.com)');
     expect(waits).toEqual([1000]);
-    const official = records.find((row) => row.entityType === 'OFFICIAL');
-    const office = records.find((row) => row.entityType === 'OFFICE');
-    expect(official?.fields.fullName).toBe('Jane Smith');
-    expect(official?.fields.title).toBe('Councilmember');
-    expect(official?.fields.fullName).not.toContain('<');
+    expect(records).toHaveLength(1);
+    const office = records[0];
+    expect(office?.entityType).toBe('OFFICE');
     expect(office?.entityId).toBe('22222222-2222-4222-8222-222222222222');
-    expect(office?.fields.phone).toBe('2407770000');
-    expect(office?.fields.email).toBe('jane@example.gov');
-    expect(office?.fields.address).toBe('101 Monroe St');
+    const directory = JSON.parse(office?.fields.directory ?? '{}') as {
+      fullName: string;
+      title: string;
+      phone: string;
+      email: string;
+      address: string;
+      officeName: string;
+      jurisdictionGeoid: string;
+    };
+    expect(directory.fullName).toBe('Jane Smith');
+    expect(directory.fullName).not.toContain('<');
+    expect(directory.title).toBe('Councilmember');
+    expect(directory.officeName).toBe('Councilmember');
+    expect(directory.phone).toBe('2407770000');
+    expect(directory.email).toBe('jane@example.gov');
+    expect(directory.address).toBe('101 Monroe St');
+    expect(directory.jurisdictionGeoid).toBe('24031');
   });
 
   it('does not request a page robots.txt disallows', async () => {

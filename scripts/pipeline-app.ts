@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createPrisma, postgresMessage, prisma, withTx } from '../src/db/prisma.js';
 import { env } from '../src/config/env.js';
 import { isAppError } from '../src/lib/errors.js';
@@ -5,14 +6,16 @@ import { AuditRepo } from '../src/modules/audit/audit.repo.js';
 import { AuditService } from '../src/modules/audit/audit.service.js';
 import {
   executePlan,
+  formatCounts,
   parsePilotArgs,
   parseRunArgs,
   pipelineContext,
   planForCollector,
-  planForPilot,
+  planPilotRuns,
   runInput,
   type PilotScope,
 } from '../src/modules/pipeline/cli.js';
+import { parsePilotList, pilotListFromStateCounty } from '../src/modules/pipeline/pilot-list.js';
 import { httpGet } from '../src/modules/pipeline/http.js';
 import { convertTigerZip } from '../src/modules/pipeline/ogr.js';
 import { createRequestPacer } from '../src/modules/pipeline/pace.js';
@@ -36,15 +39,27 @@ export async function runCollectorCli(argv: string[]): Promise<void> {
 
 export async function runPilotCli(argv: string[]): Promise<void> {
   const args = parsePilotArgs(argv);
-  const scope: PilotScope = { state: args.state, county: args.county, tigerYear: env.TIGER_YEAR };
+  const list = args.listPath ? parsePilotList(readFileSync(args.listPath, 'utf8')) : pilotListFromStateCounty(args.state ?? '', args.county ?? '');
   const store = new PipelineRepo(db);
   const sources = await store.listActiveSources();
-  const plan = planForPilot(sources, { state: args.state, county: args.county });
-  await printPlan(plan, scope, args.dryRun);
+  const runs = planPilotRuns(sources, list).map((run) => ({ ...run, scope: { ...run.scope, tigerYear: env.TIGER_YEAR } }));
+  const service = pipelineService();
+  const ctx = pipelineContext();
+  for (const run of runs) {
+    const counts = args.dryRun
+      ? await service.previewSource(ctx, runInput(run.source.id, run.scope))
+      : await service.runSource(ctx, runInput(run.source.id, run.scope));
+    const label = `${run.source.collectorKey ?? run.source.name} ${run.scope.state ?? ''}${run.scope.county ? ` ${run.scope.county}` : ''}`;
+    process.stdout.write(`${formatCounts(label.trim(), counts, args.dryRun)}\n`);
+  }
+  if (!args.dryRun) {
+    const marked = await store.markPilot(list);
+    process.stdout.write(`pilot jurisdictions marked=${marked}\n`);
+  }
 }
 
-async function printPlan(plan: SourceRow[], scope: PilotScope, dryRun: boolean): Promise<void> {
-  const service = new PipelineService({
+function pipelineService(): PipelineService {
+  return new PipelineService({
     store: new PipelineRepo(db),
     fetch: { get: httpGet },
     audit: new AuditService(new AuditRepo(db)),
@@ -53,6 +68,10 @@ async function printPlan(plan: SourceRow[], scope: PilotScope, dryRun: boolean):
     convertZip: convertTigerZip,
     withTx: (fn) => withTx((tx) => fn(tx), { client: db }),
   });
+}
+
+async function printPlan(plan: SourceRow[], scope: PilotScope, dryRun: boolean): Promise<void> {
+  const service = pipelineService();
   const ctx = pipelineContext();
   const lines = await executePlan({
     plan,

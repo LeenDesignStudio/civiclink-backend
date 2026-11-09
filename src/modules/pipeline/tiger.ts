@@ -24,6 +24,7 @@ export interface TigerLayerPlan {
   clip: boolean;
   missingOk?: boolean;
   skipOverCap?: boolean;
+  remoteClip?: boolean;
 }
 
 export interface TigerFeature {
@@ -110,7 +111,7 @@ export function tigerLayerPlan(year: number, postal: string): TigerLayerPlan[] {
     stateFile('UNSD'),
     stateFile('ELSD', true),
     stateFile('SCSD', true),
-    { id: 'ZCTA520', url: `${base}/ZCTA520/tl_${year}_us_zcta520.zip`, clip: true, skipOverCap: true },
+    { id: 'ZCTA520', url: `${base}/ZCTA520/tl_${year}_us_zcta520.zip`, clip: true, remoteClip: true },
   ];
 }
 

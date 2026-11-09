@@ -218,8 +218,12 @@ export class SourcesService {
     if (existing.decision !== 'PENDING') throw new AlreadyDecidedError();
     const change = await this.withTx(async (tx) => {
       if (parsed.decision === 'ACCEPTED') {
-        if (!existing.entityId) throw new PreconditionError('This change has no record to update.');
-        await this.deps.store.applyField(existing.entityType, existing.entityId, existing.field, existing.newValue);
+        if (existing.field === 'directory') {
+          await this.deps.store.applyDirectory(existing.sourceRunId, existing.newValue ?? '');
+        } else {
+          if (!existing.entityId) throw new PreconditionError('This change has no record to update.');
+          await this.deps.store.applyField(existing.entityType, existing.entityId, existing.field, existing.newValue);
+        }
       }
       const ok = await this.deps.store.decidePending(parsed.id, parsed.decision, admin.adminId, this.clock.now());
       if (!ok) throw new AlreadyDecidedError();

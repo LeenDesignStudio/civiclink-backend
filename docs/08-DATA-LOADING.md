@@ -1,19 +1,24 @@
 # Loading pilot data
 
-This loads Census boundaries and public office directories for one pilot state and county.
-Federal legislators load for that state. County and city directories are whatever
-`page.directory` sources you configure for the pilot. Civic records are retired, not deleted.
+This loads Census boundaries and public office directories for the places on a pilot list.
+Federal and state legislators load for each listed state. County and city directories are the
+`page.directory` sources whose config matches a listed county. Civic records are retired, not deleted.
 Page changes wait for an editor. They are not written straight onto live offices or officials.
+A successful run sets `isPilot` on the listed state, its congressional, legislative, and ZIP
+areas, and the named counties, places, school districts, and special districts. It does not
+mark every county in the state file.
 
 `ogr2ogr` (GDAL) must be on `PATH` for `tiger.boundaries`. It is not an npm package.
 Each downloaded file is capped at 50 MB. A required national extract over that cap fails the run.
-The national ZCTA file is skipped instead, and the command prints that.
+ZIP polygons are read with GDAL range requests and clipped to the state boundary, so the
+national ZCTA file is not downloaded into the process.
 
 ## 1. Add a page.directory source
 
-Create `data/page-sources/<name>.json`. `state` and `county` must match the flags you pass
-to the pilot (`MD` and `Montgomery`). `officeId` is the office UUID these contact fields
-apply to. `jurisdictionGeoid` is the Census GEOID for that county or place.
+Create `data/page-sources/<name>.json`. `state` and `county` must match a county on the
+pilot list. `jurisdictionGeoid` is the Census GEOID for that county or place. `officeId`
+is optional: when it is set, accept updates that office. When it is omitted, accept creates
+the office. `officeName` overrides the person's title as the office name.
 
 ```json
 {
@@ -46,8 +51,9 @@ apply to. `jurisdictionGeoid` is the Census GEOID for that county or place.
 
 The collector requests `robots.txt`, then the page, at one request per second, with user agent
 `CivicLinkBot/1.0 (+CONTACT_INBOX)`. A `Disallow` for that path skips the page. HTML is reduced
-to text. Names and titles are queued against the official. Phone, email, and address are queued
-against `officeId`.
+to text. Each person becomes one pending `directory` row: office name, jurisdiction, name,
+title, phone, email, and address. Accept creates or updates the office, the official, and the
+current term. Reject discards the row.
 
 ## 2. Seed the bulk sources
 
@@ -64,23 +70,45 @@ then every JSON file in `data/page-sources/`.
 
 Dry-run prints `added`, `changed`, `retired`, and `pending` and does not write.
 
+One county:
+
 ```bash
 pnpm pipeline:pilot --state MD --county "Montgomery" --dry-run
 pnpm pipeline:pilot --state MD --county "Montgomery"
 ```
 
-Order: `tiger.boundaries`, `congress.legislators`, `openstates.people`, then each
-`page.directory` source whose config state and county match. Runs use the System principal
-and store a checksum on `source_runs.snapshot_sha`.
+Several places, from a JSON file:
 
-Congress and Open States write the person, the seat, and the current term. A U.S. representative
-is attached to the Census congressional district (`24` plus the two-digit district, so Maryland 8
-is `2408`). A U.S. senator is attached to the state, one office per class. A state legislator is
-attached to the Census upper or lower district (`24` plus the three-character district). The office
-name, district, term dates, email, and photo come from the file when it has them. If that district
-is not loaded yet, the person is saved and the seat is added on the next people run. Re-running
-those two sources links existing people even when the file has not changed. Census does not need
-to run again.
+```json
+{
+  "states": ["MD"],
+  "counties": [{ "state": "MD", "name": "Montgomery" }],
+  "places": [{ "state": "MD", "name": "Rockville" }],
+  "schoolDistricts": [{ "state": "MD", "name": "Montgomery County Public Schools" }],
+  "specialDistricts": []
+}
+```
+
+```bash
+pnpm pipeline:pilot --list data/pilot.json --dry-run
+pnpm pipeline:pilot --list data/pilot.json
+```
+
+Do not run this until the pilot jurisdictions, sources, and test addresses are confirmed.
+Order, once per listed state: `tiger.boundaries`, `congress.legislators`, `openstates.people`,
+then each `page.directory` source whose config state and county match a listed county.
+Runs use the System principal and store a checksum on `source_runs.snapshot_sha`.
+
+Congress and Open States write the person, the seat, and the current term. Phone, office
+address, and contact-form URL are stored on the office, with the source and last-updated
+time. A U.S. representative is attached to the Census congressional district (`24` plus the
+two-digit district, so Maryland 8 is `2408`). A U.S. senator is attached to the state, one
+office per class. A state legislator is attached to the Census upper or lower district (`24`
+plus the three-character district). An email is stored only when the mailbox contains part of
+the person's name or is an office mailbox (`info`, `office`, `council`, and the same kind).
+Any other email is queued for review and is not shown. If that district is not loaded yet,
+the person is saved and the seat is added on the next people run. Re-running those two sources
+links existing people even when the file has not changed. Census does not need to run again.
 
 One collector:
 
@@ -94,8 +122,9 @@ TIGER downloads the pilot state's layers from `https://www2.census.gov/geo/tiger
 place, county subdivision, and school districts). County boundaries come from the Census
 cartographic file `cb_{YEAR}_us_county_500k.zip` because the TIGER/Line national county file
 is over 50 MB. A 404 on elementary or secondary school districts is skipped when Census does
-not publish that layer for the state. The national ZCTA file is over 50 MB, so that layer is
-skipped and the run says so. County subdivisions, congressional districts, and state legislative districts store the Census long name (`NAMELSAD`), so a Maryland election district is `District 1` or `District 10, Deer Park` rather than the short code `1`. Cities and counties keep the short name (`Rockville`, `Montgomery`). Jurisdictions upsert on `(type, geoid)`
+not publish that layer for the state. ZIP (ZCTA) polygons are clipped to the state with GDAL
+and stored as jurisdictions. A ZIP lookup that crosses more than one district of the same type
+returns those candidates with confidence MULTIPLE. County subdivisions, congressional districts, and state legislative districts store the Census long name (`NAMELSAD`), so a Maryland election district is `District 1` or `District 10, Deer Park` rather than the short code `1`. Cities and counties keep the short name (`Rockville`, `Montgomery`). Jurisdictions upsert on `(type, geoid)`
 with `ST_Multi(ST_MakeValid(...))`. Parents are state, then county, then place.
 `boundary_vintage` is `TIGER{YEAR}`.
 
@@ -104,10 +133,10 @@ with `ST_Multi(ST_MakeValid(...))`. Parents are state, then county, then place.
 In the admin API, `pendingSourceChanges` (`admin.civic:read`) lists queued rows.
 `decideSourceChange` (`admin.source:decide`) accepts or rejects one row.
 
-Accept applies the value when the row already points at a record: phone and email update
-that office, address updates the office's first street line, and a name or title updates
-the official. A brand-new name has no official yet, so accept does not create one. Enter
-the official in admin, then reject the leftover pending row. Reject discards the value.
+Accept of a `directory` row creates the office when the page has no `officeId`, then the
+official and the current term, including phone, email, and address. Other accepted rows update
+the record they already point at. Reject discards the value. An email queued from Congress or
+Open States stays hidden until an editor accepts it.
 
 ## 5. Re-run
 

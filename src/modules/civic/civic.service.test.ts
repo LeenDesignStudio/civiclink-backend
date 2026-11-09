@@ -214,21 +214,19 @@ describe('CivicService public reads', () => {
     await expect(service.getOffice(context(), { slug: 'district-a' })).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('redirects a retired official and an official with no current term on an active office', async () => {
+  it('hides a retired official and an official with no current term', async () => {
     const service = harness({
       officials: [
         official({ slug: 'retired', status: 'RETIRED' }),
         official({ slug: 'former', terms: [term({ isCurrent: false })] }),
+        official({ slug: 'unseated', terms: [] }),
         official({ slug: 'current' }),
       ],
     });
     const ctx = context();
-    await expect(service.getOfficial(ctx, { slug: 'retired' })).resolves.toMatchObject({
-      redirectOfficeSlug: 'district-a',
-    });
-    await expect(service.getOfficial(ctx, { slug: 'former' })).resolves.toMatchObject({
-      redirectOfficeSlug: 'district-a',
-    });
+    await expect(service.getOfficial(ctx, { slug: 'retired' })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.getOfficial(ctx, { slug: 'former' })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.getOfficial(ctx, { slug: 'unseated' })).rejects.toBeInstanceOf(NotFoundError);
     await expect(service.getOfficial(ctx, { slug: 'current' })).resolves.toMatchObject({
       redirectOfficeSlug: null,
     });
@@ -266,6 +264,8 @@ describe('CivicService public reads', () => {
 
     const fallback = await service.getOffice(ctx, { slug: 'default', lookupToken: saved.token });
     expect(fallback.whyItApplies).toBe('Representative represents District A, district 1.');
+    expect(fallback.source.name).toBe('Clerk');
+    expect(fallback.lastUpdatedAt).toEqual(office().lastUpdatedAt);
 
     const overlap = await service.getOffice(ctx, { slug: 'overlap', lookupToken: multiple.token });
     expect(overlap.whyItApplies).toBe('Your ZIP code overlaps District A and District B.');
@@ -434,6 +434,8 @@ describe('CivicService public reads', () => {
     expect(one.terms[0]?.isCurrent).toBe(true);
     expect(calls[0]?.q).toBe('Ada');
     expect(calls[0]?.sort).toBe('NAME');
+    await service.adminOfficials(viewerContext(), { filter: { noCurrentOffice: true } });
+    expect(calls.at(-1)?.noCurrentOffice).toBe(true);
   });
 
   it('returns service links and rejects a resident', async () => {

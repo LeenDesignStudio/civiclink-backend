@@ -16,6 +16,7 @@ export interface SourceConfig {
   tigerYear?: number;
   pageUrl?: string;
   officeId?: string;
+  officeName?: string;
   jurisdictionGeoid?: string;
   selectors?: PageSelectors;
 }
@@ -65,6 +66,8 @@ export interface ZipConvertRequest {
   shapefile?: string;
   where?: string;
   clipGeoJson?: Uint8Array;
+  /** Read the zip with GDAL range requests and clip it, instead of downloading the national file. */
+  remoteUrl?: string;
 }
 
 export interface HttpResult {

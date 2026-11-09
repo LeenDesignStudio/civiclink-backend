@@ -115,12 +115,16 @@ describe('tiger collector', () => {
       maxBytes: BULK_CAP,
       convertZip: (request) => {
         converted.push(request.layer);
-        if (request.layer === 'ZCTA520') expect(request.clipGeoJson).toBeInstanceOf(Uint8Array);
+        if (request.layer === 'ZCTA520') {
+          expect(request.remoteUrl).toContain('zcta520.zip');
+          expect(request.clipGeoJson).toBeInstanceOf(Uint8Array);
+        }
         const features = request.layer === 'COUNTY' ? fixture.features.filter((feature) => feature.properties.tigerLayer === 'COUNTY') : [];
         return Promise.resolve(new TextEncoder().encode(JSON.stringify({ type: 'FeatureCollection', features })));
       },
     });
-    expect(calls.map((call) => call.url)).toEqual(plan.map((layer) => layer.url));
+    expect(calls.map((call) => call.url)).toEqual(plan.filter((layer) => layer.id !== 'ZCTA520').map((layer) => layer.url));
+    expect(converted).toContain('ZCTA520');
     expect(calls[0]?.timeoutMs).toBe(TIGER_FETCH_TIMEOUT_MS);
     expect(calls[0]?.maxBytes).toBe(BULK_CAP);
     expect(converted).toHaveLength(11);
@@ -156,7 +160,7 @@ describe('tiger collector', () => {
     expect(converted).toBe(0);
   });
 
-  it('skips school-district files Census does not publish and a ZCTA file over the cap', async () => {
+  it('skips school-district files Census does not publish and clips ZCTA remotely', async () => {
     const plan = tigerLayerPlan(2025, 'MD');
     const snap = await tigerCollector.fetch({
       source: source({ state: 'MD', tigerYear: 2025 }),
@@ -166,9 +170,6 @@ describe('tiger collector', () => {
           const layer = plan.find((item) => item.url === url);
           if (layer?.id === 'ELSD' || layer?.id === 'SCSD') {
             return Promise.resolve({ status: 404, body: new Uint8Array(), contentType: 'text/html' });
-          }
-          if (layer?.id === 'ZCTA520') {
-            return Promise.resolve({ status: 200, body: new Uint8Array(), contentType: 'application/zip', contentLength: 9 });
           }
           return Promise.resolve({ status: 200, body: new Uint8Array([1]), contentType: 'application/zip' });
         },
@@ -180,9 +181,9 @@ describe('tiger collector', () => {
     });
     expect(snap.notice).toContain('ELSD skipped');
     expect(snap.notice).toContain('SCSD skipped');
-    expect(snap.notice).toContain('ZCTA520 skipped');
+    expect(snap.notice ?? '').not.toContain('ZCTA520 skipped');
     const manifest = JSON.parse(new TextDecoder().decode(snap.body)) as { files: { id: string }[] };
-    expect(manifest.files.map((file) => file.id)).not.toContain('ZCTA520');
+    expect(manifest.files.map((file) => file.id)).toContain('ZCTA520');
     expect(tigerCollector.normalise(snap).map((row) => row.fields.geoid)).toEqual(['24031']);
   });
 });

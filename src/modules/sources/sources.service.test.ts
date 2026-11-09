@@ -25,6 +25,10 @@ class Store implements Pick<
   | 'findPending'
   | 'decidePending'
   | 'applyField'
+  | 'applyDirectory'
+  | 'findOfficeIdByKey'
+  | 'hasPendingField'
+  | 'markPilot'
   | 'listPending'
   | 'markRunning'
   | 'finishRun'
@@ -94,6 +98,19 @@ class Store implements Pick<
   applyField(_type: PendingRow['entityType'], _id: string, _field: string, value: string | null): Promise<void> {
     this.applied = value;
     return Promise.resolve();
+  }
+  applyDirectory(): Promise<void> {
+    this.applied = 'directory';
+    return Promise.resolve();
+  }
+  findOfficeIdByKey(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  hasPendingField(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+  markPilot(): Promise<number> {
+    return Promise.resolve(0);
   }
   listPending(): Promise<PendingRow[]> {
     return Promise.resolve(this.pending ? [this.pending] : []);

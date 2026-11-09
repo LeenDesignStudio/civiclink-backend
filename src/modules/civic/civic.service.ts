@@ -33,7 +33,6 @@ import type {
   OfficeProfile,
   OfficeRecord,
   OfficialProfile,
-  OfficialRecord,
   PlanDto,
   LegalVersionDto,
   ServiceCategoryDto,
@@ -249,13 +248,6 @@ export function toServicePreview(record: ServiceRecord): ServicePreview {
   };
 }
 
-function redirectOfficeSlug(official: OfficialRecord): string | null {
-  const currentActive = official.terms.find((term) => term.isCurrent && term.office.status === 'ACTIVE');
-  if (official.status === 'ACTIVE' && currentActive) return null;
-  const preferred = official.terms.find((term) => term.office.status === 'ACTIVE') ?? official.terms[0];
-  return preferred?.office.slug ?? null;
-}
-
 export class CivicService {
   private readonly repo: CivicStore;
   private readonly lookups: LookupReader;
@@ -291,13 +283,11 @@ export class CivicService {
     ctx.authz.require('public.civic:read');
     const query = parseOfficialQuery(input);
     const official = await this.repo.findOfficialBySlug(query.slug);
-    if (!official) throw new NotFoundError();
+    if (!official || official.status !== 'ACTIVE') throw new NotFoundError();
     const now = this.clock.now();
     const lookup = query.lookupToken ? await this.lookups.findActive(query.lookupToken, now) : null;
-    const redirect = redirectOfficeSlug(official);
-    const current = official.terms.find(
-      (term) => official.status === 'ACTIVE' && term.isCurrent && term.office.status === 'ACTIVE',
-    );
+    const current = official.terms.find((term) => term.isCurrent && term.office.status === 'ACTIVE');
+    if (!current) throw new NotFoundError();
     return {
       id: official.id,
       slug: official.slug,
@@ -314,19 +304,17 @@ export class CivicService {
         official.source.freshnessDays,
         now,
       ),
-      redirectOfficeSlug: redirect,
-      whyItApplies: current
-        ? renderWhyItApplies({
-            officeName: current.office.name,
-            whyTemplate: current.office.whyTemplate,
-            jurisdictionId: current.office.jurisdiction.id,
-            jurisdictionName: current.office.jurisdiction.name,
-            jurisdictionType: current.office.jurisdiction.type,
-            jurisdictionLevel: current.office.jurisdiction.level,
-            districtCode: current.office.jurisdiction.districtCode,
-            lookup,
-          })
-        : null,
+      redirectOfficeSlug: null,
+      whyItApplies: renderWhyItApplies({
+        officeName: current.office.name,
+        whyTemplate: current.office.whyTemplate,
+        jurisdictionId: current.office.jurisdiction.id,
+        jurisdictionName: current.office.jurisdiction.name,
+        jurisdictionType: current.office.jurisdiction.type,
+        jurisdictionLevel: current.office.jurisdiction.level,
+        districtCode: current.office.jurisdiction.districtCode,
+        lookup,
+      }),
     };
   }
 
@@ -472,6 +460,7 @@ export class CivicService {
         ...(filter.officeType ? { officeType: filter.officeType } : {}),
         ...(filter.officeId ? { officeId: filter.officeId } : {}),
         ...(filter.freshness ? { freshness: filter.freshness } : {}),
+        ...(filter.noCurrentOffice ? { noCurrentOffice: true } : {}),
         ...(filter.q ? { q: filter.q } : {}),
       }),
     );

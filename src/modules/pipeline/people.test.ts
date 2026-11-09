@@ -61,6 +61,9 @@ describe('congress and open states fixtures', () => {
     party: Democratic
     start: '2025-01-03'
     url: https://house.example.gov/rita
+    phone: 202-225-0008
+    address: 101 Independence Ave Washington DC 20515
+    contact_form: https://house.example.gov/contact
 `;
     const snap = await congressCollector.fetch({
       source: source({ config: { state: 'MD' }, url: 'https://example.com/legislators.yaml' }),
@@ -77,6 +80,9 @@ describe('congress and open states fixtures', () => {
     expect(row?.fields.seatLabel).toBe('8');
     expect(row?.fields.termStart).toBe('2025-01-03');
     expect(row?.fields.website).toBe('https://house.example.gov/rita');
+    expect(row?.fields.phone).toBe('202-225-0008');
+    expect(row?.fields.address).toBe('101 Independence Ave Washington DC 20515');
+    expect(row?.fields.contactUrl).toBe('https://house.example.gov/contact');
   });
 
   it('reads the Open States CSV for the requested state', async () => {
@@ -146,5 +152,27 @@ describe('congress and open states fixtures', () => {
     expect(row?.fields.officeKey).toBe('seat:sldu:24014');
     expect(row?.fields.contactEmail).toBe('ada@senate.md.gov');
     expect(row?.fields.photoUrl).toBe('https://example.gov/ada.jpg');
+  });
+
+  it('keeps a quoted address in its column and holds an email that does not match the name', async () => {
+    const body =
+      'id,name,current_chamber,current_district,capitol_address,email\n' +
+      'ocd-person/md-14,Aaron Aylward,upper,14,"100 State Circle, Annapolis, MD 21401",tim.czmowski@example.gov\n';
+    const snap = await openStatesCollector.fetch({
+      source: source({
+        collectorKey: 'openstates.people',
+        url: 'https://data.openstates.org/people/current/',
+        config: { state: 'MD' },
+      }),
+      maxBytes: 100_000,
+      fetch: {
+        get: () => Promise.resolve({ status: 200, body: new TextEncoder().encode(body), contentType: 'text/csv' }),
+      },
+    });
+    const row = openStatesCollector.normalise(snap)[0];
+    expect(row?.fields.capitolAddress).toBe('100 State Circle, Annapolis, MD 21401');
+    expect(row?.fields.contactEmail).toBeUndefined();
+    expect(row?.fields.emailReview).toBe('tim.czmowski@example.gov');
+    expect(row?.fields.jurisdictionGeoid).toBe('24014');
   });
 });

@@ -72,6 +72,7 @@ export interface OfficeAdminQuery extends AdminPageQuery {
 
 export interface OfficialAdminQuery extends AdminPageQuery {
   officeId?: string;
+  noCurrentOffice?: boolean;
   level?: JurisdictionRecord['level'];
   jurisdictionId?: string;
   officeType?: 'ELECTED' | 'APPOINTED' | 'DEPARTMENT' | 'COMMISSION';
@@ -170,7 +171,7 @@ export interface CivicStore {
   updateService(id: string, input: UpsertServiceInput): Promise<AdminServiceRecord>;
   setServiceStatus(id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<void>;
   officeTiles(now: Date): Promise<{ active: number; vacant: number; outdated: number; missingContact: number }>;
-  officialTiles(now: Date): Promise<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number }>;
+  officialTiles(now: Date): Promise<{ active: number; termsEndingWithin90d: number; outdated: number; missingContact: number; noCurrentOffice: number }>;
   jurisdictionTiles(): Promise<{ active: number; missingBoundary: number; noOffices: number; outdated: number }>;
   serviceTiles(now: Date): Promise<{ total: number; active: number; inactive: number; needsValidation: number }>;
   createCategory(input: UpsertServiceCategoryInput): Promise<ServiceCategoryRecord>;
@@ -940,7 +941,9 @@ export class CivicRepo implements CivicStore {
       if (query.officeType) office.officeType = query.officeType;
       if (query.jurisdictionId) office.jurisdictionId = query.jurisdictionId;
       if (query.level) office.jurisdiction = { level: query.level };
-      if (query.officeId || query.officeType || query.jurisdictionId || query.level) {
+      if (query.noCurrentOffice) {
+        where.terms = { none: { isCurrent: true } };
+      } else if (query.officeId || query.officeType || query.jurisdictionId || query.level) {
         where.terms = {
           some: {
             ...(query.officeId ? { officeId: query.officeId } : {}),
@@ -1453,7 +1456,7 @@ export class CivicRepo implements CivicStore {
     const outdatedBefore = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
     const endingBy = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
     return this.run(async () => {
-      const [active, termsEndingWithin90d, outdated, missingContact] = await Promise.all([
+      const [active, termsEndingWithin90d, outdated, missingContact, noCurrentOffice] = await Promise.all([
         this.db.official.count({ where: { status: 'ACTIVE' } }),
         this.db.officeTerm.count({
           where: { isCurrent: true, termEnd: { gte: now, lte: endingBy }, official: { status: 'ACTIVE' } },
@@ -1468,8 +1471,9 @@ export class CivicRepo implements CivicStore {
           },
         }),
         this.db.official.count({ where: { status: 'ACTIVE', website: null } }),
+        this.db.official.count({ where: { status: 'ACTIVE', terms: { none: { isCurrent: true } } } }),
       ]);
-      return { active, termsEndingWithin90d, outdated, missingContact };
+      return { active, termsEndingWithin90d, outdated, missingContact, noCurrentOffice };
     });
   }
 

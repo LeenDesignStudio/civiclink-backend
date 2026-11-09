@@ -365,6 +365,7 @@ input AdminOfficialFilter {
   freshness: Freshness
   jurisdictionId: ID
   level: GovLevel
+  noCurrentOffice: Boolean
   officeId: ID
   officeType: OfficeType
   q: String
@@ -396,6 +397,7 @@ type AdminOfficialTermOffice {
 type AdminOfficialTiles {
   active: Int
   missingContact: Int
+  noCurrentOffice: Int
   outdated: Int
   termsEndingWithin90d: Int
 }
