@@ -1,11 +1,35 @@
 import { createRequire } from 'node:module';
 import type { Workbook as WorkbookType, Worksheet } from 'exceljs';
-
-const { Workbook } = createRequire(import.meta.url)('exceljs') as { Workbook: new () => WorkbookType };
 import { computeFreshness, renderWhyItApplies } from '../civic/civic.service.js';
 import { GOV_LEVELS, type GovLevel, type JurisdictionType } from '../civic/civic.dto.js';
 import type { FreshnessOverride } from '../civic/civic.dto.js';
 import { reviewEmail } from '../pipeline/contacts.js';
+
+const excel = createRequire(import.meta.url)('exceljs') as {
+  Workbook: new () => WorkbookType;
+  stream: {
+    xlsx: {
+      WorkbookWriter: new (options: { filename: string; useSharedStrings: boolean; useStyles: boolean }) => StreamBook;
+    };
+  };
+};
+const { Workbook } = excel;
+
+interface StreamSheet {
+  columns: Array<{ width: number }>;
+  addRow(values: Array<string | number>): { font?: { bold?: boolean }; commit(): void };
+  commit(): void;
+}
+
+interface StreamBook {
+  creator: string;
+  created: Date;
+  addWorksheet(
+    name: string,
+    options?: { views?: Worksheet['views']; autoFilter?: Worksheet['autoFilter'] },
+  ): StreamSheet;
+  commit(): Promise<void>;
+}
 
 const VACANT = 'VACANT';
 const CLIP = 32_000;
@@ -265,6 +289,54 @@ export function buildCivicWorkbook(data: CivicExport): WorkbookType {
 
 export function sheetRowCounts(book: WorkbookType): Array<{ sheet: string; rows: number }> {
   return book.worksheets.map((sheet) => ({ sheet: sheet.name, rows: Math.max(sheet.rowCount - 1, 0) }));
+}
+
+/** Writes one sheet at a time so the workbook is not held in memory. */
+export async function writeCivicWorkbook(
+  data: CivicExport,
+  filename: string,
+): Promise<Array<{ sheet: string; rows: number }>> {
+  const book = new excel.stream.xlsx.WorkbookWriter({ filename, useSharedStrings: false, useStyles: true });
+  book.creator = 'CivicLink';
+  book.created = data.generatedAt;
+  const cards = civicCardRows(data);
+  const counts = [
+    await writeSheet(book, 'README', ['Topic', 'Notes'], readmeRows(data)),
+    await writeSheet(book, 'Civic_Card_Rows', CARD_HEADERS, cards),
+    await writeSheet(book, 'Jurisdictions', JURISDICTION_HEADERS, data.jurisdictions.map(jurisdictionRow)),
+    await writeSheet(book, 'Offices', OFFICE_HEADERS, data.offices.map(officeRow)),
+    await writeSheet(book, 'Officials', OFFICIAL_HEADERS, data.officials.map(officialRow)),
+    await writeSheet(book, 'Terms', TERM_HEADERS, data.terms.map(termRow)),
+    await writeSheet(book, 'Sources', SOURCE_HEADERS, data.sources.map(sourceRow)),
+    await writeSheet(book, 'Field_Coverage', ['scope', 'group', 'field', 'total', 'filled', 'filled %'], coverageRows(data, cards)),
+    await writeSheet(book, 'Problems', ['type', 'record ID', 'name', 'detail'], problemRows(data)),
+  ];
+  await book.commit();
+  return counts;
+}
+
+async function writeSheet(
+  book: StreamBook,
+  name: string,
+  headers: readonly string[],
+  rows: Array<Array<string | number>>,
+): Promise<{ sheet: string; rows: number }> {
+  const sheet = book.addWorksheet(name, {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    autoFilter: {
+      from: { row: 1, column: 1 },
+      to: { row: Math.max(rows.length + 1, 1), column: headers.length },
+    },
+  });
+  sheet.columns = headers.map((header, index) => ({
+    width: name === 'README' && index === 1 ? 120 : Math.min(48, Math.max(12, header.length + 2)),
+  }));
+  const header = sheet.addRow([...headers]);
+  header.font = { bold: true };
+  header.commit();
+  for (const row of rows) sheet.addRow(row).commit();
+  sheet.commit();
+  return { sheet: name, rows: rows.length };
 }
 
 function readmeRows(data: CivicExport): string[][] {
@@ -564,18 +636,25 @@ function problemRows(data: CivicExport): string[][] {
     }
   }
 
+  const officeById = new Map(data.offices.map((row) => [row.id, row]));
+  const statesByOfficial = new Map<string, Set<string>>();
+  for (const term of data.terms) {
+    if (!term.isCurrent) continue;
+    const office = officeById.get(term.officeId);
+    const place = office?.jurisdictionId ? places.get(office.jurisdictionId) : undefined;
+    const state = text(place?.state).toUpperCase();
+    if (!state) continue;
+    const states = statesByOfficial.get(term.officialId) ?? new Set<string>();
+    states.add(state);
+    statesByOfficial.set(term.officialId, states);
+  }
   const byNameState = new Map<string, ExportOfficial[]>();
   for (const person of data.officials) {
-    const states = new Set<string>();
-    for (const term of data.terms) {
-      if (!term.isCurrent || term.officialId !== person.id) continue;
-      const office = data.offices.find((row) => row.id === term.officeId);
-      const place = office?.jurisdictionId ? places.get(office.jurisdictionId) : undefined;
-      const state = text(place?.state).toUpperCase();
-      if (state) states.add(state);
-    }
+    const states = statesByOfficial.get(person.id);
+    if (!states) continue;
+    const name = person.fullName.trim().toLowerCase().replace(/\s+/g, ' ');
     for (const state of states) {
-      const key = `${person.fullName.trim().toLowerCase().replace(/\s+/g, ' ')}|${state}`;
+      const key = `${name}|${state}`;
       const list = byNameState.get(key) ?? [];
       list.push(person);
       byNameState.set(key, list);

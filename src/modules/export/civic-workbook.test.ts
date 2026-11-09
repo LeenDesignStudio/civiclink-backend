@@ -1,9 +1,15 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { Workbook } from 'exceljs';
 import {
   buildCivicWorkbook,
   exportFileName,
   parseExportArgs,
   sheetRowCounts,
+  writeCivicWorkbook,
   type CivicExport,
   type ExportJurisdiction,
   type ExportOffice,
@@ -312,5 +318,18 @@ describe('civic workbook export', () => {
     expect(kinds).toContain('Duplicate official');
     expect(sheetRowCounts(book).find((row) => row.sheet === 'Civic_Card_Rows')?.rows).toBe(3);
     expect(book.worksheets.some((sheet) => /user|follow|notification/i.test(sheet.name))).toBe(false);
+  });
+
+  it('streams the workbook without keeping every cell in memory', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'civic-export-'));
+    const file = path.join(dir, 'civic.xlsx');
+    const counts = await writeCivicWorkbook(sample(), file);
+    expect(counts.find((row) => row.sheet === 'Civic_Card_Rows')?.rows).toBe(3);
+    const { Workbook } = createRequire(import.meta.url)('exceljs') as { Workbook: new () => Workbook };
+    const book = new Workbook();
+    await book.xlsx.readFile(file);
+    expect(book.getWorksheet('Civic_Card_Rows')?.getRow(4).getCell(10).value).toBe('VACANT');
+    expect(book.getWorksheet('README')?.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 });
+    await rm(dir, { recursive: true, force: true });
   });
 });

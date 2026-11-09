@@ -5,10 +5,9 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { env } from '../src/config/env.js';
 import {
-  buildCivicWorkbook,
   exportFileName,
   parseExportArgs,
-  sheetRowCounts,
+  writeCivicWorkbook,
   type CivicExport,
   type ExportJurisdiction,
   type ExportOffice,
@@ -28,13 +27,12 @@ const db = new PrismaClient({
 
 try {
   const data = await loadExport(db, args.state, args.pilotOnly);
-  const book = buildCivicWorkbook(data);
   const directory = path.resolve('exports');
   await mkdir(directory, { recursive: true });
   const file = path.join(directory, exportFileName(data.generatedAt));
-  await book.xlsx.writeFile(file);
+  const counts = await writeCivicWorkbook(data, file);
   process.stdout.write(`${file}\n`);
-  for (const row of sheetRowCounts(book)) process.stdout.write(`${row.sheet}\t${row.rows}\n`);
+  for (const row of counts) process.stdout.write(`${row.sheet}\t${row.rows}\n`);
 } catch (err: unknown) {
   process.stderr.write(`${safeMessage(err)}\n`);
   process.exitCode = 1;
