@@ -8,3 +8,4 @@ src/generated/
 .DS_Store
 test/setup/.db-url
 schema.graphql.tmp
+exports/

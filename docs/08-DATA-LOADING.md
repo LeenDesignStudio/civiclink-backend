@@ -143,3 +143,9 @@ Open States stays hidden until an editor accepts it.
 Run the same command. An unchanged download is skipped and does not add pending rows.
 Use `--dry-run` first when you change selectors. A TIGER re-run retires active jurisdictions
 from that source and state whose GEOID is no longer in the file.
+
+## 6. Export a workbook
+
+`pnpm data:export` reads the database and writes `exports/civic-data-<date>.xlsx`.
+It does not write to the database, and it does not include residents, saved locations,
+follows, or notifications. Optional flags: `--state MD` and `--pilot-only`.
