@@ -92,7 +92,7 @@ A Super Admin can replace the provider keys (site URL, Google, Apple, Maps, Stri
 | `APP_ENV` | | `development` \| `test` \| `staging` \| `production` |
 | `PORT` | | `4000` |
 | `LOG_LEVEL` | | `info` |
-| `PUBLIC_WEB_URL` | | `https://civiclink.com` (used for redirects, email links) |
+| `PUBLIC_WEB_URL` | | `https://civiclink.com` (redirects and email links). A localhost sign-in returns to that localhost origin instead |
 | `CORS_ORIGINS` | | comma list; dev only needs `http://localhost:3000` |
 | `DATABASE_URL` | S | app role connection string (`sslmode=verify-full` outside dev) |
 | `MIGRATION_DATABASE_URL` | S | owner role, used only by `prisma.config.ts` |

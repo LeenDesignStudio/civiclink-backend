@@ -26,6 +26,7 @@ import {
   residentOauthFailure,
 } from '../../auth/oauth/sign-in-failure.js';
 import { assertReturnTo, parseIntent, residentReturnUrl } from '../../auth/return-to.js';
+import { loopbackWebOrigin } from '../../auth/web-origin.js';
 import type { SessionService } from '../../auth/sessions.js';
 import { ACCESS_TOKEN_VERSION, signAccessToken } from '../../auth/tokens.js';
 import type { ResidentsService } from '../../modules/residents/residents.service.js';
@@ -65,7 +66,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         const intent = parseIntent(request.query.intent);
         const returnTo = assertReturnTo(request.query.returnTo);
         const oauth = provider === 'google' ? deps.google : deps.apple;
-        const redirectUri = new URL(`/auth/${provider}/callback`, deps.webUrl).toString();
+        const siteUrl = requestWebOrigin(request) ?? deps.webUrl;
+        const redirectUri = new URL(`/auth/${provider}/callback`, siteUrl).toString();
         const start = await oauth.begin(redirectUri);
         setOAuthCookie(
           reply,
@@ -76,6 +78,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
             codeVerifier: start.codeVerifier,
             intent,
             returnTo,
+            ...(siteUrl === deps.webUrl ? {} : { webOrigin: siteUrl }),
           },
           clock.now(),
         );
@@ -92,10 +95,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const query = callbackQuery.parse(request.query);
       await finishResident(deps, clock, 'google', query, undefined, request, reply);
     } catch (err) {
+      const siteUrl = residentSiteUrl(request, clock.now(), deps.webUrl);
       clearOAuthCookie(reply, 'lax');
       clearOAuthCookie(reply, 'none');
-      logResidentCallback(deps.webUrl, 'google', request, err);
-      return redirectAuthError(reply, deps.webUrl, '/signin', authFailureCode(err));
+      logResidentCallback(siteUrl, 'google', request, err);
+      return redirectAuthError(reply, siteUrl, '/signin', authFailureCode(err));
     }
   });
 
@@ -105,10 +109,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const body = appleBody.parse(request.body ?? {});
       await finishResident(deps, clock, 'apple', body, body.user, request, reply);
     } catch (err) {
+      const siteUrl = residentSiteUrl(request, clock.now(), deps.webUrl);
       clearOAuthCookie(reply, 'lax');
       clearOAuthCookie(reply, 'none');
-      logResidentCallback(deps.webUrl, 'apple', request, err);
-      return redirectAuthError(reply, deps.webUrl, '/signin', authFailureCode(err));
+      logResidentCallback(siteUrl, 'apple', request, err);
+      return redirectAuthError(reply, siteUrl, '/signin', authFailureCode(err));
     }
   });
 
@@ -172,8 +177,9 @@ async function finishResident(
     throw residentOauthFailure('state_mismatch');
   }
   if (payload.codeVerifier.length < 8) throw residentOauthFailure('pkce_missing');
-  const redirectUri = new URL(`/auth/${provider}/callback`, deps.webUrl).toString();
-  const currentUrl = new URL(request.url, deps.webUrl);
+  const siteUrl = loopbackWebOrigin(payload.webOrigin) ?? deps.webUrl;
+  const redirectUri = new URL(`/auth/${provider}/callback`, siteUrl).toString();
+  const currentUrl = new URL(request.url, siteUrl);
   const complete: OAuthCompleteInput = {
     code: query.code,
     redirectUri,
@@ -227,11 +233,28 @@ async function finishResident(
   setRefreshCookie(reply, session.refreshToken);
   const termsAccepted = await deps.residents.termsAreCurrent(user);
   const destination = residentReturnUrl(
-    deps.webUrl,
+    siteUrl,
     payload.returnTo,
     termsAccepted ? undefined : { intent: payload.intent },
   );
   reply.redirect(destination, 302);
+}
+
+function headerText(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function requestWebOrigin(request: FastifyRequest): string | undefined {
+  return (
+    loopbackWebOrigin(headerText(request.headers['x-civiclink-web-origin'])) ??
+    loopbackWebOrigin(headerText(request.headers.origin)) ??
+    loopbackWebOrigin(headerText(request.headers.referer))
+  );
+}
+
+function residentSiteUrl(request: FastifyRequest, now: Date, fallback: string): string {
+  const payload = readOAuthCookie(request.cookies[COOKIE_OAUTH], now);
+  return loopbackWebOrigin(payload?.webOrigin) ?? requestWebOrigin(request) ?? fallback;
 }
 
 function logResidentCallback(

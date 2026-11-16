@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppleOAuth } from '../../auth/oauth/apple.js';
 import type { GoogleOAuth } from '../../auth/oauth/google.js';
 import { idTokenFailure, tokenExchangeFailure } from '../../auth/oauth/sign-in-failure.js';
-import { COOKIE_OAUTH, setOAuthCookie, type OAuthCookiePayload } from '../../auth/cookies.js';
+import { COOKIE_OAUTH, readOAuthCookie, setOAuthCookie, type OAuthCookiePayload } from '../../auth/cookies.js';
 import type { SessionService } from '../../auth/sessions.js';
 import type { Clock } from '../../lib/clock.js';
 import { logger } from '../../lib/logger.js';
@@ -235,3 +235,81 @@ describe('resident oauth callback failure log', () => {
     expect(serialized).not.toContain(COOKIE_OAUTH);
   }
 });
+
+describe('localhost sign-in against the public site', () => {
+  const publicWeb = 'https://civic.example';
+  const begin = vi.fn();
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    begin.mockReset();
+    begin.mockImplementation((redirectUri: string) =>
+      Promise.resolve({
+        url: new URL('https://accounts.google.com/o/oauth2/v2/auth'),
+        state: 'state-value-1',
+        nonce: 'nonce-value-1',
+        codeVerifier: 'verifier-value-1',
+        redirectUri,
+      }),
+    );
+    app = Fastify();
+    await app.register(cookie);
+    registerAuthRoutes(app, {
+      google: { begin, complete: vi.fn() } as unknown as GoogleOAuth,
+      apple: { begin: vi.fn(), complete: vi.fn() } as unknown as AppleOAuth,
+      residents: { upsertFromProvider: vi.fn(), termsAreCurrent: vi.fn() } as unknown as ResidentsService,
+      sessions: { create: vi.fn(), rotate: vi.fn() } as unknown as SessionService,
+      webUrl: publicWeb,
+      clock,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('sends a localhost browser back to localhost', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/auth/google/start?intent=SIGN_IN&returnTo=%2Fme',
+      headers: { 'x-civiclink-web-origin': 'http://localhost:3000' },
+    });
+    expect(response.statusCode).toBe(302);
+    expect(begin).toHaveBeenCalledWith('http://localhost:3000/auth/google/callback');
+    const saved = readOAuthCookie(cookieValue(response.headers['set-cookie']), now);
+    expect(saved?.webOrigin).toBe('http://localhost:3000');
+  });
+
+  it('keeps the public site when the origin is not loopback', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/auth/google/start?intent=SIGN_IN&returnTo=%2Fme',
+      headers: { origin: 'https://evil.example', 'x-civiclink-web-origin': 'https://evil.example' },
+    });
+    expect(response.statusCode).toBe(302);
+    expect(begin).toHaveBeenCalledWith(`${publicWeb}/auth/google/callback`);
+    const saved = readOAuthCookie(cookieValue(response.headers['set-cookie']), now);
+    expect(saved?.webOrigin).toBeUndefined();
+  });
+
+  it('returns a failed localhost callback to the localhost sign-in page', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/auth/google/callback?code=${SECRET}&state=state-value-1`,
+      headers: {
+        host: 'localhost:3000',
+        cookie: `${COOKIE_OAUTH}=${oauthCookie({ webOrigin: 'http://localhost:3000' })}`,
+        'x-civiclink-web-origin': 'http://localhost:3000',
+      },
+    });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe('http://localhost:3000/signin?error=OAUTH_FAILED');
+  });
+});
+
+function cookieValue(header: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(header) ? header.find((item) => item.startsWith(`${COOKIE_OAUTH}=`)) : header;
+  if (!raw) return undefined;
+  const pair = raw.split(';')[0] ?? '';
+  return pair.slice(COOKIE_OAUTH.length + 1);
+}
