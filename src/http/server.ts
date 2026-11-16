@@ -15,6 +15,7 @@ import { env } from '../config/env.js';
 import { Authz } from '../authz/authz.js';
 import { anonymousPrincipal, type Principal } from '../authz/authz.js';
 import { hashIp } from '../lib/crypto.js';
+import { authClientIp } from './client-ip.js';
 import { CODE_META, isAppError } from '../lib/errors.js';
 import { logger as rootLogger } from '../lib/logger.js';
 import { OPERATION_RATES, type RateGate } from '../lib/rate-limit.js';
@@ -72,6 +73,14 @@ export interface ServerDeps {
 /** nginx and the Next.js rewrite both connect from this host. Other hops cannot set the client IP. */
 const TRUSTED_PROXIES = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
 
+/** Credential attempts only. The OAuth callback and session refresh are the rest of one sign-in. */
+function isAuthAttempt(path: string): boolean {
+  if (path === '/admin-auth/login') return true;
+  if (path === '/admin-auth/forgot-password') return true;
+  if (path === '/admin-auth/reset-password') return true;
+  return path === '/auth/google/start' || path === '/auth/apple/start';
+}
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
     trustProxy: TRUSTED_PROXIES,
@@ -120,8 +129,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   app.addHook('onRequest', async (request) => {
     const path = request.url.split('?')[0] ?? '';
-    if (!path.startsWith('/auth/') && !path.startsWith('/admin-auth/')) return;
-    await deps.rateGate.consume('auth', hashIp(request.ip || 'unknown'));
+    if (!isAuthAttempt(path)) return;
+    const client = authClientIp({
+      socketAddress: request.socket.remoteAddress,
+      requestIp: request.ip,
+      forwardedFor: request.headers['x-forwarded-for'],
+      realIp: request.headers['x-real-ip'],
+      stampedIp: request.headers['x-civiclink-client-ip'],
+    });
+    if (!client) return;
+    await deps.rateGate.consume('auth', hashIp(client));
   });
 
   app.addHook('onRequest', async (request, reply) => {

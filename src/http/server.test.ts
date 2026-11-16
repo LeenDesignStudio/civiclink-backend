@@ -98,6 +98,28 @@ describe('http server', () => {
     expect(blocked.json<{ error: { code: string } }>().error.code).toBe('RATE_LIMITED');
     expect(other.statusCode).not.toBe(429);
 
+    const sharedProxy = (client: string) =>
+      server.inject({
+        method: 'GET',
+        url: '/auth/google/start',
+        remoteAddress: '127.0.0.1',
+        headers: { 'x-forwarded-for': '127.0.0.1', 'x-civiclink-client-ip': client },
+      });
+    const stamped = await sharedProxy('203.0.113.20');
+    const stampedAgain = await sharedProxy('203.0.113.20');
+    const otherClient = await sharedProxy('203.0.113.21');
+    expect(stamped.statusCode).not.toBe(429);
+    expect(stampedAgain.statusCode).toBe(429);
+    expect(otherClient.statusCode).not.toBe(429);
+
+    const refresh = await server.inject({
+      method: 'POST',
+      url: '/auth/refresh',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.10' },
+    });
+    expect(refresh.statusCode).not.toBe(429);
+
     const direct = await hit('203.0.113.50', '198.51.100.8');
     const forged = await hit('203.0.113.51', '198.51.100.8');
     expect(direct.statusCode).not.toBe(429);

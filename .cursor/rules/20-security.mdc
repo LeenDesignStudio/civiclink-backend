@@ -51,7 +51,7 @@ alwaysApply: false
 | Class | Limit | Key |
 |---|---|---|
 | `lookup` (resolveLocation, reverseGeocode) | 30 / 10 min | IP |
-| `auth` (OAuth start/callback, refresh, admin login) | 20 / 10 min (`AUTH_RATE_LIMIT_POINTS` / `AUTH_RATE_LIMIT_DURATION`; development default 200 / 1 min) | IP hash of `request.ip`. `X-Forwarded-For` is trusted only from `127.0.0.1`, `::1`, and `::ffff:127.0.0.1` |
+| `auth` (OAuth start, admin login, forgot/reset password) | 20 / 10 min (`AUTH_RATE_LIMIT_POINTS` / `AUTH_RATE_LIMIT_DURATION`; development default 200 / 1 min). Callback and `/auth/refresh` are not counted. | IP hash of the visitor. The Next app stamps `x-civiclink-client-ip` from the rightmost public hop. A loopback or private proxy address is never the shared key. Direct connections cannot set that header. |
 | `contact` | 5 / hour | IP |
 | `correction` | 10 / day | user |
 | `mutation` (resident, default) | 60 / min | user |
