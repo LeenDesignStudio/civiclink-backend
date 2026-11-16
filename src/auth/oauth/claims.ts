@@ -1,14 +1,11 @@
-import { OauthFailedError } from '../../lib/errors.js';
 import type { IdClaims, VerifiedIdentity } from './types.js';
+import { idTokenFailure } from './sign-in-failure.js';
 
 const SKEW_SEC = 60;
 const MAX_IAT_AGE_SEC = 10 * 60;
 
 function fail(reason: string, cause?: unknown): never {
-  throw new OauthFailedError({
-    ...(cause !== undefined ? { cause } : {}),
-    details: { reason },
-  });
+  throw idTokenFailure(reason, cause);
 }
 
 export function emailVerified(value: unknown): boolean {

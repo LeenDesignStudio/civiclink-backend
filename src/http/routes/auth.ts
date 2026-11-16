@@ -2,8 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import '@fastify/cookie';
 import { z } from 'zod';
 import { hashIp } from '../../lib/crypto.js';
-import { isAppError, OauthFailedError, SessionExpiredError, ValidationError } from '../../lib/errors.js';
-import { logger } from '../../lib/logger.js';
+import { isAppError, SessionExpiredError, ValidationError } from '../../lib/errors.js';
 import type { Clock } from '../../lib/clock.js';
 import { systemClock } from '../../lib/clock.js';
 import type { AppleOAuth } from '../../auth/oauth/apple.js';
@@ -20,6 +19,12 @@ import {
   setRefreshCookie,
 } from '../../auth/cookies.js';
 import { authFailureCode, redirectAuthError, sendAuthError } from '../../auth/http-error.js';
+import {
+  callbackFailure,
+  logResidentSignInFailure,
+  requestHost,
+  residentOauthFailure,
+} from '../../auth/oauth/sign-in-failure.js';
 import { assertReturnTo, parseIntent, residentReturnUrl } from '../../auth/return-to.js';
 import type { SessionService } from '../../auth/sessions.js';
 import { ACCESS_TOKEN_VERSION, signAccessToken } from '../../auth/tokens.js';
@@ -29,6 +34,7 @@ const callbackQuery = z.object({
   code: z.string().min(1).max(2048).optional(),
   state: z.string().min(1).max(200).optional(),
   error: z.string().max(100).optional(),
+  error_description: z.string().max(300).optional(),
 });
 
 const appleBody = callbackQuery.extend({
@@ -88,7 +94,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     } catch (err) {
       clearOAuthCookie(reply, 'lax');
       clearOAuthCookie(reply, 'none');
-      logOauth(request.id, err);
+      logResidentCallback(deps.webUrl, 'google', request, err);
       return redirectAuthError(reply, deps.webUrl, '/signin', authFailureCode(err));
     }
   });
@@ -101,7 +107,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     } catch (err) {
       clearOAuthCookie(reply, 'lax');
       clearOAuthCookie(reply, 'none');
-      logOauth(request.id, err);
+      logResidentCallback(deps.webUrl, 'apple', request, err);
       return redirectAuthError(reply, deps.webUrl, '/signin', authFailureCode(err));
     }
   });
@@ -141,18 +147,31 @@ async function finishResident(
   deps: AuthRouteDeps,
   clock: Clock,
   provider: 'google' | 'apple',
-  query: { code?: string | undefined; state?: string | undefined; error?: string | undefined },
+  query: {
+    code?: string | undefined;
+    state?: string | undefined;
+    error?: string | undefined;
+    error_description?: string | undefined;
+  },
   appleUser: string | undefined,
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  const rawCookie = request.cookies[COOKIE_OAUTH];
   if (query.error || !query.code || !query.state) {
-    throw new OauthFailedError({ details: { reason: 'callback' } });
+    throw callbackFailure({
+      providerError: query.error,
+      providerErrorDescription: query.error_description,
+      hasCookie: Boolean(rawCookie),
+      hasState: Boolean(query.state),
+    });
   }
-  const payload = readOAuthCookie(request.cookies[COOKIE_OAUTH], clock.now());
-  if (!payload || payload.provider !== provider || payload.state !== query.state) {
-    throw new OauthFailedError({ details: { reason: 'state' } });
+  const payload = readOAuthCookie(rawCookie, clock.now());
+  if (!payload) throw residentOauthFailure('state_cookie_missing');
+  if (payload.provider !== provider || payload.state !== query.state) {
+    throw residentOauthFailure('state_mismatch');
   }
+  if (payload.codeVerifier.length < 8) throw residentOauthFailure('pkce_missing');
   const redirectUri = new URL(`/auth/${provider}/callback`, deps.webUrl).toString();
   const currentUrl = new URL(request.url, deps.webUrl);
   const complete: OAuthCompleteInput = {
@@ -168,24 +187,40 @@ async function finishResident(
   };
   const oauth = provider === 'google' ? deps.google : deps.apple;
   const identity = await oauth.complete(complete);
-  const user = await deps.residents.upsertFromProvider({
-    provider: identity.provider,
-    providerSubject: identity.subject,
-    email: identity.email,
-    emailVerified: identity.emailVerified,
-    ...(identity.name ? { displayName: identity.name } : {}),
-  });
+  let user;
+  try {
+    user = await deps.residents.upsertFromProvider({
+      provider: identity.provider,
+      providerSubject: identity.subject,
+      email: identity.email,
+      emailVerified: identity.emailVerified,
+      ...(identity.name ? { displayName: identity.name } : {}),
+    });
+  } catch (err) {
+    if (isAppError(err) && (err.code === 'ACCOUNT_DELETED' || err.code === 'ACCOUNT_PENDING_DELETION')) throw err;
+    throw residentOauthFailure('user_upsert', { cause: err });
+  }
   const ua = request.headers['user-agent'];
-  const session = await deps.sessions.create({
-    userId: user.id,
-    userStatus: user.status,
-    ...(typeof ua === 'string' ? { userAgent: ua.slice(0, 400) } : {}),
-    ipHash: hashIp(request.ip || 'unknown'),
-  });
-  const access = await signAccessToken(
-    { sub: user.id, typ: 'resident', sid: session.sessionId, ver: ACCESS_TOKEN_VERSION },
-    { now: clock.now() },
-  );
+  let session;
+  try {
+    session = await deps.sessions.create({
+      userId: user.id,
+      userStatus: user.status,
+      ...(typeof ua === 'string' ? { userAgent: ua.slice(0, 400) } : {}),
+      ipHash: hashIp(request.ip || 'unknown'),
+    });
+  } catch (err) {
+    throw residentOauthFailure('session_create', { cause: err });
+  }
+  let access;
+  try {
+    access = await signAccessToken(
+      { sub: user.id, typ: 'resident', sid: session.sessionId, ver: ACCESS_TOKEN_VERSION },
+      { now: clock.now() },
+    );
+  } catch (err) {
+    throw residentOauthFailure('session_create', { cause: err });
+  }
   clearOAuthCookie(reply, 'lax');
   clearOAuthCookie(reply, 'none');
   setAccessCookie(reply, access);
@@ -199,9 +234,16 @@ async function finishResident(
   reply.redirect(destination, 302);
 }
 
-function logOauth(requestId: string, err: unknown): void {
-  const code = authFailureCode(err);
-  const reason =
-    isAppError(err) && typeof err.details?.reason === 'string' ? err.details.reason : undefined;
-  logger.warn({ requestId, code, ...(reason ? { reason } : {}) }, 'resident sign-in failed');
+function logResidentCallback(
+  webUrl: string,
+  provider: 'google' | 'apple',
+  request: FastifyRequest,
+  err: unknown,
+): void {
+  logResidentSignInFailure({
+    requestId: request.id,
+    err,
+    redirectUri: new URL(`/auth/${provider}/callback`, webUrl).toString(),
+    host: requestHost(request.host),
+  });
 }

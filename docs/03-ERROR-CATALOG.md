@@ -43,7 +43,7 @@ REST routes return `{ "error": { "code", "message", "requestId" } }` with the HT
 | `ACCOUNT_PENDING_DELETION` | ForbiddenError | 403 | "Your account is scheduled for deletion. Restore it to continue." | Resident in PENDING_DELETION |
 | `ACCOUNT_DELETED` | ForbiddenError | 403 | "This account has been deleted." | Sign-in to a DELETED user |
 | `NOT_PENDING_DELETION` | ConflictError | 409 | "Your account isn't scheduled for deletion." | restoreAccount when ACTIVE |
-| `OAUTH_FAILED` | UnauthenticatedError | 400 | "Sign-in didn't complete. Please try again." | state/nonce/PKCE/token verification failure or provider error (cause logged) |
+| `OAUTH_FAILED` | UnauthenticatedError | 400 | "Sign-in didn't complete. Please try again." | Resident callback failure. WARN `resident sign-in failed` with reason (`state_cookie_missing`, `state_mismatch`, `pkce_missing`, `token_exchange`, `id_token_verify`, `user_upsert`, `session_create`, `unknown`), provider error code and description when present, redirect URI, and request host. The log includes the underlying error name and message only. No tokens, authorization codes, cookies, or secrets. |
 | `ADMIN_NOT_ALLOWED` | ForbiddenError | 403 | "This account doesn't have admin access." | Not in allowlist / wrong domain / deactivated |
 | `ADMIN_LOCKED` | ForbiddenError | 423 | "Too many attempts. Try again in 15 minutes." | Admin lockout. `retryAfterSeconds` is the time left on the lock |
 | `ADMIN_INVALID_CREDENTIALS` | UnauthenticatedError | 401 | "Email or password is incorrect." | Unknown email, wrong password, deactivated admin, or no password. Same code for each |

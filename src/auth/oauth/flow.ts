@@ -4,6 +4,7 @@ import type { RandomSource } from '../../lib/random.js';
 import { systemRandom } from '../../lib/random.js';
 import { OauthFailedError } from '../../lib/errors.js';
 import { assertIdClaims, toVerifiedIdentity } from './claims.js';
+import { residentOauthFailure, tokenExchangeFailure } from './sign-in-failure.js';
 import { pkceS256 } from './pkce.js';
 import type {
   IdClaims,
@@ -64,7 +65,7 @@ export class OAuthCodeFlow {
 
   async complete(input: OAuthCompleteInput): Promise<VerifiedIdentity> {
     if (input.queryState !== input.expectedState) {
-      throw new OauthFailedError({ details: { reason: 'state' } });
+      throw residentOauthFailure('state_mismatch');
     }
     let exchanged: { idToken: string; claims: IdClaims };
     try {
@@ -79,7 +80,7 @@ export class OAuthCodeFlow {
       });
     } catch (err) {
       if (err instanceof OauthFailedError) throw err;
-      throw new OauthFailedError({ cause: err, details: { reason: 'token_exchange' } });
+      throw tokenExchangeFailure(err);
     }
     const now = this.clock.now();
     assertIdClaims(exchanged.claims, {

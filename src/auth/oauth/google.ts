@@ -8,6 +8,7 @@ import {
 } from 'openid-client';
 import { env } from '../../config/env.js';
 import { OauthFailedError } from '../../lib/errors.js';
+import { residentOauthFailure, tokenExchangeFailure } from './sign-in-failure.js';
 import type { Clock } from '../../lib/clock.js';
 import type { RandomSource } from '../../lib/random.js';
 import { OAuthCodeFlow, type OAuthCompleteInput } from './flow.js';
@@ -60,11 +61,13 @@ export class OpenIdClient implements OidcClient {
         idTokenExpected: true,
       });
       const raw = tokens.claims();
-      if (!raw || !tokens.id_token) throw new OauthFailedError({ details: { reason: 'id_token' } });
+      if (!raw || !tokens.id_token) {
+        throw residentOauthFailure('id_token_verify', { providerErrorDescription: 'id token missing' });
+      }
       return { idToken: tokens.id_token, claims: mapClaims(raw) };
     } catch (err) {
       if (err instanceof OauthFailedError) throw err;
-      throw new OauthFailedError({ cause: err, details: { reason: 'token_exchange' } });
+      throw tokenExchangeFailure(err);
     }
   }
 }
