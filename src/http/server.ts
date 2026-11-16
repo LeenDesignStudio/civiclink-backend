@@ -69,9 +69,12 @@ export interface ServerDeps {
   resolvePrincipal?: (request: { headers: Record<string, unknown>; cookies: Record<string, string | undefined> }) => Promise<Principal>;
 }
 
+/** nginx and the Next.js rewrite both connect from this host. Other hops cannot set the client IP. */
+const TRUSTED_PROXIES = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    trustProxy: true,
+    trustProxy: TRUSTED_PROXIES,
     bodyLimit: 100 * 1024,
     genReqId: (request) => {
       const inbound = request.headers['x-request-id'];
@@ -118,7 +121,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.addHook('onRequest', async (request) => {
     const path = request.url.split('?')[0] ?? '';
     if (!path.startsWith('/auth/') && !path.startsWith('/admin-auth/')) return;
-    await deps.rateGate.consume('auth', hashIp(request.ip));
+    await deps.rateGate.consume('auth', hashIp(request.ip || 'unknown'));
   });
 
   app.addHook('onRequest', async (request, reply) => {

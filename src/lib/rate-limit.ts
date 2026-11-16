@@ -1,5 +1,6 @@
 import { RateLimiterPostgres, RateLimiterMemory } from 'rate-limiter-flexible';
 import type { Pool } from 'pg';
+import { env } from '../config/env.js';
 import { RateLimitedError } from './errors.js';
 import type { Clock } from './clock.js';
 import { systemClock } from './clock.js';
@@ -35,6 +36,16 @@ const WINDOWS: Record<RateClass, { points: number; duration: number }> = {
   alert_send: { points: 10, duration: 3600 },
   test_notification: { points: 3, duration: 3600 },
 };
+
+/** Auth uses env overrides. Development defaults are looser than test, staging, and production. */
+export function rateWindows(
+  auth: { points: number; duration: number } = {
+    points: env.AUTH_RATE_LIMIT_POINTS,
+    duration: env.AUTH_RATE_LIMIT_DURATION,
+  },
+): Record<RateClass, { points: number; duration: number }> {
+  return { ...WINDOWS, auth };
+}
 
 /** GraphQL operations and REST routes that carry a Rate value in docs/05. */
 export const OPERATION_RATES: Record<string, RateClass> = {
@@ -115,6 +126,8 @@ export const OPERATION_RATES: Record<string, RateClass> = {
   adminJurisdictionTiles: 'admin',
   adminServiceTiles: 'admin',
   adminSourceTiles: 'admin',
+  integrationSettings: 'admin',
+  updateIntegrationSettings: 'admin',
   markServiceValidated: 'admin',
   adminCorrections: 'admin',
   adminCorrection: 'admin',
@@ -148,10 +161,14 @@ export const OPERATION_RATES: Record<string, RateClass> = {
 export class MemoryRateGate implements RateGate {
   private readonly buckets = new Map<string, { points: number; resetAt: number }>();
 
+  private readonly limits: Record<RateClass, { points: number; duration: number }>;
+
   constructor(
     private readonly clock: Clock = systemClock,
-    private readonly limits: Record<RateClass, { points: number; duration: number }> = WINDOWS,
-  ) {}
+    overrides?: Partial<Record<RateClass, { points: number; duration: number }>>,
+  ) {
+    this.limits = { ...rateWindows(), ...overrides };
+  }
 
   consume(rateClass: RateClass, key: string): Promise<void> {
     const limit = this.limits[rateClass];
@@ -172,8 +189,9 @@ export class MemoryRateGate implements RateGate {
 
 export function createPostgresRateGate(pool: Pool): RateGate {
   const limiters = new Map<RateClass, RateLimiterPostgres>();
+  const windows = rateWindows();
   for (const rateClass of RATE_CLASSES) {
-    const window = WINDOWS[rateClass];
+    const window = windows[rateClass];
     limiters.set(
       rateClass,
       new RateLimiterPostgres({

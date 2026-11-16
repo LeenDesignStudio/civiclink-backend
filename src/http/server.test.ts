@@ -1,6 +1,7 @@
 import { getIntrospectionQuery } from 'graphql';
 import { describe, expect, it } from 'vitest';
 import type { AppServices } from '../app/services.js';
+import { systemClock } from '../lib/clock.js';
 import { MemoryRateGate } from '../lib/rate-limit.js';
 import { buildServer } from './server.js';
 
@@ -71,6 +72,37 @@ describe('http server', () => {
     const unavailable = await db.inject({ method: 'GET', url: '/readyz' });
     expect(unavailable.statusCode).toBe(503);
     await db.close();
+  });
+
+  it('gives each client IP its own auth limit', async () => {
+    const server = await buildServer({
+      services: services(),
+      rateGate: new MemoryRateGate(systemClock, { auth: { points: 1, duration: 600 } }),
+      readiness: {
+        isShuttingDown: () => false,
+        pingDb: () => Promise.resolve(true),
+      },
+    });
+    const hit = (forwardedFor: string, remoteAddress = '127.0.0.1') =>
+      server.inject({
+        method: 'GET',
+        url: '/auth/google/start',
+        remoteAddress,
+        headers: { 'x-forwarded-for': forwardedFor },
+      });
+    const first = await hit('203.0.113.10');
+    const blocked = await hit('203.0.113.10');
+    const other = await hit('203.0.113.11');
+    expect(first.statusCode).not.toBe(429);
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json<{ error: { code: string } }>().error.code).toBe('RATE_LIMITED');
+    expect(other.statusCode).not.toBe(429);
+
+    const direct = await hit('203.0.113.50', '198.51.100.8');
+    const forged = await hit('203.0.113.51', '198.51.100.8');
+    expect(direct.statusCode).not.toBe(429);
+    expect(forged.statusCode).toBe(429);
+    await server.close();
   });
 
   it('returns JSON 404 with a request id', async () => {

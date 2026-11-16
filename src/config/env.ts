@@ -60,6 +60,14 @@ const envSchema = z
     ANON_LOOKUP_TTL_DAYS: z.coerce.number().int().positive().default(30),
     FRESHNESS_DEFAULT_DAYS: z.coerce.number().int().positive().default(90),
     TIGER_YEAR: z.coerce.number().int().min(2000).max(2100).default(2025),
+    AUTH_RATE_LIMIT_POINTS: z.preprocess(
+      (value) => (value === undefined || value === '' ? undefined : value),
+      z.coerce.number().int().positive().max(10_000).optional(),
+    ),
+    AUTH_RATE_LIMIT_DURATION: z.preprocess(
+      (value) => (value === undefined || value === '' ? undefined : value),
+      z.coerce.number().int().positive().max(86_400).optional(),
+    ),
     GRAPHQL_INTROSPECTION: z
       .enum(['true', 'false'])
       .default('true')
@@ -133,8 +141,11 @@ const envSchema = z
   })
   .transform((value) => {
     const introspection = value.APP_ENV === 'production' ? false : value.GRAPHQL_INTROSPECTION;
+    const development = value.APP_ENV === 'development';
     return {
       ...value,
+      AUTH_RATE_LIMIT_POINTS: value.AUTH_RATE_LIMIT_POINTS ?? (development ? 200 : 20),
+      AUTH_RATE_LIMIT_DURATION: value.AUTH_RATE_LIMIT_DURATION ?? (development ? 60 : 600),
       CORS_ORIGINS: value.CORS_ORIGINS.split(',')
         .map((origin) => origin.trim())
         .filter((origin) => origin.length > 0),

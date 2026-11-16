@@ -105,6 +105,34 @@ describe('parseEnv', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.env.GRAPHQL_INTROSPECTION).toBe(false);
+    expect(parsed.env.AUTH_RATE_LIMIT_POINTS).toBe(20);
+    expect(parsed.env.AUTH_RATE_LIMIT_DURATION).toBe(600);
+  });
+
+  it('uses a looser auth limit in development and keeps an explicit override', () => {
+    const development = parseEnv(
+      validSource({ APP_ENV: 'development', SHADOW_DATABASE_URL: 'postgresql://civiclink_owner:pw@localhost:5432/shadow' }),
+    );
+    expect(development.ok).toBe(true);
+    if (!development.ok) return;
+    expect(development.env.AUTH_RATE_LIMIT_POINTS).toBe(200);
+    expect(development.env.AUTH_RATE_LIMIT_DURATION).toBe(60);
+
+    const overridden = parseEnv(
+      validSource({
+        APP_ENV: 'production',
+        DATABASE_URL: 'postgresql://civiclink_app:pw@db/civiclink?sslmode=verify-full',
+        EMAIL_PROVIDER: 'ses',
+        PUSH_PROVIDER: 'fcm',
+        FCM_SERVICE_ACCOUNT_JSON: 'e30=',
+        AUTH_RATE_LIMIT_POINTS: '5',
+        AUTH_RATE_LIMIT_DURATION: '120',
+      }),
+    );
+    expect(overridden.ok).toBe(true);
+    if (!overridden.ok) return;
+    expect(overridden.env.AUTH_RATE_LIMIT_POINTS).toBe(5);
+    expect(overridden.env.AUTH_RATE_LIMIT_DURATION).toBe(120);
   });
 
   it('rejects production database URLs without verify-full', () => {

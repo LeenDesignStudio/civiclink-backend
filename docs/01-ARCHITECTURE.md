@@ -123,6 +123,7 @@ A Super Admin can replace the provider keys (site URL, Google, Apple, Maps, Stri
 | `ACCOUNT_PURGE_DAYS` / `ANON_LOOKUP_TTL_DAYS` / `FRESHNESS_DEFAULT_DAYS` | | `30` / `30` / `90` |
 | `TIGER_YEAR` | | `2025`. Census TIGER/Line vintage for `pnpm db:seed:sources` and `pnpm pipeline:pilot` |
 | `GRAPHQL_INTROSPECTION` | | `true` in dev only; forced `false` when `APP_ENV=production` |
+| `AUTH_RATE_LIMIT_POINTS` / `AUTH_RATE_LIMIT_DURATION` | | Optional. Auth requests allowed per window, and the window in seconds. Unset: `200` / `60` when `APP_ENV=development`, otherwise `20` / `600`. The limiter key is the hash of `request.ip`. Fastify trusts `X-Forwarded-For` only from `127.0.0.1`, `::1`, and `::ffff:127.0.0.1` (nginx and the Next.js rewrite) |
 
 ## 7. Environments
 
