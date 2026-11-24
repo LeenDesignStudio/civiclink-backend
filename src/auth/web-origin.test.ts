@@ -19,6 +19,7 @@ describe('developmentWebOrigin', () => {
   it('accepts only a loopback origin, including when the API is the public site', () => {
     expect(loopbackWebOrigin('http://localhost:3000/signin')).toBe('http://localhost:3000');
     expect(loopbackWebOrigin('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000');
+    expect(loopbackWebOrigin('https://localhost:3002')).toBeUndefined();
     expect(loopbackWebOrigin('https://civic.leenterminal.com')).toBeUndefined();
     expect(loopbackWebOrigin('http://localhost.evil.example')).toBeUndefined();
     expect(loopbackWebOrigin('http://user:pass@localhost:3000')).toBeUndefined();

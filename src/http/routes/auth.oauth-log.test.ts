@@ -280,6 +280,16 @@ describe('localhost sign-in against the public site', () => {
     expect(saved?.webOrigin).toBe('http://localhost:3000');
   });
 
+  it('keeps the public site when the proxy host is https://localhost', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/auth/google/start?intent=SIGN_IN&returnTo=%2Fme',
+      headers: { 'x-civiclink-web-origin': 'https://localhost:3002' },
+    });
+    expect(response.statusCode).toBe(302);
+    expect(begin).toHaveBeenCalledWith(`${publicWeb}/auth/google/callback`);
+  });
+
   it('keeps the public site when the origin is not loopback', async () => {
     const response = await app.inject({
       method: 'GET',

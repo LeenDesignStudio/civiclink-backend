@@ -13,7 +13,9 @@ export function loopbackWebOrigin(header: string | undefined): string | undefine
     return undefined;
   }
   if (url.username || url.password) return undefined;
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  // The live site is proxied through https://localhost:<port>. Only an http loopback
+  // browser may take over the Google callback. https://localhost stays on PUBLIC_WEB_URL.
+  if (url.protocol !== 'http:') return undefined;
   if (!LOCAL_HOSTS.has(url.hostname)) return undefined;
   return url.origin;
 }
